@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graph-search-chat PoC</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.1rem; }
+  #log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+  .msg { padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; line-height: 1.5; }
+  .user { background: #3b82f6; color: #fff; align-self: flex-end; max-width: 85%; }
+  .bot  { background: color-mix(in srgb, canvas 92%, canvastext); align-self: flex-start; max-width: 95%; }
+  .tools { font-size: .78rem; opacity: .7; font-family: ui-monospace, monospace; }
+  form { display: flex; gap: 8px; position: sticky; bottom: 0; background: canvas; padding: 8px 0; }
+  input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #8884; font-size: 1rem; }
+  button { padding: 10px 18px; border-radius: 8px; border: 0; background: #3b82f6; color: #fff; font-size: 1rem; }
+  button:disabled { opacity: .5; }
+</style>
+</head>
+<body>
+<h1>graph-search-chat PoC — DataHub MCP + 블로그 검색(Oracle)</h1>
+<div id="log"></div>
+<form id="f">
+  <input id="q" placeholder="예: financial DB에서 계좌 테이블 뭐 있어? / pip이 프록시 뒤에서 안 돼" autofocus>
+  <button id="b">전송</button>
+</form>
+<script>
+let sid = null;
+const log = document.getElementById("log"), f = document.getElementById("f"),
+      q = document.getElementById("q"), b = document.getElementById("b");
+function add(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls; d.textContent = text;
+  log.appendChild(d); d.scrollIntoView();
+  return d;
+}
+f.onsubmit = async (e) => {
+  e.preventDefault();
+  const msg = q.value.trim(); if (!msg) return;
+  add("user", msg); q.value = ""; b.disabled = true;
+  const wait = add("bot", "생각 중…");
+  try {
+    const r = await fetch("/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({session_id: sid, message: msg}),
+    });
+    const j = await r.json();
+    sid = j.session_id;
+    wait.textContent = j.answer;
+    if (j.tool_calls.length) {
+      const t = document.createElement("div");
+      t.className = "tools";
+      t.textContent = j.tool_calls.map(c => `⚙ ${c.name}(${JSON.stringify(c.args)})`).join("\n")
+                      + `\n⏱ ${j.elapsed_sec}s`;
+      wait.appendChild(t);
+    }
+  } catch (err) { wait.textContent = "오류: " + err; }
+  b.disabled = false; q.focus();
+};
+</script>
+</body>
+</html>

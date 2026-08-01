@@ -32,14 +32,19 @@ def main():
         )
     """)
 
-    docs = [json.loads(l) for l in open(CORPUS, encoding="utf-8")]
-    cur.executemany(
-        "INSERT INTO blog_posts VALUES (:1, :2, :3, :4, :5, :6)",
-        [(d["id"], d["title"][:1000], d["body"], " ".join(d["tags"])[:1000],
-          d["source"], d["url"][:500]) for d in docs],
-    )
+    total, batch = 0, []
+    for line in open(CORPUS, encoding="utf-8"):
+        d = json.loads(line)
+        batch.append((d["id"], d["title"][:1000], d["body"],
+                      " ".join(d["tags"])[:1000], d["source"], d["url"][:500]))
+        if len(batch) >= 5000:
+            cur.executemany("INSERT INTO blog_posts VALUES (:1,:2,:3,:4,:5,:6)", batch)
+            total += len(batch); batch = []
+    if batch:
+        cur.executemany("INSERT INTO blog_posts VALUES (:1,:2,:3,:4,:5,:6)", batch)
+        total += len(batch)
     con.commit()
-    print(f"적재: {len(docs)}건")
+    print(f"적재: {total}건")
 
     # Oracle Text: WORLD_LEXER = 한국어/영어 혼합 자동 처리
     # (사내 19c에서 한국어 정밀도가 필요하면 KOREAN_MORPH_LEXER로 교체)

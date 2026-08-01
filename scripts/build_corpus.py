@@ -14,7 +14,7 @@ from pathlib import Path
 
 DATA = Path(__file__).parent.parent / "data"
 OUT = DATA / "corpus"
-TOP_N = 5000  # ponytail: 사이트당 5천 건이면 PoC 검색 코퍼스로 충분
+TOP_N = int(__import__("os").environ.get("TOP_N", "0"))  # 0 = 전체(채택답변 전부)
 
 TAG_RE = re.compile(r"<[^>]+>")
 
@@ -52,7 +52,7 @@ def parse_site(name: str, posts_xml: Path):
                     "url": f"https://{name}.com/q/{q['Id']}",
                 })
     docs.sort(key=lambda d: d["score"], reverse=True)
-    return docs[:TOP_N]
+    return docs[:TOP_N] if TOP_N else docs
 
 
 def parse_kin(parquet: Path):
