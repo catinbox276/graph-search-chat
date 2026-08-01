@@ -5,6 +5,7 @@
 - 이어하기: embedding IS NULL 인 것만 처리
 usage: .venv/bin/python scripts/embed_corpus.py
 """
+import asyncio
 import json
 import sys
 import time
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import oracledb
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -21,11 +22,12 @@ from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 CORPUS = ROOT / "data" / "corpus" / "blog_corpus.jsonl"
 EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
 BATCH = 64
+CONCURRENCY = 4  # LM Studio 동시 요청 수
 
-llm = OpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
+llm = AsyncOpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
 
 
-def main():
+async def main():
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
     cur.execute("""SELECT COUNT(*) FROM user_tab_columns
@@ -44,16 +46,21 @@ def main():
     print(f"임베딩 대상 {len(todo)}건 (완료 {len(done)}건 스킵)", flush=True)
 
     t0, n = time.time(), 0
-    for i in range(0, len(todo), BATCH):
-        batch = todo[i:i + BATCH]
-        vecs = llm.embeddings.create(model=EMB_MODEL, input=[t for _, t in batch])
-        cur.executemany(
-            "UPDATE blog_posts SET embedding = :1 WHERE id = :2",
-            [(np.asarray(v.embedding, dtype=np.float32).tobytes(), batch[k][0])
-             for k, v in enumerate(vecs.data)])
+    step = BATCH * CONCURRENCY
+    for i in range(0, len(todo), step):
+        chunk = todo[i:i + step]
+        batches = [chunk[j:j + BATCH] for j in range(0, len(chunk), BATCH)]
+        results = await asyncio.gather(*[
+            llm.embeddings.create(model=EMB_MODEL, input=[t for _, t in b])
+            for b in batches])
+        rows = []
+        for b, vecs in zip(batches, results):
+            rows += [(np.asarray(v.embedding, dtype=np.float32).tobytes(), b[k][0])
+                     for k, v in enumerate(vecs.data)]
+        cur.executemany("UPDATE blog_posts SET embedding = :1 WHERE id = :2", rows)
         con.commit()
-        n += len(batch)
-        if n % 3200 == 0:
+        n += len(chunk)
+        if n % (step * 10) < step:
             rate = n / (time.time() - t0)
             print(f"{n}/{len(todo)} ({rate:.0f}건/s, 남은 {((len(todo)-n)/rate)/60:.0f}분)",
                   flush=True)
@@ -61,4 +68,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
