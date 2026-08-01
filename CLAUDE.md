@@ -5,6 +5,7 @@
 ## 문서
 - `docs/research.md` — 오픈소스/논문/문제점 조사 (출처 링크 포함)
 - `docs/design.md` — 확정된 설계 결정 (Mermaid 다이어그램 포함)
+- `docs/poc-datasets.md` — PoC용 공개 데이터셋 카탈로그 (다운로드 링크·라이선스)
 - `system-overview.drawio` — 시각 자료 3페이지 (시스템 개요 / 4계층 스키마 / 세션 판정 분기)
 
 ## 핵심 설계 결정 (변경 시 docs/design.md도 갱신)

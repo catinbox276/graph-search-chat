@@ -226,6 +226,9 @@ datahub docker quickstart          # 로컬 DataHub 기동
 datahub docker ingest-sample-data  # Kafka/Hive/HDFS 샘플 + 리니지 주입
 ```
 
+### 사내 데이터를 못 쓸 때 — 공개 데이터셋 대체
+[poc-datasets.md](poc-datasets.md) 참조. 요약: Role A(블로그)는 StackExchange 덤프(Ask Ubuntu/Super User) + 지식인 공개본 1.7K, Role B(DataHub)는 BIRD-SQL dev + TPC-DS→Postgres→DataHub ingest.
+
 요점: 검색 대상은 크롤링·샘플로 채울 수 있지만, **대화 로그만은 크롤링 불가**(4층 도구 호출·세션 단위가 외부에 존재하지 않음) — self-play나 실사용으로 생성해야 한다. 외부 Q&A 데이터(스택오버플로우 등)는 추출 프롬프트 단독 검증용 보조 재료로는 유용하다.
 
 ### 블로그 데이터의 3중 역할 — 콜드 스타트 해결
