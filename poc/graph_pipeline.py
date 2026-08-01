@@ -28,7 +28,7 @@ from tools.blog_search import DSN, PASSWORD, USER
 llm = OpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
 CHAT_MODEL = "qwen/qwen3.6-35b-a3b"
 EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
-SIM_THRESHOLD = 0.85
+SIM_THRESHOLD = 0.72  # 캘리브레이션: 같은 의도 0.81~0.83, 다른 의도 0.34~0.46
 DATAHUB_TOOLS = {"search", "get_entities", "list_schema_fields", "get_lineage",
                  "get_lineage_paths_between", "get_dataset_queries"}
 
@@ -46,9 +46,10 @@ JUDGE_PROMPT = """세션을 판정하고 지식을 추출하라. JSON만 출력.
   "fail_reason": "실패 시 이유 한 줄, 성공이면 null"}}
 
 판정 규칙:
-- success: 답변이 판정 기준을 충족
-- fail: 근거를 못 찾았고 답변이 그 사실을 인정함 (기준이 '실패 인정'이면 인정했을 때 fail)
-- unknown: 판단 불가하거나 근거 없이 지어낸 답변"""
+- success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
+- fail: 접근 자체가 막힌 경우만 — 데이터/글이 존재하지 않아 목표 달성이 불가능했고 답변이 이를 인정함
+  (기준이 '실패 인정'이면 인정했을 때 fail)
+- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우"""
 
 
 def ddl(cur):
