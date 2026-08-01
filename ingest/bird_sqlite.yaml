@@ -1,0 +1,13 @@
+# BIRD SQLite DB -> DataHub ingest 레시피
+# usage: DB_PATH=data/bird_dev/dev_20240627/dev_databases/financial/financial.sqlite \
+#        DB_NAME=financial datahub ingest -c ingest/bird_sqlite.yaml
+source:
+  type: sqlalchemy
+  config:
+    connect_uri: "sqlite:///${DB_PATH}"
+    platform: sqlite
+    platform_instance: "${DB_NAME}"
+sink:
+  type: datahub-rest
+  config:
+    server: http://localhost:8080
