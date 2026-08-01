@@ -90,3 +90,21 @@ async def chat(inp: ChatIn):
 @app.get("/")
 def index():
     return FileResponse(ROOT / "app" / "index.html")
+
+
+@app.get("/graph/data")
+def graph_data():
+    con = db()
+    cur = con.cursor()
+    cur.execute("""SELECT id, layer, name, fail_flag, fail_reason FROM nodes""")
+    nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail": r[3] == "Y",
+              "fail_reason": r[4]} for r in cur.fetchall()]
+    cur.execute("SELECT src, dst, raw_count FROM edges")
+    edges = [{"src": r[0], "dst": r[1], "count": r[2]} for r in cur.fetchall()]
+    con.close()
+    return {"nodes": nodes, "edges": edges}
+
+
+@app.get("/graph")
+def graph_page():
+    return FileResponse(ROOT / "app" / "graph.html")
