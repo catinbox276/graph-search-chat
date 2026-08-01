@@ -40,3 +40,12 @@
 .venv/bin/python poc/graph_pipeline.py    # 게이트 + 추출 + 그래프 적재
 # 결과는 Oracle: sessions(verdict), nodes/edges(가중치), node_evidence(출처)
 ```
+
+## 추가: 하이브리드 검색 전환 완료 (2026-08-02)
+
+이슈 3(한국어 질의 ↔ 영어 코퍼스 미스매치)을 하이브리드 검색으로 해소했다.
+
+- **구조**: 임베딩 원본은 Oracle `blog_posts.embedding` BLOB에 저장(1회성 백필, 병렬 4요청으로 34.3만 건 약 4시간), 검색 서버 기동 시 numpy 행렬(1.4GB)로 메모리 로드. 검색 = Oracle Text(lexical) top-30 + 행렬 코사인(semantic) top-30 → RRF 융합. 검색당 임베딩 계산은 질의 1건뿐.
+- **검증**: 한국어 질의 "사내망 프록시 때문에 파이썬 패키지 설치가 안 됨" → 영어 글 "Failed to parse: proxy:port"(pip 프록시 오류) 시맨틱 매칭 ✅ / 영어 질의는 L+S 동시 매칭 ✅ / 채팅 E2E에서 search_blog×3 + read_blog_post×3 → 근거 기반 답변 ✅
+- **운영 노트**: 새 글은 해당 글만 임베딩 후 `GET /reload` (전체 재계산 없음). 임베딩 모델 교체 시에만 전체 재백필 + dedup 임계값 재캘리브레이션 필요.
+- **남은 노이즈**: 한국어 질의 시 lexical 쪽이 지식인 생활 Q&A를 끌어옴 — 코퍼스 품질 문제(실제 사내 블로그로 교체 시 소멸), 검색 로직 튜닝 대상 아님.
