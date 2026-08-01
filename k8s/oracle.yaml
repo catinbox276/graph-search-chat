@@ -1,0 +1,59 @@
+# Oracle 파드 (PoC: gvenzl/oracle-free:23 ARM / 사내: 19c 이미지로 교체)
+# 사내 19c 전환 시: image를 사내 레지스트리의 19c EE로, ORACLE_PASSWORD는 Secret으로.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oracle
+spec:
+  type: LoadBalancer   # Docker Desktop: localhost:1521로 노출. 사내: ClusterIP 권장
+  selector:
+    app: oracle
+  ports:
+    - port: 1521
+      targetPort: 1521
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oracle
+spec:
+  serviceName: oracle
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oracle
+  template:
+    metadata:
+      labels:
+        app: oracle
+    spec:
+      containers:
+        - name: oracle
+          image: gvenzl/oracle-free:23
+          ports:
+            - containerPort: 1521
+          env:
+            - name: ORACLE_PASSWORD
+              value: poc1234   # ponytail: PoC 평문. 사내 배포 시 Secret 필수
+          volumeMounts:
+            - name: oradata
+              mountPath: /opt/oracle/oradata
+          readinessProbe:
+            exec:
+              command: ["healthcheck.sh"]
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 20
+          resources:
+            requests:
+              memory: "2Gi"
+            limits:
+              memory: "4Gi"
+  volumeClaimTemplates:
+    - metadata:
+        name: oradata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
