@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from agent.agent import build_agent
-from tools.blog_search import DSN, PASSWORD, USER
+from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 
 app = FastAPI()
 _agent = None
@@ -31,6 +31,7 @@ def db():
 @app.on_event("startup")
 async def startup():
     global _agent
+    load_matrix()  # 임베딩 행렬 메모리 적재 (하이브리드 검색)
     _agent = await build_agent()
     con = db()
     cur = con.cursor()
@@ -108,3 +109,9 @@ def graph_data():
 @app.get("/graph")
 def graph_page():
     return FileResponse(ROOT / "app" / "graph.html")
+
+
+@app.get("/reload")
+def reload_embeddings():
+    """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요)."""
+    return {"loaded": load_matrix()}

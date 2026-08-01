@@ -1,47 +1,101 @@
-"""블로그 검색 함수 툴 — Oracle 19c(로컬 PoC: 23ai Free(ARM))의 Oracle Text 조회.
+"""블로그 검색 함수 툴 — Oracle 19c 하이브리드 (Oracle Text + 인메모리 임베딩 행렬).
+
+- 원본 임베딩은 Oracle(blog_posts.embedding BLOB)에 저장 (scripts/embed_corpus.py)
+- 서버/프로세스 기동 시 임베딩을 numpy 행렬로 메모리 로드 (정규화 -> dot = cosine)
+- 검색: Oracle Text(lexical) top-30 + 행렬 코사인(semantic) top-30 -> RRF 융합
+- 임베딩이 아직 없으면 lexical 단독으로 동작 (백필 진행 중에도 사용 가능)
 
 에이전트에 함수 툴로 직접 등록해서 쓴다 (MCP 아님 — MCP는 DataHub 공식만 사용).
 """
 import os
 import re
+import threading
 
+import numpy as np
 import oracledb
+from openai import OpenAI
 
 DSN = os.environ.get("ORACLE_DSN", "localhost:1521/FREEPDB1")
 USER = os.environ.get("ORACLE_USER", "system")
 PASSWORD = os.environ.get("ORACLE_PASSWORD", "poc1234")
+EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
+RRF_K = 60
 
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN, min=1, max=4)
+_llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"),
+              api_key="lm-studio")
+_matrix, _ids, _lock = None, None, threading.Lock()
+
+
+def load_matrix():
+    """Oracle의 임베딩을 메모리 행렬로 로드. 서버 기동 시 1회 호출 권장."""
+    global _matrix, _ids
+    with _lock:
+        with _pool.acquire() as con:
+            cur = con.cursor()
+            cur.execute("SELECT id, embedding FROM blog_posts WHERE embedding IS NOT NULL")
+            ids, vecs = [], []
+            for pid, blob in cur:
+                ids.append(pid)
+                vecs.append(np.frombuffer(blob.read(), dtype=np.float32))
+        if vecs:
+            m = np.stack(vecs)
+            m /= np.linalg.norm(m, axis=1, keepdims=True)
+            _matrix, _ids = m, ids
+        print(f"[blog_search] 임베딩 행렬 로드: {len(ids)}건")
+    return len(ids)
+
+
+def _lexical(cur, query: str, n: int):
+    terms = [t for t in re.findall(r"[\w가-힣]+", query) if len(t) >= 2]
+    if not terms:
+        return []
+    cur.execute(
+        """SELECT id FROM blog_posts WHERE CONTAINS(body, :q, 1) > 0
+           ORDER BY SCORE(1) DESC FETCH FIRST :n ROWS ONLY""",
+        q=" ACCUM ".join(terms), n=n)
+    return [r[0] for r in cur.fetchall()]
+
+
+def _semantic(query: str, n: int):
+    if _matrix is None:
+        return []
+    q = np.asarray(
+        _llm.embeddings.create(model=EMB_MODEL, input=query).data[0].embedding,
+        dtype=np.float32)
+    q /= np.linalg.norm(q)
+    top = np.argsort(_matrix @ q)[::-1][:n]
+    return [_ids[i] for i in top]
 
 
 def search_blog(query: str, limit: int = 5) -> str:
-    """사내 블로그(문제해결 노하우 글)를 키워드로 검색한다.
+    """사내 블로그(문제해결 노하우 글)를 키워드+시맨틱 하이브리드로 검색한다.
 
     Args:
         query: 검색어 (한국어/영어, 자연어 가능)
         limit: 최대 결과 수 (기본 5)
     """
-    terms = re.findall(r"[\w가-힣]+", query)
-    if not terms:
-        return "검색어가 비어 있습니다."
-    match = " ACCUM ".join(terms)  # ACCUM: OR보다 다중어 매칭에 높은 점수
     with _pool.acquire() as con:
         cur = con.cursor()
-        cur.execute(
-            """SELECT id, title, source, url, SCORE(1),
-                      dbms_lob.substr(body, 200, 1)
-               FROM blog_posts
-               WHERE CONTAINS(body, :q, 1) > 0
-               ORDER BY SCORE(1) DESC
-               FETCH FIRST :n ROWS ONLY""",
-            q=match, n=limit,
-        )
-        rows = cur.fetchall()
-    if not rows:
-        return "검색 결과가 없습니다."
-    return "\n\n".join(
-        f"[{r[0]}] {r[1]} (출처: {r[2]}, 점수: {r[4]})\n{r[5]}\n{r[3]}" for r in rows
-    )
+        lex = _lexical(cur, query, 30)
+        sem = _semantic(query, 30)
+        scores = {}
+        for rank_list in (lex, sem):
+            for r, pid in enumerate(rank_list):
+                scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + r + 1)
+        top = sorted(scores, key=scores.get, reverse=True)[:limit]
+        if not top:
+            return "검색 결과가 없습니다."
+        out = []
+        for pid in top:
+            cur.execute(
+                """SELECT title, source, url, dbms_lob.substr(body, 200, 1)
+                   FROM blog_posts WHERE id = :1""", [pid])
+            t, src, url, snip = cur.fetchone()
+            tag = ("L+S" if pid in lex and pid in sem
+                   else "L" if pid in lex else "S")
+            out.append(f"[{pid}] {t} (출처: {src}, 매칭: {tag})\n{snip}\n{url}")
+    return "\n\n".join(out)
 
 
 def read_blog_post(post_id: str) -> str:
@@ -50,8 +104,7 @@ def read_blog_post(post_id: str) -> str:
         cur = con.cursor()
         cur.execute(
             "SELECT title, body, source, url FROM blog_posts WHERE id = :1",
-            [post_id],
-        )
+            [post_id])
         row = cur.fetchone()
         if not row:
             return f"글을 찾을 수 없습니다: {post_id}"
@@ -59,4 +112,5 @@ def read_blog_post(post_id: str) -> str:
 
 
 if __name__ == "__main__":
-    print(search_blog("pip install proxy", 3))
+    load_matrix()
+    print(search_blog("파이썬 패키지 설치가 사내망에서 안 됨", 5))
