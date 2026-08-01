@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "blog-search": {
-      "command": "python3",
-      "args": ["mcp_servers/blog_search.py"]
-    }
-  }
-}
