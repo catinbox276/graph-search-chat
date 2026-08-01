@@ -325,4 +325,76 @@
       </root>
     </mxGraphModel>
   </diagram>
+  <diagram id="oracle19c-arch" name="19c 단독 구성">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="ot0" value="저장소 구성 — Oracle 19c 단독 (사내 표준 DB 고정)" style="text;html=1;fontSize=22;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="850" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ot0b" value="19c엔 벡터 검색이 없다(23ai부터) — 하지만 그래프가 작아서(접근법 노드 수백~수천 개) 설계를 굽히지 않고 구현 가능" style="text;html=1;fontSize=13;align=center;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="150" y="60" width="950" height="24" as="geometry" />
+        </mxCell>
+
+        <!-- 쓰기 경로 -->
+        <mxCell id="oa" value="대화 세션&#10;(MCP 에이전트)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="130" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="op" value="추출 파이프라인 (직접 구현)&#10;LLM 추출 → dedup → upsert&#10;※ Graphiti는 Oracle 미지원이라 사용 불가" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="400" y="130" width="300" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Oracle 19c 컨테이너 -->
+        <mxCell id="odb" value="Oracle 19c (단일 DB)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=16;fontStyle=1;verticalAlign=top;spacingTop=12;" vertex="1" parent="1">
+          <mxGeometry x="320" y="280" width="620" height="340" as="geometry" />
+        </mxCell>
+        <mxCell id="og" value="nodes / edges 테이블&#10;&#10;· 4계층 스키마 (layer 1~4)&#10;· weight (채택률 보정 가중치)&#10;· fail_flag / 이유 / 조건&#10;· valid_from / valid_to (bi-temporal)&#10;· embedding BLOB (dedup용, 인덱스 아님)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="350" y="330" width="270" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="oe" value="증거 테이블&#10;&#10;· 원본 대화 로그 전량&#10;· 세션 판정 결과 (성공/실패/미완결)&#10;· 출처 (누가·언제) → 오염 시 롤백" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="650" y="330" width="260" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="otx" value="검색 기능: Oracle Text CONTEXT 인덱스 (한국어 형태소 분석 KOREAN_MORPH_LEXER) + 재귀 CTE 순회 (≤3 hop)&#10;그래프 ↔ 증거는 에피소드 ID 조인 하나로 연결" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;dashed=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="350" y="520" width="560" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- 읽기 경로 -->
+        <mxCell id="oq" value="신규 사용자 질의" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="700" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="ocl" value="벡터 검색 대체 장치 ①&#10;LLM이 닫힌 1~2층 목록에서 진입점 분류&#10;(&quot;이 문제는 어느 도메인·목표에 속하나?&quot;)&#10;→ 진입점부터는 그래프 순회" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="400" y="680" width="300" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="odd" value="벡터 검색 대체 장치 ②&#10;dedup은 같은 부모 밑 후보 수십 개뿐&#10;→ 임베딩 BLOB을 Python에서&#10;전수 코사인 계산 (밀리초)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="760" y="680" width="280" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- 트레이드오프 / 이점 -->
+        <mxCell id="otr" value="트레이드오프&#10;&#10;· Graphiti 사용 불가 → 추출 파이프라인 직접 구현&#10;&#160;&#160;(어차피 게이트·4계층이 커스텀이라 대폭 수정 필요했음)&#10;· 대규모 시맨틱 검색 불가 → 수십만 노드가 되면&#10;&#160;&#160;23ai 이관 또는 외부 벡터 스토어 재검토&#10;· bi-temporal 자동 처리 없음 → 컬럼+upsert 직접 구현" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="80" y="830" width="520" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="obn" value="단독 구성의 이점&#10;&#10;· 원본과 그래프가 같은 DB → 조인 하나로 근거 참조, 롤백 용이&#10;· 백업·권한·감사가 사내 표준 그대로&#10;· 평범한 관계형 스키마 → 23ai 이관 시&#10;&#160;&#160;VECTOR 컬럼 + SQL/PGQ만 얹으면 됨 (이관 부담 낮음)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="640" y="830" width="470" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- 화살표 -->
+        <mxCell id="of1" value="세션 종료 → 게이트 판정 (배치)" style="endArrow=block;html=1;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="oa" target="op"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="of2" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="op" target="og"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="of3" value="원본 로그 전량" style="endArrow=block;html=1;strokeWidth=1;dashed=1;fontSize=11;exitX=0.5;exitY=1;entryX=0.1;entryY=0;" edge="1" parent="1" source="oa" target="oe">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="190" y="360" /><mxPoint x="676" y="300" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="of4" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#9673a6;" edge="1" parent="1" source="oq" target="ocl"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="of5" value="순회 (≤3 hop)" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#9673a6;fontSize=11;" edge="1" parent="1" source="ocl" target="og"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="of6" style="endArrow=open;html=1;dashed=1;strokeColor=#82b366;" edge="1" parent="1" source="odd" target="op">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1080" y="170" /></Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
 </mxfile>

@@ -120,8 +120,67 @@ flowchart TD
 1. 실패 정보는 낡는다 — 도구가 바뀌면 어제의 막힌 길이 오늘 뚫림. 재시도 성공 시 Zep bi-temporal 방식으로 표식을 무효화(삭제 아닌 "그때는 막혔었음" 이력).
 2. 차단하면 자정 능력 상실 — 재시도가 없으면 낡은 표식이 영원히 살아남고 새 경로 발견 순환이 끊긴다.
 
-## 5. 미해결 / 다음 단계
+## 5. 저장소 구성 — Oracle 19c 단독
+
+제약: **사내 표준 DB가 Oracle 19c 고정.** 19c는 Oracle Text(한국어 형태소 분석 포함) 전문 검색은 되지만 네이티브 벡터 검색은 없다(23ai부터). 검토 결과 **19c 단독으로 설계를 굽히지 않고 구현 가능** — 근거는 이 그래프가 작다는 것(조직 접근법 노드는 수백~수천 개, 벡터 인덱스가 필요한 규모가 아님).
+
+```mermaid
+flowchart TD
+    A["대화 세션 (MCP 에이전트)"] -->|"세션 종료 → 게이트 판정 (배치)"| P["추출 파이프라인 (직접 구현)<br/>LLM 추출 → dedup → upsert"]
+    A -->|"원본 로그 전량"| EV["증거 테이블<br/>(세션·판정·출처)"]
+    P --> G["nodes / edges 테이블<br/>4계층 + 가중치 + bi-temporal 컬럼"]
+    Q["신규 사용자 질의"] --> CL["LLM이 닫힌 1~2층 목록에서<br/>진입점 분류 (벡터 검색 대체)"]
+    CL --> TR["재귀 CTE 순회 (≤3 hop)<br/>+ Oracle Text 키워드 검색"]
+    TR --> G
+    G -.->|"에피소드 ID 조인"| EV
+    subgraph ORA["Oracle 19c (단일 DB)"]
+        EV
+        G
+    end
+```
+
+### 스키마 골격
+
+```sql
+CREATE TABLE nodes (
+  id          VARCHAR2(64) PRIMARY KEY,
+  layer       NUMBER(1) NOT NULL,          -- 1~4 (4계층 스키마)
+  name        VARCHAR2(400),
+  embedding   BLOB,                        -- dedup용. 검색 인덱스 아님
+  fail_flag   CHAR(1) DEFAULT 'N',
+  fail_reason VARCHAR2(1000),
+  fail_cond   VARCHAR2(1000),
+  valid_from  TIMESTAMP, valid_to TIMESTAMP  -- bi-temporal supersession
+);
+CREATE TABLE edges (
+  src VARCHAR2(64), dst VARCHAR2(64),
+  weight    NUMBER DEFAULT 0,              -- 채택률 보정 가중치
+  raw_count NUMBER DEFAULT 0,
+  PRIMARY KEY (src, dst)
+);
+-- 노드 이름·설명 키워드 검색: Oracle Text CONTEXT 인덱스 + KOREAN_MORPH_LEXER
+```
+
+### 벡터 검색을 불필요하게 만드는 두 가지 장치
+1. **진입점 = LLM 분류** — 1~2층이 닫힌 목록이므로, 에이전트에게 목록을 주고 "이 문제는 어디 속하나"를 분류시키면 임베딩 검색 없이 진입점이 나온다. 진입점부터는 그래프 순회.
+2. **dedup = 애플리케이션 브루트포스** — 추출 시 "기존 노드와 같은가" 비교는 같은 부모 밑 후보 수십 개뿐. 임베딩을 BLOB에 저장하고 Python에서 전수 코사인 계산(밀리초).
+
+### 트레이드오프 (정직하게)
+| 잃는 것 | 대응 |
+|---|---|
+| **Graphiti 사용 불가** (Oracle 백엔드 미지원) — 최대 비용 | 추출 파이프라인 직접 구현. 어차피 세션 게이트·4계층 스키마가 커스텀이라 Graphiti도 대폭 수정이 필요했음 |
+| 대규모 시맨틱 검색 | 수천 노드 규모엔 불필요. 수십만 노드가 되면 23ai 이관 또는 외부 벡터 스토어 재검토 |
+| bi-temporal 자동 처리 | `valid_from/valid_to` + upsert 로직 직접 구현 |
+
+### 단독 구성의 이점
+- 원본 로그(증거 계층)와 그래프가 같은 DB → 조인 하나로 근거 참조, 오염 롤백 용이
+- 백업·권한·감사가 사내 표준 그대로
+- 평범한 관계형 스키마라 **23ai 이관 시 VECTOR 컬럼 + SQL/PGQ만 얹으면 됨** (이관 부담 낮음)
+
+> 참고 — 19c 고정이 아니었다면: Graphiti + Neo4j 하나 추가(임베딩·키워드·그래프 하이브리드를 Neo4j 안에서 처리)가 최단 경로였다. 그래프는 19c 원본에서 재생성 가능한 파생 데이터로 취급(단방향 참조, 양방향 동기화 금지)한다는 원칙은 두 구성 모두 동일.
+
+## 6. 미해결 / 다음 단계
 - 성공 판정 LLM 프롬프트·정확도 검증
 - 노출 대비 채택률 가중치의 구체 수식과 탐색 예산 비율
 - 비식별화 파이프라인 위치(추출 전 vs 후)
-- Graphiti vs cognee 코어 선정 PoC
+- PoC: nodes/edges 테이블 + 세션 게이트 배치(일 1회) + 진입점 분류 프롬프트 — 이 세 조각이 전부
