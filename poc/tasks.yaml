@@ -1,0 +1,131 @@
+# PoC self-play 태스크 20개 (design.md §6의 반복 10 / 단발 5 / 실패 유도 5)
+#
+# - repeat: 같은 의도를 표현만 바꿔 여러 번 실행 -> 인기 경로 형성, 가중치·dedup 검증
+# - single: 1회만 -> 저빈도 경로, 잎 흡수 규칙 검증
+# - fail:   의도적으로 답이 없는 질문 -> 실패 표식·경고 검증
+#
+# tool: 기대 도구 (datahub | blog | both) — 검증용 힌트일 뿐 에이전트에겐 안 보임
+# expect: 세션 게이트 판정 기준 (성공 조건 또는 기대 실패 사유)
+
+repeat:
+  - id: R1
+    tool: datahub
+    expect: "financial DB의 account 중심 조인 관계(disp, client, loan, trans 등) 제시"
+    runs:
+      - "financial DB에서 계좌 관련 테이블은 뭐가 있고 어떤 컬럼으로 조인해?"
+      - "계좌(account) 데이터 분석하려는데 financial에서 어떤 테이블들을 봐야 하지?"
+      - "financial의 account 테이블이랑 연결된 테이블 전부 알려줘"
+      - "고객 계좌 정보를 보려면 financial DB에서 뭘 조인해야 하나?"
+  - id: R2
+    tool: datahub
+    expect: "loan-account-district 조인 경로 제시"
+    runs:
+      - "대출 분석을 하려면 financial DB에서 어떤 테이블을 조인해야 해?"
+      - "financial에서 대출(loan) 관련 데이터는 어디에 있고 지역별로 보려면?"
+      - "지역별 대출 현황을 뽑고 싶은데 필요한 테이블과 조인 키는?"
+      - "loan 테이블 스키마와 연결 관계 알려줘"
+  - id: R3
+    tool: datahub
+    expect: "california_schools의 frpm 테이블과 무상급식 관련 컬럼 제시"
+    runs:
+      - "학교별 무상급식 비율 데이터는 어느 테이블에 있어?"
+      - "california_schools에서 free meal 관련 컬럼 찾아줘"
+      - "무상급식 대상 학생 수를 분석하려면 어떤 테이블을 봐야 해?"
+  - id: R4
+    tool: datahub
+    expect: "codebase_community의 users-posts-comments 조인 관계 제시"
+    runs:
+      - "codebase_community에서 사용자 활동 분석하려면 어떤 테이블을 조인해?"
+      - "유저별 게시글이랑 댓글 수를 집계하려면 뭘 봐야 하지?"
+      - "posts 테이블이랑 users 테이블 연결 방법 알려줘"
+      - "커뮤니티 DB에서 활동량 많은 사용자 찾는 데 필요한 테이블은?"
+  - id: R5
+    tool: datahub
+    expect: "order_entry orders의 상류/하류 리니지(s3->snowflake->dbt 계열) 제시"
+    runs:
+      - "orders 테이블의 상류 소스가 어디야?"
+      - "order_entry의 orders 데이터는 어디서 흘러들어와?"
+      - "orders 테이블 리니지 보여줘"
+      - "orders의 다운스트림에는 뭐가 있어?"
+  - id: R6
+    tool: blog
+    expect: "프록시 환경 pip/snap 설정 해법 + 근거 글 인용"
+    runs:
+      - "pip install이 회사 프록시 뒤에서 안 되는데 어떻게 해결해?"
+      - "프록시 환경에서 파이썬 패키지 설치가 실패해"
+      - "사내망에서 pip이 타임아웃 나는데 방법 있어?"
+      - "우분투에서 스냅 패키지를 프록시 뒤에서 설치하려면?"
+      - "proxy 때문에 패키지 매니저가 안 될 때 설정법 알려줘"
+  - id: R7
+    tool: blog
+    expect: "apt/dpkg 패키지 목록·관리 해법 + 근거 글 인용"
+    runs:
+      - "우분투에 설치된 패키지 전체 목록을 뽑으려면?"
+      - "설치된 패키지를 다른 서버에 똑같이 설치하고 싶어"
+      - "apt로 설치한 프로그램 목록 확인 방법은?"
+  - id: R8
+    tool: blog
+    expect: "docker 네트워크/DNS 문제 해법 + 근거 글 인용"
+    runs:
+      - "도커 컨테이너 안에서 인터넷이 안 돼"
+      - "docker 컨테이너에서 DNS가 안 풀리는데 왜 그래?"
+      - "컨테이너 내부에서 apt update가 실패해"
+      - "docker 네트워크 문제 해결 방법 찾아줘"
+  - id: R9
+    tool: blog
+    expect: "ssh 키/접속 문제 해법 + 근거 글 인용"
+    runs:
+      - "ssh 키 인증이 갑자기 안 되는데 원인이 뭘까?"
+      - "ssh permission denied 에러 해결법 알려줘"
+      - "서버에 ssh 접속이 안 될 때 점검 순서는?"
+  - id: R10
+    tool: both
+    expect: "trans 테이블 스키마(날짜·금액 컬럼) + 집계 접근법 제시"
+    runs:
+      - "financial의 거래 내역으로 월별 집계를 하려면 어떤 컬럼을 써야 해?"
+      - "trans 테이블 구조 보여주고 시계열 분석 방법 알려줘"
+      - "거래 데이터 월별 트렌드 뽑는 법 알려줘"
+
+single:
+  - id: S1
+    tool: datahub
+    expect: "district 테이블 스키마 설명"
+    runs: ["financial의 district 테이블에는 어떤 컬럼이 있어?"]
+  - id: S2
+    tool: datahub
+    expect: "satscores-schools 조인 키(CDSCode) 제시"
+    runs: ["satscores랑 schools 테이블은 뭘로 조인해?"]
+  - id: S3
+    tool: blog
+    expect: "배터리 경고 메시지 억제 해법 (askubuntu-1 계열)"
+    runs: ["우분투 부팅할 때마다 배터리 고장 경고가 뜨는데 끄는 법?"]
+  - id: S4
+    tool: blog
+    expect: "grub 복구 해법 + 근거 글 인용"
+    runs: ["grub 부트로더가 깨졌는데 복구하려면?"]
+  - id: S5
+    tool: both
+    expect: "badges-users 조인 + 집계 접근법 제시"
+    runs: ["codebase_community에서 배지를 많이 받은 유저를 분석하는 방법은?"]
+
+fail:
+  - id: F1
+    tool: datahub
+    expect_fail: "thrombosis DB는 DataHub에 미등록 -> 검색 실패를 인정해야 함"
+    runs: ["thrombosis_prediction DB에서 환자 검사 테이블 찾아줘"]
+  - id: F2
+    tool: datahub
+    expect_fail: "sqlite 테이블엔 리니지 없음 -> 리니지 부재를 인정해야 함"
+    runs: ["financial의 trans 테이블 리니지(상류 소스) 보여줘"]
+  - id: F3
+    tool: blog
+    expect_fail: "사내 VPN 신청 절차는 코퍼스에 없음 -> 검색 실패 인정"
+    runs: ["사내 VPN 신청은 어떻게 해?"]
+  - id: F4
+    tool: datahub
+    expect_fail: "salary/급여 테이블은 존재하지 않음 -> 없음을 인정해야 함"
+    runs: ["직원 급여 테이블 어디 있어?"]
+  - id: F5
+    tool: blog
+    expect_fail: "Oracle RAC 구성 노하우는 코퍼스에 희박 -> 근거 부재 인정"
+    runs: ["오라클 19c RAC 구성할 때 인터커넥트 설정 노하우 있어?"]
