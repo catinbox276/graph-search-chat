@@ -97,6 +97,9 @@ async def chat_stream(inp: ChatIn):
                     # LLM 생성 중 토큰을 실시간 전송 (이게 체감 스트리밍의 핵심)
                     msg_chunk, _meta = chunk
                     text = getattr(msg_chunk, "content", "")
+                    if not (isinstance(text, str) and text):
+                        text = (getattr(msg_chunk, "additional_kwargs", {}) or {}).get(
+                            "reasoning_content", "")
                     if isinstance(text, str) and text:
                         yield sse({"type": "token", "text": text})
                     continue
@@ -147,7 +150,8 @@ async def chat(inp: ChatIn):
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "app" / "index.html")
+    return FileResponse(ROOT / "app" / "index.html",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/graph/data")
@@ -165,7 +169,8 @@ def graph_data():
 
 @app.get("/graph")
 def graph_page():
-    return FileResponse(ROOT / "app" / "graph.html")
+    return FileResponse(ROOT / "app" / "graph.html",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/reload")
