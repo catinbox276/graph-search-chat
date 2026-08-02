@@ -105,12 +105,15 @@ function build() {
       smooth: {type: "continuous"},
     })));
   net = new vis.Network(document.getElementById("net"), {nodes: vnodes, edges: vedges}, {
-    physics: {  /* force-directed — 연결된 것끼리 뭉치는 표준 방식 */
-      barnesHut: {gravitationalConstant: -6000, springLength: 130, springConstant: 0.02},
-      stabilization: {iterations: 150},
+    physics: {  /* force-directed 배치 계산용 — 안정화 후 끔 */
+      barnesHut: {gravitationalConstant: -6000, springLength: 130,
+                  springConstant: 0.02, damping: 0.4},
+      stabilization: {iterations: 200},
     },
     interaction: {hover: true, tooltipDelay: 120},
   });
+  /* 배치가 끝나면 물리 정지 — 출렁임 없이 고정, 드래그하면 그 노드만 이동 */
+  net.once("stabilizationIterationsDone", () => net.setOptions({physics: false}));
   net.on("click", p => p.nodes.length ? showPanel(p.nodes[0]) : hidePanel());
 }
 
