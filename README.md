@@ -2,7 +2,7 @@
 
 조직 구성원들의 LLM 대화 로그에서 지식그래프를 자동 추출·병합해, 신규 사용자에게 검증된 문제 해결 경로를 제안하는 시스템.
 
-> **현재 상태: 설계·조사 단계** (코드 없음). 이 리포는 설계 문서와 조사 결과를 담고 있다.
+> **현재 상태: PoC 전 순환 구현 완료** — 대화→추출→병합→가중치→경로 제안이 실제로 동작한다. 웹 UI(채팅+그래프 뷰), 하이브리드 검색, 모델 레지스트리 포함. 구성은 [docs/implementation.md](docs/implementation.md).
 
 ## 무엇을 하려는가
 
@@ -28,8 +28,10 @@ flowchart LR
 | 문서 | 내용 |
 |---|---|
 | [docs/design.md](docs/design.md) | 확정된 설계 결정 — 전체 흐름, 그래프 4계층 스키마, 세션 판정 3갈래 분기, 실패 경로 노출 정책 (Mermaid 다이어그램 포함) |
+| [docs/implementation.md](docs/implementation.md) | **구현 아키텍처** — 컴포넌트 지도, 테이블·API, 실행 방법, 알려진 한계 |
+| [docs/poc-results.md](docs/poc-results.md) | PoC 실증 결과 — 병합·가중치 검증, 캘리브레이션 수치, 방향 제안 E2E |
 | [docs/research.md](docs/research.md) | 조사 보고 — 기존 오픈소스(Graphiti·cognee·GraphRAG 등) 커버리지, 관련 논문 20여 편, 알려진 문제점 6가지 (전부 출처 링크 포함) |
-| [system-overview.drawio](system-overview.drawio) | 시각 자료 3페이지 — [draw.io](https://app.diagrams.net)에서 열기 |
+| [system-overview.drawio](system-overview.drawio) | 시각 자료 5페이지 — [draw.io](https://app.diagrams.net)에서 열기 |
 | [CLAUDE.md](CLAUDE.md) | Claude Code용 프로젝트 컨텍스트 |
 
 ## 조사 핵심 결론

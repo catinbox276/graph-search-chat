@@ -7,7 +7,8 @@
 - `docs/design.md` — 확정된 설계 결정 (Mermaid 다이어그램 포함)
 - `docs/poc-datasets.md` — PoC용 공개 데이터셋 카탈로그 (다운로드 링크·라이선스)
 - `docs/poc-results.md` — PoC 실증 결과 (병합·가중치 검증, 캘리브레이션 수치, 남은 이슈)
-- `system-overview.drawio` — 시각 자료 3페이지 (시스템 개요 / 4계층 스키마 / 세션 판정 분기)
+- `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
+- `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
 
 ## 핵심 설계 결정 (변경 시 docs/design.md도 갱신)
 1. **4계층 스키마, 위는 닫고 아래는 연다** — 1~2층(도메인·목표)은 사람이 고정한 시드 스키마, 3~4층(접근법·행동)은 LLM 자동 확장. 3층 "접근법"이 추천 단위.

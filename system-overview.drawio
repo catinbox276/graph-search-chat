@@ -397,4 +397,86 @@
       </root>
     </mxGraphModel>
   </diagram>
+  <diagram id="impl-arch" name="구현 아키텍처">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1300" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="it0" value="구현 아키텍처 — PoC 실물 (2026-08-02, docs/implementation.md)" style="text;html=1;fontSize=22;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="200" y="20" width="900" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- 브라우저 -->
+        <mxCell id="ibr" value="브라우저 (localhost:8500)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="90" width="300" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="iui" value="채팅 UI /&#10;SSE 토큰 스트리밍·접이식 단계&#10;LLM 선택 드롭다운·새 대화" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="75" y="120" width="130" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="igv" value="지식그래프 뷰 /graph&#10;force-directed·검색&#10;클릭 상세 패널" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="215" y="120" width="130" height="105" as="geometry" />
+        </mxCell>
+
+        <!-- FastAPI -->
+        <mxCell id="isv" value="FastAPI 서버 (app/server.py)&#10;&#10;/chat·/chat/stream(SSE)·/models·/admin/models/*&#10;/graph/data·/stats·/reload&#10;&#10;· MemorySaver (멀티턴 기억)&#10;· 임베딩 행렬 1.4GB 메모리 (기동 시 Oracle에서)&#10;· 모델 레지스트리: LLM=사용자, 임베딩·리랭커=관리자 토큰" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="440" y="90" width="380" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- 에이전트 -->
+        <mxCell id="iag" value="에이전트 A — DeepAgents&#10;&#10;툴: suggest_paths(그래프 제안) + search_blog/read_blog_post(함수)&#10;+ DataHub 공식 MCP (search·get_entities·get_lineage…)&#10;규칙: 새 문제 → suggest_paths 먼저, 실패 이력은 사용자에게 고지" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="440" y="290" width="380" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- LM Studio -->
+        <mxCell id="ilm" value="모델 서빙 LM Studio :1234&#10;&#10;LLM 4종 (qwen3.6 계열)&#10;임베딩 3종 (기본: qwen3-embedding-0.6b)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="920" y="290" width="300" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Oracle -->
+        <mxCell id="ior" value="D: Oracle 파드 (k8s StatefulSet :1521 — 사내는 19c로 이미지 교체)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=13;fontStyle=1;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="470" width="760 " height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="it1" value="blog_posts&#10;343,045건&#10;+embedding BLOB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="80" y="510" width="140" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="it2" value="sessions&#10;대화 증거+판정&#10;(verdict)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="235" y="510" width="130" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="it3" value="nodes / edges&#10;node_evidence&#10;4계층 그래프+가중치" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="510" width="150" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="it4" value="suggestions&#10;노출 기록&#10;(채택률 보정용)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="545" y="510" width="120" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="it5" value="model_registry&#10;모델 등록·기본값" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="680" y="510" width="125" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- DataHub -->
+        <mxCell id="idh" value="C: DataHub (:9002 UI / :8080 GMS)&#10;&#10;샘플 데이터팩 67 + BIRD 스키마 19테이블(FK)&#10;B: mcp-server-datahub (공식 MCP, stdio)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="920" y="470" width="300" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- 배치 -->
+        <mxCell id="ibt" value="배치 (수동/야간)&#10;&#10;selfplay.py — 태스크 47세션 생성&#10;graph_pipeline.py — 게이트→추출→병합(0.72)→가중치&#10;embed_corpus.py — 임베딩 백필(병렬 4, 26건/s)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;spacingLeft=12;verticalAlign=top;spacingTop=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="720" width="380" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="inote" value="색 = 의미 (UI 공통): 파랑 경로·초록 검증·빨강 실패 우세&#10;알려진 한계와 사내 전환 체크리스트는 implementation.md 참조" style="text;html=1;fontSize=12;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="480" y="740" width="500" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- 화살표 -->
+        <mxCell id="ie1" style="endArrow=block;startArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="ibr" target="isv"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ie2" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="isv" target="iag"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ie3" value="함수 (SQL)" style="endArrow=block;html=1;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="iag" target="ior"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ie4" value="MCP" style="endArrow=block;html=1;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="iag" target="idh"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ie5" value="OpenAI 호환" style="endArrow=block;html=1;strokeWidth=2;fontSize=11;" edge="1" parent="1" source="iag" target="ilm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ie6" value="행렬 로드·세션 기록" style="endArrow=block;html=1;dashed=1;fontSize=11;" edge="1" parent="1" source="isv" target="ior">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="410" y="440" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="ie7" style="endArrow=block;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="ibt" target="ior"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
 </mxfile>
