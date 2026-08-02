@@ -170,3 +170,15 @@ PoC 원료였던 `data/` 로컬 파일 8GB 전량 삭제 (BIRD SQLite, StackExch
 | 복귀 | `kubectl apply -k k8s/base` 한 줄로 1복제본 축소 ✅ |
 
 sessionAffinity(ClientIP) 기반 기억 유지가 실측으로 확인됨 — 단, 같은 클라이언트 IP 기준이므로 사내 프록시/LB 뒤에서는 원본 IP 전달(externalTrafficPolicy 등) 확인 필요. 근본 해법(체크포인터 외부화)은 여전히 남은 과제.
+
+## 추가: 체크포인터 외부화 — Oracle 기반 멀티턴 기억 (2026-08-02)
+
+책임 경계 원칙(별도 저장소 금지)에 따라 LangGraph `BaseCheckpointSaver`를 Oracle로 직접 구현(`tools/oracle_checkpointer.py`, lg_checkpoints/lg_writes 테이블).
+
+| 검증 | 결과 |
+|---|---|
+| 단위 (다른 인스턴스 간 공유) | 새 체크포인터 인스턴스가 이전 대화 이어받음 ✅ |
+| **파드 재시작 생존** | 1턴 → `rollout restart` → 같은 세션 2턴에서 "달고야" 회상 ✅ (MemorySaver로는 불가능했던 것) |
+| **클러스터 자유 라우팅** | sessionAffinity 제거 상태에서 4요청이 두 파드에 2/2 분산 — 이름·색 모두 정확 회상 ✅ |
+
+구현 중 만난 Oracle 특성 2건(재발 방지 기록): ① 빈 문자열('')을 NULL 취급 → PK인 checkpoint_ns에 센티널('~') 매핑, ② 빈 BLOB(b"")도 NULL 저장 → 읽기 시 None 가드. 클러스터 모드의 세션 고정은 제거됨 — 기존 한계(기억 휘발·고정 라우팅)가 모두 해소.

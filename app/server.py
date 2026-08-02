@@ -1,6 +1,6 @@
 """PoC 채팅 UI 서버 — 에이전트를 웹에서 테스트하고 세션을 Oracle 증거 테이블에 기록.
 
-- 멀티턴 기억: LangGraph MemorySaver + thread_id=세션id (서버 재시작 시 초기화)
+- 멀티턴 기억: Oracle 체크포인터(thread_id=세션id) — 복제본 공유·재시작 생존
 - 실시간 진행 표시: /chat/stream SSE — 툴 호출 이벤트를 즉시 전송
 
 usage: .venv/bin/uvicorn app.server:app --port 8500
@@ -19,7 +19,7 @@ import oracledb
 import os
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from langgraph.checkpoint.memory import MemorySaver
+from tools.oracle_checkpointer import OracleSaver
 from pydantic import BaseModel
 
 from agent.agent import build_agent
@@ -52,7 +52,7 @@ def db():
 async def startup():
     global _saver
     load_matrix()  # 임베딩 행렬 메모리 적재 (하이브리드 검색)
-    _saver = MemorySaver()  # 멀티턴 기억 (모델 간 공유)
+    _saver = OracleSaver()  # 멀티턴 기억 — Oracle 외부화 (복제본 공유·재시작 생존)
     await get_agent(None)   # 기본 LLM 예열
     con = db()
     cur = con.cursor()
