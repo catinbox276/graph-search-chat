@@ -1,22 +1,24 @@
 /* 공통 셸 — 색은 의미다: 그래프 범례와 채팅 단계가 같은 색을 쓴다 */
 :root {
   color-scheme: light;  /* 밝은 테마 고정 */
+  --bg: #FAF7F0;     /* 아이보리 배경 */
+  --ink: #2A2722;    /* 따뜻한 잉크색 글자 */
   --path: #2f6df6;   /* 경로/행동 (파랑) */
   --ok:   #159a5b;   /* 검증된 경로 (초록) */
   --warn: #d97706;   /* 주의 (호박) */
   --fail: #dc2626;   /* 실패 이력 (빨강) */
-  --mut:  color-mix(in srgb, canvastext 55%, canvas);
-  --line: color-mix(in srgb, canvastext 16%, canvas);
-  --card: color-mix(in srgb, canvas 94%, canvastext);
+  --mut:  color-mix(in srgb, var(--ink) 55%, var(--bg));
+  --line: color-mix(in srgb, var(--ink) 14%, var(--bg));
+  --card: color-mix(in srgb, var(--bg) 92%, var(--ink));
 }
 * { box-sizing: border-box; }
-body { font-family: system-ui, sans-serif; margin: 0; }
+body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
 
 /* 상단 바 */
 header.shell {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 10px 18px; border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; background: canvas; z-index: 10;
+  position: sticky; top: 0; background: var(--bg); z-index: 10;
 }
 .brand { font-weight: 750; font-size: 1rem; letter-spacing: -.01em; }
 .brand small { font-weight: 400; color: var(--mut); margin-left: 6px; }
@@ -29,17 +31,17 @@ nav.pathnav a {
 }
 nav.pathnav a::before {
   content: ""; width: 9px; height: 9px; border-radius: 50%;
-  border: 2px solid var(--mut); background: canvas; flex: none;
+  border: 2px solid var(--mut); background: var(--bg); flex: none;
 }
-nav.pathnav a.on { color: canvastext; font-weight: 650; }
+nav.pathnav a.on { color: var(--ink); font-weight: 650; }
 nav.pathnav a.on::before { background: var(--path); border-color: var(--path); }
-nav.pathnav a:hover { color: canvastext; }
+nav.pathnav a:hover { color: var(--ink); }
 nav.pathnav .edge { width: 26px; height: 2px; background: var(--line); margin: 0 6px; }
 
 .spacer { flex: 1; }
 .shell select, .shell button.ghost {
   font-size: .82rem; padding: 5px 9px; border-radius: 8px;
-  border: 1px solid var(--line); background: canvas; color: canvastext; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer;
 }
 .shell button.ghost:hover { border-color: var(--path); color: var(--path); }
 
@@ -49,7 +51,7 @@ footer.stats {
   color: var(--mut); border-top: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
 }
-footer.stats b { color: canvastext; font-weight: 600; }
+footer.stats b { color: var(--ink); font-weight: 600; }
 a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
   outline: 2px solid var(--path); outline-offset: 2px;
 }
