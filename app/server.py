@@ -211,9 +211,21 @@ def index():
 def graph_data():
     con = db()
     cur = con.cursor()
-    cur.execute("SELECT id, layer, name, fail_flag, fail_reason FROM nodes")
-    nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail": r[3] == "Y",
-              "fail_reason": r[4]} for r in cur.fetchall()]
+    cur.execute("""
+        SELECT n.id, n.layer, n.name, n.fail_reason,
+               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+                WHERE ev.node_id = n.id) AS ev_cnt,
+               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+                JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
+                WHERE ev.node_id = n.id AND s.verdict = 'success') AS sc,
+               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+                JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
+                WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc
+        FROM nodes n""")
+    nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail_reason": r[3],
+              "uses": r[4], "success": r[5], "fail_cnt": r[6],
+              "fail": r[6] > r[5]}  # 실패 우세만 빨강 (카운트 기준)
+             for r in cur.fetchall()]
     cur.execute("SELECT src, dst, raw_count FROM edges")
     edges = [{"src": r[0], "dst": r[1], "count": r[2]} for r in cur.fetchall()]
     con.close()

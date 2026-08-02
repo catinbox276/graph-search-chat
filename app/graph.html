@@ -7,11 +7,29 @@
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <link rel="stylesheet" href="/static/shell.css">
 <style>
-  #legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
-            padding: 8px 18px; font-size: .82rem; color: var(--mut);
-            border-bottom: 1px solid var(--line); }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-  #net { height: calc(100vh - 138px); }
+  #bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+         padding: 8px 18px; font-size: .82rem; border-bottom: 1px solid var(--line); }
+  #bar input[type=search] { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+                            background: canvas; color: canvastext; width: 220px; }
+  #bar label { display: flex; align-items: center; gap: 4px; color: var(--mut); cursor: pointer; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+  #wrap { display: flex; height: calc(100vh - 140px); }
+  #net { flex: 1; }
+  /* 클릭 상세 패널 (Neo4j Bloom / DataHub 방식) */
+  #panel { width: 320px; border-left: 1px solid var(--line); padding: 14px 16px;
+           overflow-y: auto; display: none; font-size: .85rem; }
+  #panel.show { display: block; }
+  #panel h3 { margin: 0 0 4px; font-size: .95rem; line-height: 1.4; }
+  #panel .kv { color: var(--mut); margin: 8px 0; line-height: 1.7; }
+  #panel .kv b { color: canvastext; font-variant-numeric: tabular-nums; }
+  #panel .warnbox { border-left: 3px solid var(--fail); padding: 6px 10px;
+                    background: color-mix(in srgb, var(--fail) 8%, canvas);
+                    border-radius: 6px; margin: 8px 0; }
+  #panel ul { padding-left: 16px; margin: 6px 0; }
+  #panel li { margin: 3px 0; cursor: pointer; }
+  #panel li:hover { color: var(--path); }
+  #panel .close { float: right; cursor: pointer; border: 0; background: none;
+                  color: var(--mut); font-size: 1rem; }
 </style>
 </head>
 <body>
@@ -26,45 +44,111 @@
   <button class="ghost" onclick="location.reload()">새로고침</button>
 </header>
 
-<div id="legend">
+<div id="bar">
+  <input type="search" id="find" placeholder="노드 검색 (Enter)">
+  <label><input type="checkbox" id="showTools"> 행동(도구) 노드 표시</label>
+  <label><input type="checkbox" id="failOnly"> 실패 이력만</label>
+  <span class="spacer"></span>
   <span><i class="dot" style="background:#1e40af"></i>도메인</span>
   <span><i class="dot" style="background:#0891b2"></i>목표</span>
-  <span><i class="dot" style="background:var(--ok)"></i>접근법 (검증 경로)</span>
-  <span><i class="dot" style="background:#9ca3af"></i>행동/도구</span>
-  <span><i class="dot" style="background:var(--fail)"></i>실패 이력 우세</span>
-  <span>선 굵기 = 통행 횟수 · 노드를 잡고 끌 수 있습니다</span>
+  <span><i class="dot" style="background:var(--ok)"></i>접근법</span>
+  <span><i class="dot" style="background:#9ca3af"></i>도구</span>
+  <span><i class="dot" style="background:var(--fail)"></i>실패 우세</span>
+  <span style="color:var(--mut)">크기·선 굵기 = 사용 횟수</span>
 </div>
-<div id="net"></div>
+
+<div id="wrap">
+  <div id="net"></div>
+  <aside id="panel"></aside>
+</div>
 <footer class="stats" id="stats"></footer>
 
 <script>
 const OK = getComputedStyle(document.documentElement).getPropertyValue("--ok").trim();
 const FAIL = getComputedStyle(document.documentElement).getPropertyValue("--fail").trim();
 const COLORS = {1: "#1e40af", 2: "#0891b2", 3: OK, 4: "#9ca3af"};
+const LAYER_NAME = {1: "도메인", 2: "목표", 3: "접근법", 4: "행동/도구"};
+let NODES = [], EDGES = [], net, vnodes, vedges;
+
 fetch("/graph/data").then(r => r.json()).then(({nodes, edges}) => {
+  NODES = nodes; EDGES = edges;
   document.getElementById("stats").innerHTML =
     `<span>노드 <b>${nodes.length}</b></span><span>연결 <b>${edges.length}</b></span>` +
-    `<span>실패 이력 <b>${nodes.filter(n => n.fail).length}</b></span>`;
-  const vnodes = nodes.map(n => ({
+    `<span>실패 우세 <b>${nodes.filter(n => n.fail).length}</b></span>`;
+  build();
+});
+
+function visible(n) {
+  if (!document.getElementById("showTools").checked && n.layer === 4) return false;
+  if (document.getElementById("failOnly").checked && !(n.fail || n.layer <= 2)) return false;
+  return true;
+}
+
+function build() {
+  const shown = new Set(NODES.filter(visible).map(n => n.id));
+  vnodes = new vis.DataSet(NODES.filter(n => shown.has(n.id)).map(n => ({
     id: n.id,
-    label: n.name.length > 28 ? n.name.slice(0, 28) + "…" : n.name,
-    title: n.name + (n.fail ? "\n⚠ " + (n.fail_reason || "실패 이력") : ""),
-    color: n.fail ? FAIL : COLORS[n.layer],
-    font: {color: "#fff", size: n.layer <= 2 ? 16 : 12},
+    label: n.name.length > 24 ? n.name.slice(0, 24) + "…" : n.name,
+    color: {background: n.fail ? FAIL : COLORS[n.layer],
+            border: n.fail ? FAIL : COLORS[n.layer],
+            highlight: {background: "#f59e0b", border: "#b45309"}},
+    font: {color: "#fff", size: n.layer === 1 ? 18 : 13},
     shape: n.layer === 1 ? "box" : "dot",
-    size: n.layer === 2 ? 22 : n.layer === 3 ? 16 : 8,
-    level: n.layer,
-  }));
-  const vedges = edges.map(e => ({
-    from: e.src, to: e.dst, width: Math.min(1 + e.count, 10),
-    label: e.count > 1 ? String(e.count) : undefined,
-    font: {size: 11}, arrows: "to", color: {opacity: .55},
-  }));
-  new vis.Network(document.getElementById("net"),
-    {nodes: vnodes, edges: vedges},
-    {layout: {hierarchical: {direction: "LR", sortMethod: "directed",
-                             levelSeparation: 320, nodeSpacing: 24}},
-     physics: false, interaction: {hover: true}});
+    size: Math.min(10 + n.uses * 3, 34),   /* 크기 = 사용 횟수 (Obsidian 방식) */
+    mass: n.layer === 1 ? 3 : 1,
+  })));
+  vedges = new vis.DataSet(EDGES.filter(e => shown.has(e.src) && shown.has(e.dst))
+    .map((e, i) => ({
+      id: i, from: e.src, to: e.dst,
+      width: Math.min(1 + e.count, 9),
+      color: {opacity: .45}, arrows: {to: {scaleFactor: .5}},
+      smooth: {type: "continuous"},
+    })));
+  net = new vis.Network(document.getElementById("net"), {nodes: vnodes, edges: vedges}, {
+    physics: {  /* force-directed — 연결된 것끼리 뭉치는 표준 방식 */
+      barnesHut: {gravitationalConstant: -6000, springLength: 130, springConstant: 0.02},
+      stabilization: {iterations: 150},
+    },
+    interaction: {hover: true, tooltipDelay: 120},
+  });
+  net.on("click", p => p.nodes.length ? showPanel(p.nodes[0]) : hidePanel());
+}
+
+function showPanel(id) {
+  const n = NODES.find(x => x.id === id);
+  const nb = [];  // 연결 노드
+  EDGES.forEach(e => {
+    if (e.src === id) { const t = NODES.find(x => x.id === e.dst); if (t) nb.push({t, c: e.count, dir: "→"}); }
+    if (e.dst === id) { const t = NODES.find(x => x.id === e.src); if (t) nb.push({t, c: e.count, dir: "←"}); }
+  });
+  const p = document.getElementById("panel");
+  p.innerHTML = `<button class="close" onclick="hidePanel()">✕</button>
+    <div style="color:var(--mut);font-size:.75rem">${LAYER_NAME[n.layer]}</div>
+    <h3>${n.name}</h3>
+    <div class="kv">사용 <b>${n.uses}</b>회 · 성공 <b>${n.success}</b> · 실패 <b>${n.fail_cnt}</b></div>
+    ${n.fail_reason ? `<div class="warnbox">⚠ ${n.fail_reason}</div>` : ""}
+    <div style="font-weight:600;margin-top:10px">연결 (${nb.length})</div>
+    <ul>${nb.sort((a, b) => b.c - a.c).map(x =>
+      `<li onclick="focusNode('${x.t.id}')">${x.dir} ${x.t.name.slice(0, 40)} <span style="color:var(--mut)">(${x.c})</span></li>`).join("")}
+    </ul>`;
+  p.classList.add("show");
+}
+function hidePanel() { document.getElementById("panel").classList.remove("show"); }
+function focusNode(id) {
+  if (!vnodes.get(id)) { document.getElementById("showTools").checked = true; build(); }
+  net.selectNodes([id]);
+  net.focus(id, {scale: 1.1, animation: true});
+  showPanel(id);
+}
+
+document.getElementById("showTools").onchange = build;
+document.getElementById("failOnly").onchange = build;
+document.getElementById("find").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const kw = e.target.value.trim().toLowerCase();
+  if (!kw) return;
+  const hit = NODES.find(n => n.name.toLowerCase().includes(kw));
+  if (hit) focusNode(hit.id);
 });
 </script>
 </body>
