@@ -98,3 +98,31 @@ kubectl apply -f k8s/app.yaml -f k8s/cron.yaml   # 앱 Deployment + 야간 CronJ
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
 5. 야간 CronJob이 UI 세션 포함 미판정분을 자동 처리 (03:00 파이프라인, 03:30 임베딩). 로컬은 야간에 맥·LM Studio가 켜져 있어야 동작
 6. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정, supersession 자동화 등)
+
+## 배포 모드 전환 (standalone ↔ cluster)
+
+Milvus·OpenSearch가 설치 모드를 나누는 방식처럼, 오라클·모델 서빙을 제외한 컴포넌트를 두 모드로 운용한다. 전환은 kustomize 적용 한 줄 — 데이터·설정 마이그레이션 없음.
+
+### 스탠다드 → 클러스터
+
+```bash
+kubectl apply -k k8s/cluster        # 앱 2복제본 + 세션 고정(ClientIP)
+kubectl rollout status deploy/gsc-app
+kubectl get pods -l app=gsc-app     # 2/2 Ready 확인
+
+# DataHub도 클러스터로 (선택, 사내 규모에서):
+helm upgrade datahub datahub/datahub --reuse-values -f k8s/datahub-values-cluster.yaml
+```
+
+### 클러스터 → 스탠다드 (롤백)
+
+```bash
+kubectl apply -k k8s/base           # 복제본 1로 축소, 세션 고정 해제
+```
+
+### 전환 시 주의사항
+
+1. **멀티턴 기억**: 파드 메모리(MemorySaver) 기반이라 클러스터 모드는 sessionAffinity로 같은 사용자를 같은 파드에 고정. 전환 순간 진행 중이던 대화의 기억은 끊길 수 있음(증거는 Oracle sessions에 보존). 복제본 간 자유 라우팅이 필요하면 체크포인터 외부화 선행
+2. **리소스**: 앱 복제본당 메모리 요청 3Gi(임베딩 행렬 1.4GB 포함) — 복제본 수 × 3Gi 여유 확인. 로컬 검증 때 두 번째 복제본이 노드 disk-pressure로 Pending된 사례 있음 → `docker system prune`으로 해소
+3. **CronJob은 모드 무관** — concurrencyPolicy: Forbid라 복제본 수와 무관하게 단일 실행
+4. **Oracle·모델 서빙은 모드 대상 아님** — Oracle은 StatefulSet 단일(사내 HA는 DB 팀 영역), 모델 서빙은 호스트 LM Studio(사내는 vLLM 파드로 별도 구성)
