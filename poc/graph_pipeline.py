@@ -147,6 +147,31 @@ def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
     return node_id
 
 
+def recompute_weights(cur):
+    """노출 대비 채택률 보정: weight = 자발 통행 + 채택 통행 x 채택률.
+
+    제안에 노출돼 생긴 통행은 채택률만큼 할인 -> "많이 보여줘서 많이 간 길"이
+    "좋은 길"로 굳는 피드백 루프 차단 (research.md 위험 1 대책).
+    채택 수는 노드 단위, raw_count는 엣지 단위 — 3층은 부모가 대개 1개라 근사 적용.
+    """
+    cur.execute("""SELECT node_id, COUNT(*) exposures,
+                          SUM(CASE WHEN adopted='Y' THEN 1 ELSE 0 END) adoptions
+                   FROM suggestions WHERE adopted IS NOT NULL
+                   GROUP BY node_id""")
+    updated = 0
+    for nid, e, a in cur.fetchall():
+        rate = (a / e) if e else 1.0
+        cur.execute("SELECT src, raw_count FROM edges WHERE dst = :1", [nid])
+        for src, raw in cur.fetchall():
+            organic = max(raw - a, 0)
+            corrected = round(organic + a * rate, 2)
+            cur.execute("UPDATE edges SET weight = :w WHERE src = :s AND dst = :d",
+                        {"w": corrected, "s": src, "d": nid})
+            updated += 1
+    if updated:
+        print(f"가중치 보정: 엣지 {updated}건 (노출 대비 채택률 반영)", flush=True)
+
+
 def expects():
     tasks = yaml.safe_load(open(ROOT / "poc" / "tasks.yaml"))
     out = {}
@@ -199,8 +224,17 @@ def main():
                                WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], a])
             for tool in sorted(tool_names):
                 get_or_create(cur, 4, f"tool:{tool}", a, sid, use_embedding=False)
+        # 채택 판정: 이 세션에 노출된 제안 노드를 실제로 사용했는가 (유도 vs 자발 구분의 기초)
+        cur.execute("""UPDATE suggestions s SET adopted =
+            CASE WHEN EXISTS (SELECT 1 FROM node_evidence ev
+                              WHERE ev.session_id = :sid AND ev.node_id = s.node_id)
+                 THEN 'Y' ELSE 'N' END
+            WHERE s.session_id = :sid AND s.adopted IS NULL""", {"sid": sid})
         con.commit()
         print(f"[{n}/{len(rows)}] {sid} -> {verdict}", flush=True)
+
+    recompute_weights(cur)
+    con.commit()
 
     # 결과 요약
     cur.execute("SELECT verdict, COUNT(*) FROM sessions WHERE REGEXP_LIKE(id,'^[RSF]') GROUP BY verdict")

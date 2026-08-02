@@ -14,6 +14,7 @@ import oracledb
 from openai import OpenAI
 
 from tools.blog_search import DSN, PASSWORD, USER
+from tools.session_ctx import current_session
 
 from tools.model_registry import get_default
 EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
@@ -28,7 +29,13 @@ def _ensure_table(cur):
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE suggestions (
             ts TIMESTAMP DEFAULT SYSTIMESTAMP, problem VARCHAR2(2000),
-            node_id VARCHAR2(36), weight NUMBER)""")
+            node_id VARCHAR2(36), weight NUMBER,
+            session_id VARCHAR2(64), adopted CHAR(1))""")
+    else:
+        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                       WHERE table_name='SUGGESTIONS' AND column_name='SESSION_ID'""")
+        if not cur.fetchone()[0]:
+            cur.execute("ALTER TABLE suggestions ADD (session_id VARCHAR2(64), adopted CHAR(1))")
 
 
 def suggest_paths(problem: str) -> str:
@@ -72,7 +79,7 @@ def suggest_paths(problem: str) -> str:
                         WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc
                 FROM edges e JOIN nodes n ON n.id = e.dst
                 WHERE e.src = :1 AND n.layer = 3
-                ORDER BY e.raw_count DESC""", [gid])
+                ORDER BY e.weight DESC""", [gid])  # 보정 가중치 순 (원시 빈도 아님)
             for aid, aname, cnt, reason, sc, fc in cur.fetchall():
                 cur.execute("""SELECT n4.name FROM edges e4
                                JOIN nodes n4 ON n4.id = e4.dst
@@ -86,10 +93,10 @@ def suggest_paths(problem: str) -> str:
                     mixed = f", 실패 {fc}회 있음" if fc else ""
                     out.append(f"  ✅ 검증된 경로 (성공 {sc}회{mixed}): {aname}"
                                + (f"\n     사용 도구: {tools}" if tools else ""))
-                cur.execute("INSERT INTO suggestions (problem, node_id, weight) "
-                            "VALUES (:1, :2, :3)", [problem[:2000], aid, cnt])
+                cur.execute("INSERT INTO suggestions (problem, node_id, weight, session_id) "
+                            "VALUES (:1, :2, :3, :4)",
+                            [problem[:2000], aid, cnt, current_session.get()])
         con.commit()
-        # ponytail: 노출 기록만. 채택률 보정 가중치는 노출 데이터가 쌓인 뒤 별도 배치로
     return "\n".join(out)
 
 

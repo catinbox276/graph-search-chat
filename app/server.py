@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from agent.agent import build_agent
 from tools import model_registry
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
+from tools.session_ctx import current_session
 
 app = FastAPI()
 _agents = {}          # model_name -> agent (모델별 캐시)
@@ -123,6 +124,7 @@ async def chat_stream(inp: ChatIn):
     sid = inp.session_id or str(uuid.uuid4())
 
     async def gen():
+        current_session.set(sid)  # 도구(노출 기록)까지 세션 id 전파
         agent = await get_agent(inp.model)
         yield sse({"type": "session", "session_id": sid})
         calls, answer, t0 = [], "", time.time()
@@ -178,6 +180,7 @@ async def chat(inp: ChatIn):
     """비스트리밍 API (스크립트용). 멀티턴 기억 동일 적용."""
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
+    current_session.set(sid)
     agent = await get_agent(inp.model)
     try:
         result = await agent.ainvoke(
