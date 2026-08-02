@@ -21,7 +21,7 @@
                         white-space: pre-wrap; background: #0001; border-radius: 6px;
                         padding: 6px 8px; margin: 4px 0 6px; max-height: 260px; overflow-y: auto; }
   .elapsed { font-size: .75rem; opacity: .6; font-family: ui-monospace, monospace; }
-  .body.streaming { white-space: pre-wrap; opacity: .8; }
+  .body.streaming { opacity: .85; }
   .body :is(h1,h2,h3) { font-size: 1rem; margin: .6em 0 .3em; }
   .body pre { background: #0002; padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
   .body code { font-family: ui-monospace, monospace; font-size: .88em; }
@@ -126,8 +126,19 @@ f.onsubmit = async (e) => {
   const {steps, body, d} = addBot();
   body.textContent = "🤔 질문 분석 중…";
   const pending = [];
-  let buf = "", raw = "";
-  const render = () => { body.textContent = buf.slice(-800); d.scrollIntoView(false); };
+  let buf = "", raw = "", lastRender = 0;
+  const mdRender = (text) => {
+    // 열린 채 끝난 코드블록은 임시로 닫아 레이아웃 출렁임 방지
+    const fences = (text.match(/```/g) || []).length;
+    body.innerHTML = marked.parse(fences % 2 ? text + "\n```" : text);
+  };
+  const render = (force) => {
+    const now = Date.now();
+    if (!force && now - lastRender < 100) return;  // 100ms 스로틀
+    lastRender = now;
+    mdRender(buf);
+    d.scrollIntoView(false);
+  };
   const addStep = (label, reasoning, args) => {
     const det = document.createElement("details");
     const sum = document.createElement("summary");
@@ -157,7 +168,7 @@ f.onsubmit = async (e) => {
         if (!line.trim()) continue;
         const ev = JSON.parse(line);
         if (ev.type === "session") sid = ev.session_id;
-        else if (ev.type === "token") { buf += ev.text; render(); }
+        else if (ev.type === "token") { buf += ev.text; render(false); }
         else if (ev.type === "tool") {
           addStep(TOOL_LABEL[ev.name] || ev.name, buf, JSON.stringify(ev.args, null, 1));
           buf = ""; body.textContent = "⏳ 도구 실행 중…";
@@ -173,7 +184,7 @@ f.onsubmit = async (e) => {
         }
         else if (ev.type === "answer") {
           body.classList.remove("streaming");
-          body.innerHTML = marked.parse(ev.text || "(빈 답변)");
+          mdRender(ev.text || "(빈 답변)");
           if (steps.children.length) {
             const el = document.createElement("div");
             el.className = "elapsed"; el.textContent = `⏱ ${ev.elapsed_sec}s`;
