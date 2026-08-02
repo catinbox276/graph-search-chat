@@ -44,3 +44,26 @@ spec:
                   value: oracle:1521/FREEPDB1
                 - name: MODEL_URL
                   value: http://host.docker.internal:1234/v1
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: graph-maintenance
+spec:
+  schedule: "20 3 * * *"   # 매일 03:20 — 파이프라인(03:00) 직후 형제 통합·잎 흡수
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: maintenance
+              image: graph-search-chat:latest
+              imagePullPolicy: Never
+              command: ["python", "-m", "poc.graph_maintenance"]
+              env:
+                - name: ORACLE_DSN
+                  value: oracle:1521/FREEPDB1
+                - name: MODEL_URL
+                  value: http://host.docker.internal:1234/v1
