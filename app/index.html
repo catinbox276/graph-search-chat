@@ -65,7 +65,15 @@ f.onsubmit = async (e) => {
         if (!line.trim()) continue;
         const ev = JSON.parse(line);
         if (ev.type === "session") sid = ev.session_id;
+        else if (ev.type === "token") {
+          // LLM 생성 토큰 실시간 표시 (툴 결정 중엔 생각 과정, 마지막엔 답변 초안)
+          if (!wait.dataset.streaming) { wait.dataset.streaming = "1"; wait.dataset.buf = ""; }
+          wait.dataset.buf += ev.text;
+          const head = steps.length ? steps.join("\n") + "\n" : "";
+          wait.textContent = head + wait.dataset.buf.slice(-800);
+        }
         else if (ev.type === "tool") {
+          wait.dataset.streaming = ""; wait.dataset.buf = "";
           const label = TOOL_LABEL[ev.name] || ev.name;
           const args = JSON.stringify(ev.args);
           steps.push(`⚙ ${label} ${args.length > 60 ? args.slice(0, 60) + "…" : args}`);

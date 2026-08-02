@@ -89,10 +89,17 @@ async def chat_stream(inp: ChatIn):
         calls, answer, t0 = [], "", time.time()
         config = {"configurable": {"thread_id": sid}}
         try:
-            async for chunk in _agent.astream(
+            async for mode, chunk in _agent.astream(
                 {"messages": [{"role": "user", "content": inp.message}]},
-                config, stream_mode="updates",
+                config, stream_mode=["updates", "messages"],
             ):
+                if mode == "messages":
+                    # LLM 생성 중 토큰을 실시간 전송 (이게 체감 스트리밍의 핵심)
+                    msg_chunk, _meta = chunk
+                    text = getattr(msg_chunk, "content", "")
+                    if isinstance(text, str) and text:
+                        yield sse({"type": "token", "text": text})
+                    continue
                 for upd in chunk.values():
                     if not isinstance(upd, dict):
                         continue
