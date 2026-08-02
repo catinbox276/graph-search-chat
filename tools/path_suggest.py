@@ -14,7 +14,8 @@ from openai import OpenAI
 
 from tools.blog_search import DSN, PASSWORD, USER
 
-EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
+from tools.model_registry import get_default
+EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
 SIM_ENTRY = 0.60  # 진입점 매칭 임계값 (dedup 0.72보다 완화 — 원질문 vs 정규화 문구)
 
 _llm = OpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")

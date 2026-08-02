@@ -20,7 +20,8 @@ sys.path.insert(0, str(ROOT))
 from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 
 CORPUS = ROOT / "data" / "corpus" / "blog_corpus.jsonl"
-EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
+from tools.model_registry import get_default
+EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
 BATCH = 64
 CONCURRENCY = 4  # LM Studio 동시 요청 수
 

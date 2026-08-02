@@ -40,7 +40,7 @@ SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴�
 - 한국어로 답한다."""
 
 
-async def build_agent(checkpointer=None):
+async def build_agent(checkpointer=None, model_name=None):
     tools = [suggest_paths, search_blog, read_blog_post]
     try:
         client = MultiServerMCPClient({
@@ -57,7 +57,7 @@ async def build_agent(checkpointer=None):
     model = ChatOpenAI(
         base_url=MODEL_URL,
         api_key=os.environ.get("MODEL_API_KEY", "lm-studio"),
-        model=MODEL_NAME,
+        model=model_name or MODEL_NAME,
         temperature=0,
     )
     return create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT,

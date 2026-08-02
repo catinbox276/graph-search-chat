@@ -37,7 +37,9 @@
 </style>
 </head>
 <body>
-<h1>graph-search-chat PoC — DataHub MCP + 블로그 검색(Oracle)</h1>
+<h1>graph-search-chat PoC — DataHub MCP + 블로그 검색(Oracle)
+  <select id="model" style="font-size:.8rem; margin-left:8px; padding:2px 6px; border-radius:6px;"></select>
+</h1>
 <div id="log"></div>
 <form id="f">
   <input id="q" placeholder="예: financial DB에서 계좌 테이블 뭐 있어? / pip이 프록시 뒤에서 안 돼" autofocus>
@@ -45,6 +47,15 @@
 </form>
 <script>
 let sid = null;
+fetch("/models").then(r => r.json()).then(j => {
+  const sel = document.getElementById("model");
+  j.llm.forEach(m => {
+    const o = document.createElement("option");
+    o.value = m.name; o.textContent = m.name + (m.default ? " (기본)" : "");
+    if (m.default) o.selected = true;
+    sel.appendChild(o);
+  });
+});
 const log = document.getElementById("log"), f = document.getElementById("f"),
       q = document.getElementById("q"), b = document.getElementById("b");
 const TOOL_LABEL = {
@@ -91,7 +102,7 @@ f.onsubmit = async (e) => {
   try {
     const r = await fetch("/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({session_id: sid, message: msg}),
+      body: JSON.stringify({session_id: sid, message: msg, model: document.getElementById("model").value || null}),
     });
     const reader = r.body.getReader(), dec = new TextDecoder();
     while (true) {

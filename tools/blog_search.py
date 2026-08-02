@@ -18,7 +18,8 @@ from openai import OpenAI
 DSN = os.environ.get("ORACLE_DSN", "localhost:1521/FREEPDB1")
 USER = os.environ.get("ORACLE_USER", "system")
 PASSWORD = os.environ.get("ORACLE_PASSWORD", "poc1234")
-EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
+from tools.model_registry import get_default
+EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
 RRF_K = 60
 
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN, min=1, max=4)

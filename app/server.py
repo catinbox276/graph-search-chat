@@ -16,16 +16,32 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import oracledb
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from langgraph.checkpoint.memory import MemorySaver
 from pydantic import BaseModel
 
 from agent.agent import build_agent
+from tools import model_registry
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 
 app = FastAPI()
-_agent = None
+_agents = {}          # model_name -> agent (모델별 캐시)
+_saver = None         # 공유 checkpointer (같은 세션이 모델 바꿔도 기억 유지)
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "poc-admin")
+
+
+def check_admin(token):
+    if token != ADMIN_TOKEN:
+        raise HTTPException(403, "관리자 토큰이 필요합니다 (X-Admin-Token)")
+
+
+async def get_agent(model_name: str | None):
+    name = model_name or model_registry.get_default("llm", None) or None
+    if name not in _agents:
+        _agents[name] = await build_agent(checkpointer=_saver, model_name=name)
+    return _agents[name]
 
 
 def db():
@@ -34,9 +50,10 @@ def db():
 
 @app.on_event("startup")
 async def startup():
-    global _agent
+    global _saver
     load_matrix()  # 임베딩 행렬 메모리 적재 (하이브리드 검색)
-    _agent = await build_agent(checkpointer=MemorySaver())  # 멀티턴 기억
+    _saver = MemorySaver()  # 멀티턴 기억 (모델 간 공유)
+    await get_agent(None)   # 기본 LLM 예열
     con = db()
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'SESSIONS'")
@@ -60,6 +77,7 @@ async def startup():
 class ChatIn(BaseModel):
     session_id: str | None = None
     message: str
+    model: str | None = None  # 사용자가 선택한 LLM (미지정 시 레지스트리 기본값)
 
 
 def log_turn(sid: str, question: str, calls: list, answer: str):
@@ -105,11 +123,12 @@ async def chat_stream(inp: ChatIn):
     sid = inp.session_id or str(uuid.uuid4())
 
     async def gen():
+        agent = await get_agent(inp.model)
         yield sse({"type": "session", "session_id": sid})
         calls, answer, t0 = [], "", time.time()
         config = {"configurable": {"thread_id": sid}}
         try:
-            async for mode, chunk in _agent.astream(
+            async for mode, chunk in agent.astream(
                 {"messages": [{"role": "user", "content": inp.message}]},
                 config, stream_mode=["updates", "messages"],
             ):
@@ -159,9 +178,14 @@ async def chat(inp: ChatIn):
     """비스트리밍 API (스크립트용). 멀티턴 기억 동일 적용."""
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
-    result = await _agent.ainvoke(
-        {"messages": [{"role": "user", "content": inp.message}]},
-        {"configurable": {"thread_id": sid}})
+    agent = await get_agent(inp.model)
+    try:
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": inp.message}]},
+            {"configurable": {"thread_id": sid}})
+    except Exception as e:
+        return {"session_id": sid, "answer": f"[모델 오류] {e}", "tool_calls": [],
+                "elapsed_sec": round(time.time() - t0, 1), "error": True}
     calls = [{"name": c["name"], "args": c["args"]}
              for m in result["messages"]
              for c in (getattr(m, "tool_calls", None) or [])]
@@ -200,3 +224,36 @@ def graph_page():
 def reload_embeddings():
     """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요)."""
     return {"loaded": load_matrix()}
+
+
+@app.get("/models")
+def models():
+    """사용자용: 선택 가능한 LLM 목록 + 현재 임베딩(정보만)."""
+    llms = [m for m in model_registry.list_models("llm") if m["enabled"]]
+    emb = model_registry.get_default("embedding", "?")
+    return {"llm": llms, "embedding_in_use": emb}
+
+
+@app.post("/admin/models/sync")
+def admin_sync(x_admin_token: str = Header(default="")):
+    """관리자: 모델 서빙에서 목록 동기화(등록)."""
+    check_admin(x_admin_token)
+    return model_registry.sync_from_serving()
+
+
+class SelectIn(BaseModel):
+    kind: str   # llm | embedding | reranker
+    name: str
+
+
+@app.post("/admin/models/select")
+def admin_select(inp: SelectIn, x_admin_token: str = Header(default="")):
+    """관리자: 종류별 기본 모델 지정. 임베딩 교체는 전체 재백필 필요."""
+    check_admin(x_admin_token)
+    model_registry.set_default(inp.kind, inp.name)
+    warn = None
+    if inp.kind == "embedding":
+        warn = ("임베딩 모델 변경됨 — 기존 벡터와 호환되지 않습니다. "
+                "UPDATE blog_posts SET embedding=NULL 후 embed_corpus.py 재실행, "
+                "그래프 dedup 임계값 재캘리브레이션 필요")
+    return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
