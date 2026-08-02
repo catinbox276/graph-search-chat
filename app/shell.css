@@ -1,6 +1,6 @@
 /* 공통 셸 — 색은 의미다: 그래프 범례와 채팅 단계가 같은 색을 쓴다 */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;  /* 밝은 테마 고정 */
   --path: #2f6df6;   /* 경로/행동 (파랑) */
   --ok:   #159a5b;   /* 검증된 경로 (초록) */
   --warn: #d97706;   /* 주의 (호박) */
