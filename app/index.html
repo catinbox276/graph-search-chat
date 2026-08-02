@@ -36,25 +36,58 @@ function add(cls, text) {
   log.appendChild(d); d.scrollIntoView();
   return d;
 }
+const TOOL_LABEL = {
+  search_blog: "사내 블로그 검색", read_blog_post: "블로그 글 읽기",
+  search: "DataHub 테이블 검색", get_entities: "테이블 스키마 조회",
+  list_schema_fields: "컬럼 목록 조회", get_lineage: "리니지 추적",
+};
 f.onsubmit = async (e) => {
   e.preventDefault();
   const msg = q.value.trim(); if (!msg) return;
   add("user", msg); q.value = ""; b.disabled = true;
-  const wait = add("bot", "생각 중…");
+  const wait = add("bot", "🤔 질문 분석 중…");
+  const steps = [];
   try {
-    const r = await fetch("/chat", {
+    const r = await fetch("/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({session_id: sid, message: msg}),
     });
-    const j = await r.json();
-    sid = j.session_id;
-    wait.textContent = j.answer;
-    if (j.tool_calls.length) {
-      const t = document.createElement("div");
-      t.className = "tools";
-      t.textContent = j.tool_calls.map(c => `⚙ ${c.name}(${JSON.stringify(c.args)})`).join("\n")
-                      + `\n⏱ ${j.elapsed_sec}s`;
-      wait.appendChild(t);
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, idx).replace(/^data: /, "");
+        buf = buf.slice(idx + 2);
+        if (!line.trim()) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "session") sid = ev.session_id;
+        else if (ev.type === "tool") {
+          const label = TOOL_LABEL[ev.name] || ev.name;
+          const args = JSON.stringify(ev.args);
+          steps.push(`⚙ ${label} ${args.length > 60 ? args.slice(0, 60) + "…" : args}`);
+          wait.textContent = steps.join("\n") + "\n⏳ 실행 중…";
+          wait.scrollIntoView();
+        }
+        else if (ev.type === "tool_end") {
+          wait.textContent = steps.join("\n") + "\n✍️ 결과 정리 중…";
+        }
+        else if (ev.type === "answer") {
+          wait.textContent = ev.text;
+          if (steps.length) {
+            const t = document.createElement("div");
+            t.className = "tools";
+            t.textContent = steps.join("\n") + `\n⏱ ${ev.elapsed_sec}s`;
+            wait.appendChild(t);
+          }
+        }
+        else if (ev.type === "error") {
+          wait.textContent = "오류: " + ev.message;
+        }
+      }
     }
   } catch (err) { wait.textContent = "오류: " + err; }
   b.disabled = false; q.focus();

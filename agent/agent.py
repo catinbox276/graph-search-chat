@@ -34,7 +34,7 @@ SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴�
 - 한국어로 답한다."""
 
 
-async def build_agent():
+async def build_agent(checkpointer=None):
     tools = [search_blog, read_blog_post]
     try:
         client = MultiServerMCPClient({
@@ -54,7 +54,8 @@ async def build_agent():
         model=MODEL_NAME,
         temperature=0,
     )
-    return create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT)
+    return create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT,
+                             checkpointer=checkpointer)
 
 
 async def run(question: str):
