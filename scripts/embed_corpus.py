@@ -6,6 +6,7 @@
 usage: .venv/bin/python scripts/embed_corpus.py
 """
 import asyncio
+import os
 import json
 import sys
 import time
@@ -25,7 +26,7 @@ EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # �
 BATCH = 64
 CONCURRENCY = 4  # LM Studio 동시 요청 수
 
-llm = AsyncOpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
+llm = AsyncOpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
 
 
 async def main():
@@ -36,14 +37,19 @@ async def main():
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE blog_posts ADD (embedding BLOB)")
 
-    # 점수 내림차순 우선순위 (JSONL에서), 이미 임베딩된 id는 스킵
+    # 점수 내림차순 우선순위 (JSONL에서). 파일이 없으면(파드 등) DB에서 직접 조회
     cur.execute("SELECT id FROM blog_posts WHERE embedding IS NOT NULL")
     done = {r[0] for r in cur.fetchall()}
-    order = sorted(
-        (json.loads(l) for l in open(CORPUS, encoding="utf-8")),
-        key=lambda d: d["score"], reverse=True)
-    todo = [(d["id"], (d["title"] + " " + d["body"][:300])) for d in order
-            if d["id"] not in done]
+    try:
+        order = sorted(
+            (json.loads(l) for l in open(CORPUS, encoding="utf-8")),
+            key=lambda d: d["score"], reverse=True)
+        todo = [(d["id"], (d["title"] + " " + d["body"][:300])) for d in order
+                if d["id"] not in done]
+    except FileNotFoundError:
+        cur.execute("""SELECT id, title || ' ' || dbms_lob.substr(body, 300, 1)
+                       FROM blog_posts WHERE embedding IS NULL""")
+        todo = cur.fetchall()
     print(f"임베딩 대상 {len(todo)}건 (완료 {len(done)}건 스킵)", flush=True)
 
     t0, n = time.time(), 0

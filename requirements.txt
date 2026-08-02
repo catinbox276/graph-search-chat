@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+oracledb
+numpy
+openai
+httpx
+pyyaml
+deepagents
+langchain-openai
+langchain-mcp-adapters
+mcp-server-datahub

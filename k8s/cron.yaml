@@ -1,0 +1,46 @@
+# 야간 배치 — 앱과 같은 이미지 사용 (둘 다 이어하기/멱등이라 재실행 안전)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: graph-pipeline
+spec:
+  schedule: "0 3 * * *"   # 매일 03:00 — 미판정 세션 게이트→추출→그래프 반영
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pipeline
+              image: graph-search-chat:latest
+              imagePullPolicy: Never
+              command: ["python", "-m", "poc.graph_pipeline"]
+              env:
+                - name: ORACLE_DSN
+                  value: oracle:1521/FREEPDB1
+                - name: MODEL_URL
+                  value: http://host.docker.internal:1234/v1
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: embed-backfill
+spec:
+  schedule: "30 3 * * *"   # 매일 03:30 — 새 문서 임베딩 (없으면 즉시 종료)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: embed
+              image: graph-search-chat:latest
+              imagePullPolicy: Never
+              command: ["python", "scripts/embed_corpus.py"]
+              env:
+                - name: ORACLE_DSN
+                  value: oracle:1521/FREEPDB1
+                - name: MODEL_URL
+                  value: http://host.docker.internal:1234/v1

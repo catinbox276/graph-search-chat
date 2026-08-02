@@ -2,6 +2,7 @@
 
 > 설계 근거는 [design.md](design.md), 실증 수치는 [poc-results.md](poc-results.md).
 > 이 문서는 **현재 리포에서 실제로 돌아가는 것**의 지도다. (2026-08-02 기준)
+> **배치 형태: LM Studio(모델 서빙)를 제외한 전부가 k8s 파드** — 앱(Deployment), Oracle(StatefulSet), DataHub(helm), 배치(CronJob).
 
 ## 전체 구성
 
@@ -11,7 +12,7 @@ flowchart LR
         UI["채팅 UI /<br/>SSE 토큰 스트리밍·접이식 단계"]
         GV["지식그래프 뷰 /graph<br/>force-directed·상세 패널"]
     end
-    subgraph srv["FastAPI 서버 (app/server.py)"]
+    subgraph srv["앱 파드 gsc-app (Deployment, 이미지 1개 = 모놀리스)"]
         API["/chat·/chat/stream(SSE)<br/>/models·/admin/models/*<br/>/graph/data·/stats·/reload"]
         MEM["MemorySaver<br/>(멀티턴 기억, thread=세션)"]
         MTX["임베딩 행렬 1.4GB<br/>(기동 시 Oracle에서 로드)"]
@@ -26,7 +27,7 @@ flowchart LR
         T3["nodes/edges/node_evidence"]
         T4["suggestions·model_registry"]
     end
-    DH["C: DataHub (:9002/:8080)<br/>샘플 67 + BIRD 19테이블"]
+    DH["C: DataHub (helm 파드 ~10개)<br/>:9002 UI / GMS는 클러스터 DNS<br/>샘플 67 + BIRD 19테이블"]
     MCP["B: mcp-server-datahub<br/>(공식 MCP, stdio)"]
     UI & GV --> API
     API --> AG
@@ -34,12 +35,11 @@ flowchart LR
     AG -->|MCP| MCP --> DH
     AG --> LMS
     MTX -.-> ora
-    subgraph batch["배치 (수동/야간)"]
-        P1["selfplay.py → 세션 생성"]
-        P2["graph_pipeline.py<br/>게이트→추출→병합→가중치"]
-        P3["embed_corpus.py 백필"]
+    subgraph batch["CronJob (앱과 같은 이미지)"]
+        P2["graph-pipeline 03:00<br/>게이트→추출→병합 (UI 세션 포함)"]
+        P3["embed-backfill 03:30<br/>새 문서 임베딩"]
     end
-    P1 & P2 & P3 --> ora
+    P2 & P3 --> ora
 ```
 
 ## 저장소 (Oracle 단일 DB — design §5 원칙 유지)
@@ -73,22 +73,28 @@ flowchart LR
 - `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(X-Admin-Token)
 - `GET /graph/data` — 노드(사용·성공·실패 카운트)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 
-## 실행 방법
+## 실행 방법 (전부 파드)
 
 ```bash
-# 인프라: Docker Desktop(k8s 활성) + LM Studio(:1234, 모델 로드)
-kubectl apply -f k8s/oracle.yaml          # Oracle 파드
-datahub docker quickstart                  # DataHub 스택
-# 데이터 준비(1회): build_corpus.py → load_oracle.py → embed_corpus.py → ingest_bird.py
-.venv/bin/uvicorn app.server:app --port 8500
+# 전제: Docker Desktop(k8s 활성) + LM Studio(:1234, 모델 로드) — 모델 서빙만 호스트
+kubectl create secret generic mysql-secrets --from-literal=mysql-root-password=datahub
+helm repo add datahub https://helm.datahubproject.io/
+helm install prerequisites datahub/datahub-prerequisites
+helm install datahub datahub/datahub \
+  --set global.datahub.metadata_service_authentication.enabled=false  # PoC 한정
+kubectl apply -f k8s/oracle.yaml   # Oracle StatefulSet
+docker build -t graph-search-chat:latest .
+kubectl apply -f k8s/app.yaml -f k8s/cron.yaml   # 앱 Deployment + 야간 CronJob 2종
+# 데이터 준비(1회, 호스트): build_corpus.py → load_oracle.py → embed_corpus.py → ingest_bird.py
 # 접속: 채팅 :8500 / 그래프 :8500/graph / DataHub :9002 (datahub/datahub)
+# 사내 전환: 이미지를 레지스트리로 push, MODEL_URL을 vLLM 서비스로, 인증·Secret 활성화
 ```
 
 ## 알려진 한계 (사내 전환 시 체크리스트)
 
-1. 로컬은 대형 LLM 1개만 동시 로드(LM Studio) — GPU 서빙(vLLM 등)에서 드롭다운 선택 그대로 동작
+1. 로컬은 대형 LLM 1개만 동시 로드(LM Studio, 유일한 비파드 구성요소) — GPU 서빙(vLLM 파드)에서 드롭다운 선택 그대로 동작
 2. 멀티턴 기억은 서버 메모리(재시작 시 초기화) — 증거는 sessions에 영구 보존
 3. 관리자 인증은 단일 토큰(PoC) — 사내는 SSO 연동
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
-5. 그래프 파이프라인·게이트는 배치 수동 실행 — 운영 시 세션 종료 트리거/야간 배치로
+5. 야간 CronJob이 UI 세션 포함 미판정분을 자동 처리 (03:00 파이프라인, 03:30 임베딩). 로컬은 야간에 맥·LM Studio가 켜져 있어야 동작
 6. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정, supersession 자동화 등)

@@ -8,6 +8,7 @@ usage: .venv/bin/python agent/agent.py "financial DB에서 계좌 테이블 뭐 
 """
 import asyncio
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -45,7 +46,8 @@ async def build_agent(checkpointer=None, model_name=None):
     try:
         client = MultiServerMCPClient({
             "datahub": {
-                "command": str(ROOT / ".venv/bin/mcp-server-datahub"),
+                "command": shutil.which("mcp-server-datahub")
+                           or str(ROOT / ".venv/bin/mcp-server-datahub"),
                 "args": [],
                 "transport": "stdio",
                 "env": {"DATAHUB_GMS_URL": DATAHUB_GMS},

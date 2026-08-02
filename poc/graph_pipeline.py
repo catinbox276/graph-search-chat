@@ -11,6 +11,7 @@ design.md §2~§5 구현:
 usage: .venv/bin/python poc/graph_pipeline.py
 """
 import json
+import os
 import re
 import sys
 import uuid
@@ -25,7 +26,7 @@ from openai import OpenAI
 
 from tools.blog_search import DSN, PASSWORD, USER
 
-llm = OpenAI(base_url="http://127.0.0.1:1234/v1", api_key="lm-studio")
+llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
 CHAT_MODEL = "qwen/qwen3.6-35b-a3b"
 EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
 SIM_THRESHOLD = 0.72  # 캘리브레이션: 같은 의도 0.81~0.83, 다른 의도 0.34~0.46
@@ -135,16 +136,17 @@ def main():
     cur = con.cursor()
     ddl(cur)
     cur.execute("""SELECT id, question, tool_calls, answer FROM sessions
-                   WHERE turn = 1 AND verdict IS NULL
-                   AND REGEXP_LIKE(id, '^[RSF][0-9]+-[0-9]+$') ORDER BY id""")
+                   WHERE turn = 1 AND verdict IS NULL ORDER BY id""")
     rows = [(r[0], r[1].read(), r[2].read(), r[3].read()) for r in cur.fetchall()]
     print(f"판정 대상 {len(rows)}세션")
     for n, (sid, q, calls_json, answer) in enumerate(rows, 1):
         calls = json.loads(calls_json or "[]")
         task_id = sid.split("-")[0]
+        expect = exp.get(task_id,  # 실사용(UI) 세션은 일반 기준으로 판정
+                         "사용자의 질문이 근거(데이터/문서)와 함께 실질적으로 해결되었는가")
         prompt = JUDGE_PROMPT.format(
             question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
-            answer=answer[:3000], expect=exp[task_id])
+            answer=answer[:3000], expect=expect)
         resp = llm.chat.completions.create(
             model=CHAT_MODEL, temperature=0,
             messages=[{"role": "user", "content": prompt}])
