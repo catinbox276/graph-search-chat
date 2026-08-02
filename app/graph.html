@@ -2,35 +2,54 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>지식그래프 뷰</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<link rel="stylesheet" href="/static/shell.css">
 <style>
-  body { margin: 0; font-family: system-ui, sans-serif; }
-  #bar { padding: 8px 14px; font-size: .9rem; border-bottom: 1px solid #ddd;
-         display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
-  #net { height: calc(100vh - 42px); }
+  #legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+            padding: 8px 18px; font-size: .82rem; color: var(--mut);
+            border-bottom: 1px solid var(--line); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+  #net { height: calc(100vh - 138px); }
 </style>
 </head>
 <body>
-<div id="bar">
-  <b>조직 지식그래프</b>
-  <span><i class="dot" style="background:#1e40af"></i>1층 도메인</span>
-  <span><i class="dot" style="background:#0891b2"></i>2층 목표</span>
-  <span><i class="dot" style="background:#16a34a"></i>3층 접근법</span>
-  <span><i class="dot" style="background:#9ca3af"></i>4층 행동</span>
-  <span><i class="dot" style="background:#dc2626"></i>실패 표식</span>
-  <span>선 굵기 = 가중치(통행 횟수)</span>
+<header class="shell">
+  <span class="brand">지식그래프 챗<small>조직의 문제 해결 경로</small></span>
+  <nav class="pathnav">
+    <a href="/">채팅</a><span class="edge"></span>
+    <a class="on" href="/graph">지식그래프</a><span class="edge"></span>
+    <a href="http://localhost:9002" target="_blank">DataHub ↗</a>
+  </nav>
+  <span class="spacer"></span>
+  <button class="ghost" onclick="location.reload()">새로고침</button>
+</header>
+
+<div id="legend">
+  <span><i class="dot" style="background:#1e40af"></i>도메인</span>
+  <span><i class="dot" style="background:#0891b2"></i>목표</span>
+  <span><i class="dot" style="background:var(--ok)"></i>접근법 (검증 경로)</span>
+  <span><i class="dot" style="background:#9ca3af"></i>행동/도구</span>
+  <span><i class="dot" style="background:var(--fail)"></i>실패 이력 우세</span>
+  <span>선 굵기 = 통행 횟수 · 노드를 잡고 끌 수 있습니다</span>
 </div>
 <div id="net"></div>
+<footer class="stats" id="stats"></footer>
+
 <script>
-const COLORS = {1: "#1e40af", 2: "#0891b2", 3: "#16a34a", 4: "#9ca3af"};
+const OK = getComputedStyle(document.documentElement).getPropertyValue("--ok").trim();
+const FAIL = getComputedStyle(document.documentElement).getPropertyValue("--fail").trim();
+const COLORS = {1: "#1e40af", 2: "#0891b2", 3: OK, 4: "#9ca3af"};
 fetch("/graph/data").then(r => r.json()).then(({nodes, edges}) => {
+  document.getElementById("stats").innerHTML =
+    `<span>노드 <b>${nodes.length}</b></span><span>연결 <b>${edges.length}</b></span>` +
+    `<span>실패 이력 <b>${nodes.filter(n => n.fail).length}</b></span>`;
   const vnodes = nodes.map(n => ({
     id: n.id,
     label: n.name.length > 28 ? n.name.slice(0, 28) + "…" : n.name,
-    title: n.name + (n.fail ? "\n⚠ " + (n.fail_reason || "실패") : ""),
-    color: n.fail ? "#dc2626" : COLORS[n.layer],
+    title: n.name + (n.fail ? "\n⚠ " + (n.fail_reason || "실패 이력") : ""),
+    color: n.fail ? FAIL : COLORS[n.layer],
     font: {color: "#fff", size: n.layer <= 2 ? 16 : 12},
     shape: n.layer === 1 ? "box" : "dot",
     size: n.layer === 2 ? 22 : n.layer === 3 ? 16 : 8,
@@ -39,7 +58,7 @@ fetch("/graph/data").then(r => r.json()).then(({nodes, edges}) => {
   const vedges = edges.map(e => ({
     from: e.src, to: e.dst, width: Math.min(1 + e.count, 10),
     label: e.count > 1 ? String(e.count) : undefined,
-    font: {size: 11}, arrows: "to", color: {opacity: .6},
+    font: {size: 11}, arrows: "to", color: {opacity: .55},
   }));
   new vis.Network(document.getElementById("net"),
     {nodes: vnodes, edges: vedges},

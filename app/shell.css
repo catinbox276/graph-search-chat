@@ -1,0 +1,56 @@
+/* 공통 셸 — 색은 의미다: 그래프 범례와 채팅 단계가 같은 색을 쓴다 */
+:root {
+  color-scheme: light dark;
+  --path: #2f6df6;   /* 경로/행동 (파랑) */
+  --ok:   #159a5b;   /* 검증된 경로 (초록) */
+  --warn: #d97706;   /* 주의 (호박) */
+  --fail: #dc2626;   /* 실패 이력 (빨강) */
+  --mut:  color-mix(in srgb, canvastext 55%, canvas);
+  --line: color-mix(in srgb, canvastext 16%, canvas);
+  --card: color-mix(in srgb, canvas 94%, canvastext);
+}
+* { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; margin: 0; }
+
+/* 상단 바 */
+header.shell {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px 18px; border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; background: canvas; z-index: 10;
+}
+.brand { font-weight: 750; font-size: 1rem; letter-spacing: -.01em; }
+.brand small { font-weight: 400; color: var(--mut); margin-left: 6px; }
+
+/* 시그니처: 노드-엣지 네비게이션 — 탭이 그래프의 노드다 */
+nav.pathnav { display: flex; align-items: center; }
+nav.pathnav a {
+  display: flex; align-items: center; gap: 7px;
+  color: var(--mut); text-decoration: none; font-size: .88rem; padding: 6px 0;
+}
+nav.pathnav a::before {
+  content: ""; width: 9px; height: 9px; border-radius: 50%;
+  border: 2px solid var(--mut); background: canvas; flex: none;
+}
+nav.pathnav a.on { color: canvastext; font-weight: 650; }
+nav.pathnav a.on::before { background: var(--path); border-color: var(--path); }
+nav.pathnav a:hover { color: canvastext; }
+nav.pathnav .edge { width: 26px; height: 2px; background: var(--line); margin: 0 6px; }
+
+.spacer { flex: 1; }
+.shell select, .shell button.ghost {
+  font-size: .82rem; padding: 5px 9px; border-radius: 8px;
+  border: 1px solid var(--line); background: canvas; color: canvastext; cursor: pointer;
+}
+.shell button.ghost:hover { border-color: var(--path); color: var(--path); }
+
+/* 하단 상태줄 */
+footer.stats {
+  display: flex; gap: 14px; padding: 8px 18px; font-size: .75rem;
+  color: var(--mut); border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+footer.stats b { color: canvastext; font-weight: 600; }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--path); outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

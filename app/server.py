@@ -195,6 +195,12 @@ async def chat(inp: ChatIn):
             "elapsed_sec": round(time.time() - t0, 1)}
 
 
+@app.get("/static/shell.css")
+def shell_css():
+    return FileResponse(ROOT / "app" / "shell.css",
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/")
 def index():
     return FileResponse(ROOT / "app" / "index.html",
@@ -257,3 +263,22 @@ def admin_select(inp: SelectIn, x_admin_token: str = Header(default="")):
                 "UPDATE blog_posts SET embedding=NULL 후 embed_corpus.py 재실행, "
                 "그래프 dedup 임계값 재캘리브레이션 필요")
     return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
+
+
+@app.get("/stats")
+def stats():
+    """헤더 상태칩용 현황."""
+    con = db()
+    cur = con.cursor()
+    out = {}
+    for k, q in [("posts", "SELECT COUNT(*) FROM blog_posts"),
+                 ("nodes", "SELECT COUNT(*) FROM nodes"),
+                 ("edges", "SELECT COUNT(*) FROM edges"),
+                 ("sessions", "SELECT COUNT(DISTINCT id) FROM sessions")]:
+        try:
+            cur.execute(q)
+            out[k] = cur.fetchone()[0]
+        except oracledb.DatabaseError:
+            out[k] = 0
+    con.close()
+    return out

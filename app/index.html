@@ -3,61 +3,103 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graph-search-chat PoC</title>
+<title>지식그래프 챗</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="/static/shell.css">
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, sans-serif; max-width: 780px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.1rem; }
+  main { max-width: 820px; margin: 0 auto; padding: 16px; min-height: calc(100vh - 110px); }
   #log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
   .msg { padding: 10px 14px; border-radius: 12px; line-height: 1.55; }
-  .user { background: #3b82f6; color: #fff; align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
-  .bot  { background: color-mix(in srgb, canvas 92%, canvastext); align-self: flex-start; max-width: 95%; }
-  .steps { font-size: .8rem; border-left: 3px solid #3b82f6; padding-left: 8px;
-           margin-bottom: 8px; }
+  .user { background: var(--path); color: #fff; align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
+  .bot  { background: var(--card); align-self: flex-start; max-width: 95%; }
+  .steps { font-size: .8rem; border-left: 3px solid var(--path); padding-left: 8px; margin-bottom: 8px; }
   .steps:empty { display: none; }
   .steps details { margin: 3px 0; }
   .steps summary { cursor: pointer; opacity: .85; }
+  .steps summary.ok { color: var(--ok); }
   .steps .detail-body { font-family: ui-monospace, monospace; font-size: .75rem;
                         white-space: pre-wrap; background: #0001; border-radius: 6px;
-                        padding: 6px 8px; margin: 4px 0 6px; max-height: 260px;
-                        overflow-y: auto; }
-  .steps .sec { font-weight: 700; opacity: .7; }
+                        padding: 6px 8px; margin: 4px 0 6px; max-height: 260px; overflow-y: auto; }
   .elapsed { font-size: .75rem; opacity: .6; font-family: ui-monospace, monospace; }
   .body.streaming { white-space: pre-wrap; opacity: .8; }
   .body :is(h1,h2,h3) { font-size: 1rem; margin: .6em 0 .3em; }
   .body pre { background: #0002; padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
   .body code { font-family: ui-monospace, monospace; font-size: .88em; }
   .body table { border-collapse: collapse; }
-  .body td, .body th { border: 1px solid #8886; padding: 4px 8px; }
-  form { display: flex; gap: 8px; position: sticky; bottom: 0; background: canvas; padding: 8px 0; }
-  input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #8884; font-size: 1rem; }
-  button { padding: 10px 18px; border-radius: 8px; border: 0; background: #3b82f6; color: #fff; font-size: 1rem; }
-  button:disabled { opacity: .5; }
+  .body td, .body th { border: 1px solid var(--line); padding: 4px 8px; }
+  /* 빈 화면 = 행동으로의 초대 */
+  #hello { text-align: center; padding: 48px 12px 12px; }
+  #hello h2 { font-weight: 650; font-size: 1.15rem; margin-bottom: 4px; }
+  #hello p { color: var(--mut); font-size: .88rem; margin-top: 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; }
+  .chips button { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+                  background: canvas; color: canvastext; font-size: .85rem; cursor: pointer; }
+  .chips button:hover { border-color: var(--path); color: var(--path); }
+  form { display: flex; gap: 8px; position: sticky; bottom: 0; background: canvas; padding: 8px 0 14px; }
+  input#q { flex: 1; padding: 11px 14px; border-radius: 10px; border: 1px solid var(--line);
+            font-size: 1rem; background: canvas; color: canvastext; }
+  button#b { padding: 10px 20px; border-radius: 10px; border: 0; background: var(--path);
+             color: #fff; font-size: 1rem; cursor: pointer; }
+  button#b:disabled { opacity: .5; }
 </style>
 </head>
 <body>
-<h1>graph-search-chat PoC — DataHub MCP + 블로그 검색(Oracle)
-  <select id="model" style="font-size:.8rem; margin-left:8px; padding:2px 6px; border-radius:6px;"></select>
-</h1>
-<div id="log"></div>
-<form id="f">
-  <input id="q" placeholder="예: financial DB에서 계좌 테이블 뭐 있어? / pip이 프록시 뒤에서 안 돼" autofocus>
-  <button id="b">전송</button>
-</form>
+<header class="shell">
+  <span class="brand">지식그래프 챗<small>사내 데이터 · 노하우 어시스턴트</small></span>
+  <nav class="pathnav">
+    <a class="on" href="/">채팅</a><span class="edge"></span>
+    <a href="/graph">지식그래프</a><span class="edge"></span>
+    <a href="http://localhost:9002" target="_blank">DataHub ↗</a>
+  </nav>
+  <span class="spacer"></span>
+  <select id="model" title="답변에 사용할 LLM"></select>
+  <button class="ghost" id="newchat" title="기억을 비우고 새 대화 시작">새 대화</button>
+</header>
+
+<main>
+  <div id="hello">
+    <h2>무엇을 도와드릴까요?</h2>
+    <p>데이터 위치·조인·리니지는 DataHub에서, 설치·설정 문제는 사내 블로그에서 찾아 답합니다.<br>
+       비슷한 문제를 해결한 동료들의 검증된 경로가 있으면 먼저 안내합니다.</p>
+    <div class="chips">
+      <button>financial DB에서 계좌 분석하려면 어떤 테이블을 조인해?</button>
+      <button>orders 테이블 데이터는 어디서 흘러들어와?</button>
+      <button>pip install이 회사 프록시 뒤에서 안 돼</button>
+      <button>도커 컨테이너 안에서 인터넷이 안 돼</button>
+    </div>
+  </div>
+  <div id="log"></div>
+  <form id="f">
+    <input id="q" placeholder="질문을 입력하세요…" autofocus autocomplete="off">
+    <button id="b">전송</button>
+  </form>
+</main>
+
+<footer class="stats" id="stats"></footer>
+
 <script>
 let sid = null;
+const $ = (id) => document.getElementById(id);
+const log = $("log"), f = $("f"), q = $("q"), b = $("b"), hello = $("hello");
+
 fetch("/models").then(r => r.json()).then(j => {
-  const sel = document.getElementById("model");
   j.llm.forEach(m => {
     const o = document.createElement("option");
     o.value = m.name; o.textContent = m.name + (m.default ? " (기본)" : "");
     if (m.default) o.selected = true;
-    sel.appendChild(o);
+    $("model").appendChild(o);
   });
 });
-const log = document.getElementById("log"), f = document.getElementById("f"),
-      q = document.getElementById("q"), b = document.getElementById("b");
+fetch("/stats").then(r => r.json()).then(s => {
+  $("stats").innerHTML =
+    `<span>노하우 문서 <b>${s.posts.toLocaleString()}</b></span>` +
+    `<span>그래프 노드 <b>${s.nodes.toLocaleString()}</b></span>` +
+    `<span>축적 세션 <b>${s.sessions.toLocaleString()}</b></span>`;
+});
+$("newchat").onclick = () => { sid = null; log.innerHTML = ""; hello.style.display = ""; q.focus(); };
+document.querySelectorAll(".chips button").forEach(c =>
+  c.onclick = () => { q.value = c.textContent; f.requestSubmit(); });
+
 const TOOL_LABEL = {
   suggest_paths: "과거 해결 경로 조회",
   search_blog: "사내 블로그 검색", read_blog_post: "블로그 글 읽기",
@@ -79,10 +121,11 @@ function addBot() {
 f.onsubmit = async (e) => {
   e.preventDefault();
   const msg = q.value.trim(); if (!msg) return;
+  hello.style.display = "none";
   addUser(msg); q.value = ""; b.disabled = true;
   const {steps, body, d} = addBot();
   body.textContent = "🤔 질문 분석 중…";
-  const pending = [];  // 결과 대기 중인 단계 블록
+  const pending = [];
   let buf = "", raw = "";
   const render = () => { body.textContent = buf.slice(-800); d.scrollIntoView(false); };
   const addStep = (label, reasoning, args) => {
@@ -92,17 +135,15 @@ f.onsubmit = async (e) => {
     const bd = document.createElement("div");
     bd.className = "detail-body";
     const think = (reasoning || "").trim();
-    bd.textContent = (think ? "🧠 판단\n" + think + "\n\n" : "")
-                   + "📤 요청\n" + args;
+    bd.textContent = (think ? "🧠 판단\n" + think + "\n\n" : "") + "📤 요청\n" + args;
     det.append(sum, bd);
     steps.appendChild(det);
-    pending.push(bd);
-    return det;
+    pending.push({bd, sum});
   };
   try {
     const r = await fetch("/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({session_id: sid, message: msg, model: document.getElementById("model").value || null}),
+      body: JSON.stringify({session_id: sid, message: msg, model: $("model").value || null}),
     });
     const reader = r.body.getReader(), dec = new TextDecoder();
     while (true) {
@@ -118,14 +159,16 @@ f.onsubmit = async (e) => {
         if (ev.type === "session") sid = ev.session_id;
         else if (ev.type === "token") { buf += ev.text; render(); }
         else if (ev.type === "tool") {
-          addStep(TOOL_LABEL[ev.name] || ev.name, buf,
-                  JSON.stringify(ev.args, null, 1));
+          addStep(TOOL_LABEL[ev.name] || ev.name, buf, JSON.stringify(ev.args, null, 1));
           buf = ""; body.textContent = "⏳ 도구 실행 중…";
           d.scrollIntoView(false);
         }
         else if (ev.type === "tool_end") {
-          const bd = pending.shift();
-          if (bd) bd.textContent += "\n\n📥 응답 (MCP/함수)\n" + (ev.result || "(빈 응답)");
+          const p = pending.shift();
+          if (p) {
+            p.bd.textContent += "\n\n📥 응답 (MCP/함수)\n" + (ev.result || "(빈 응답)");
+            p.sum.classList.add("ok");  /* 완료된 단계 = 초록 (그래프의 '검증' 색) */
+          }
           buf = ""; body.textContent = "✍️ 결과 검토 중…";
         }
         else if (ev.type === "answer") {
@@ -138,9 +181,7 @@ f.onsubmit = async (e) => {
           }
           d.scrollIntoView(false);
         }
-        else if (ev.type === "error") {
-          body.textContent = "오류: " + ev.message;
-        }
+        else if (ev.type === "error") { body.textContent = "오류: " + ev.message; }
       }
     }
   } catch (err) { body.textContent = "오류: " + err; }
