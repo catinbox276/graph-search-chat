@@ -1,0 +1,6 @@
+# 스탠다드(standalone) 모드 — kubectl apply -k k8s/base
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - app.yaml
+  - cron.yaml

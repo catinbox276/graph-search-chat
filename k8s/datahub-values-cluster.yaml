@@ -1,0 +1,10 @@
+# DataHub 클러스터 모드 helm values (사내 환경용 — 로컬 리소스로는 미적용)
+# 사용: helm upgrade datahub datahub/datahub -f k8s/datahub-values-cluster.yaml
+datahub-gms:
+  replicaCount: 2
+datahub-frontend:
+  replicaCount: 2
+acryl-datahub-actions:
+  replicaCount: 2
+# prerequisites 클러스터화는 datahub-prerequisites values로:
+#   opensearch: replicas 3 / kafka: controller.replicaCount 3 / mysql: 사내 표준 DB 사용 권장

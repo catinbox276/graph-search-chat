@@ -29,7 +29,9 @@ from tools.blog_search import DSN, PASSWORD, USER
 llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
 CHAT_MODEL = "qwen/qwen3.6-35b-a3b"
 EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
-SIM_THRESHOLD = 0.72  # 캘리브레이션: 같은 의도 0.81~0.83, 다른 의도 0.34~0.46
+SIM_HIGH = 0.92       # 이 이상은 명백히 동일 — LLM 확인 생략하고 병합
+SIM_THRESHOLD = 0.70  # 후보 하한 — 이 구간(0.70~0.92)은 LLM이 동일 의도 여부 확인
+# 캘리브레이션: 같은 의도 0.81~0.98, 다른 의도 0.34~0.46. 인접 주제 과병합(도커 사례)이 0.7대에서 발생
 DATAHUB_TOOLS = {"search", "get_entities", "list_schema_fields", "get_lineage",
                  "get_lineage_paths_between", "get_dataset_queries"}
 
@@ -85,19 +87,43 @@ def cosine(a, b):
     return dot / (na * nb) if na and nb else 0.0
 
 
+LAYER_KIND = {2: "목표(사용자가 이루려는 것)", 3: "접근법(문제를 푸는 방법)"}
+
+
+def llm_same(kind: str, a: str, b: str) -> bool:
+    """2단계 판정: 임베딩 후보를 LLM이 최종 확인 (인접 주제 과병합 차단)."""
+    resp = llm.chat.completions.create(
+        model=CHAT_MODEL, temperature=0,
+        messages=[{"role": "user", "content":
+                   f'두 문구가 같은 {kind}를 가리키면 true. '
+                   f'주제·도구가 비슷해도 의도가 다르면 false. JSON만 출력: {{"same": true|false}}\n'
+                   f'A: {a}\nB: {b}'}])
+    m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
+    try:
+        return bool(json.loads(m.group()).get("same")) if m else False
+    except json.JSONDecodeError:
+        return False
+
+
 def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
-    """같은 부모 밑 형제와 임베딩 비교 -> 병합 또는 신규. 엣지 raw_count 증가."""
+    """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가."""
     vec = embed(name) if use_embedding else None
     node_id = None
     if parent_id:
         cur.execute("""SELECT n.id, n.name, n.embedding FROM nodes n
                        JOIN edges e ON e.dst = n.id
                        WHERE e.src = :1 AND n.layer = :2""", [parent_id, layer])
+        cands = []
         for nid, nname, nemb in cur.fetchall():
             if nname == name:
                 node_id = nid; break
             if vec is not None and nemb:
-                if cosine(vec, json.loads(nemb.read())) >= SIM_THRESHOLD:
+                sim = cosine(vec, json.loads(nemb.read()))
+                if sim >= SIM_THRESHOLD:
+                    cands.append((sim, nid, nname))
+        if node_id is None:
+            for sim, nid, nname in sorted(cands, reverse=True):
+                if sim >= SIM_HIGH or llm_same(LAYER_KIND.get(layer, "개념"), name, nname):
                     node_id = nid; break
     else:
         cur.execute("SELECT id FROM nodes WHERE layer = :1 AND name = :2",

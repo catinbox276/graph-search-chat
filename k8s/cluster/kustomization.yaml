@@ -1,0 +1,17 @@
+# 클러스터 모드 — kubectl apply -k k8s/cluster
+# Milvus/OpenSearch의 standalone/cluster 구분과 같은 방식. Oracle·모델 서빙은 모드 대상 아님.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../base
+patches:
+  - target: {kind: Deployment, name: gsc-app}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+  - target: {kind: Service, name: gsc-app}
+    patch: |-
+      - op: add
+        path: /spec/sessionAffinity
+        value: ClientIP   # 멀티턴 기억이 파드 메모리라 세션 고정 필요
