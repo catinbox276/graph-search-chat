@@ -80,7 +80,8 @@ f.onsubmit = async (e) => {
     sum.textContent = "⚙ " + label;
     const bd = document.createElement("div");
     bd.className = "detail-body";
-    bd.textContent = (reasoning ? "🧠 판단\n" + reasoning.trim() + "\n\n" : "")
+    const think = (reasoning || "").trim();
+    bd.textContent = (think ? "🧠 판단\n" + think + "\n\n" : "")
                    + "📤 요청\n" + args;
     det.append(sum, bd);
     steps.appendChild(det);

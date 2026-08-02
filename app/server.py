@@ -79,6 +79,26 @@ def sse(obj: dict) -> str:
     return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
+def prettify_result(result: str) -> str:
+    """MCP 응답의 이스케이프 JSON 덩어리를 사람이 읽게 정리."""
+    try:
+        data = json.loads(result)
+        # MCP content 포맷 [{"type":"text","text":"..."}] 언랩
+        if isinstance(data, list) and data and isinstance(data[0], dict) \
+                and data[0].get("type") == "text":
+            result = "\n".join(d.get("text", "") for d in data
+                               if d.get("type") == "text")
+            try:
+                data = json.loads(result)
+            except json.JSONDecodeError:
+                return result
+        if isinstance(data, (dict, list)):
+            return json.dumps(data, ensure_ascii=False, indent=1)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return result
+
+
 @app.post("/chat/stream")
 async def chat_stream(inp: ChatIn):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""
@@ -119,7 +139,7 @@ async def chat_stream(inp: ChatIn):
                                 else json.dumps(m.content, ensure_ascii=False)
                             yield sse({"type": "tool_end",
                                        "name": getattr(m, "name", "") or "",
-                                       "result": result[:3000]})
+                                       "result": prettify_result(result)[:3000]})
                         if getattr(m, "type", "") == "ai" and m.content \
                                 and not getattr(m, "tool_calls", None):
                             answer = m.content if isinstance(m.content, str) \
