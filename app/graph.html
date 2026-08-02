@@ -92,7 +92,7 @@ function build() {
     color: {background: n.fail ? FAIL : COLORS[n.layer],
             border: n.fail ? FAIL : COLORS[n.layer],
             highlight: {background: "#f59e0b", border: "#b45309"}},
-    font: {color: "#fff", size: n.layer === 1 ? 18 : 13},
+    font: {color: n.layer === 1 ? "#fff" : "#1f2430", size: n.layer === 1 ? 18 : 13},
     shape: n.layer === 1 ? "box" : "dot",
     size: Math.min(10 + n.uses * 3, 34),   /* 크기 = 사용 횟수 (Obsidian 방식) */
     mass: n.layer === 1 ? 3 : 1,
