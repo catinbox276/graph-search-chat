@@ -13,10 +13,17 @@
   .msg { padding: 10px 14px; border-radius: 12px; line-height: 1.55; }
   .user { background: #3b82f6; color: #fff; align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
   .bot  { background: color-mix(in srgb, canvas 92%, canvastext); align-self: flex-start; max-width: 95%; }
-  .steps { font-size: .78rem; opacity: .75; font-family: ui-monospace, monospace;
-           white-space: pre-wrap; border-left: 3px solid #3b82f6; padding-left: 8px;
+  .steps { font-size: .8rem; border-left: 3px solid #3b82f6; padding-left: 8px;
            margin-bottom: 8px; }
   .steps:empty { display: none; }
+  .steps details { margin: 3px 0; }
+  .steps summary { cursor: pointer; opacity: .85; }
+  .steps .detail-body { font-family: ui-monospace, monospace; font-size: .75rem;
+                        white-space: pre-wrap; background: #0001; border-radius: 6px;
+                        padding: 6px 8px; margin: 4px 0 6px; max-height: 260px;
+                        overflow-y: auto; }
+  .steps .sec { font-weight: 700; opacity: .7; }
+  .elapsed { font-size: .75rem; opacity: .6; font-family: ui-monospace, monospace; }
   .body.streaming { white-space: pre-wrap; opacity: .8; }
   .body :is(h1,h2,h3) { font-size: 1rem; margin: .6em 0 .3em; }
   .body pre { background: #0002; padding: 8px 10px; border-radius: 8px; overflow-x: auto; }
@@ -63,9 +70,22 @@ f.onsubmit = async (e) => {
   addUser(msg); q.value = ""; b.disabled = true;
   const {steps, body, d} = addBot();
   body.textContent = "🤔 질문 분석 중…";
-  const stepList = [];
+  const pending = [];  // 결과 대기 중인 단계 블록
   let buf = "", raw = "";
   const render = () => { body.textContent = buf.slice(-800); d.scrollIntoView(false); };
+  const addStep = (label, reasoning, args) => {
+    const det = document.createElement("details");
+    const sum = document.createElement("summary");
+    sum.textContent = "⚙ " + label;
+    const bd = document.createElement("div");
+    bd.className = "detail-body";
+    bd.textContent = (reasoning ? "🧠 판단\n" + reasoning.trim() + "\n\n" : "")
+                   + "📤 요청\n" + args;
+    det.append(sum, bd);
+    steps.appendChild(det);
+    pending.push(bd);
+    return det;
+  };
   try {
     const r = await fetch("/chat/stream", {
       method: "POST", headers: {"Content-Type": "application/json"},
@@ -85,19 +105,24 @@ f.onsubmit = async (e) => {
         if (ev.type === "session") sid = ev.session_id;
         else if (ev.type === "token") { buf += ev.text; render(); }
         else if (ev.type === "tool") {
-          const args = JSON.stringify(ev.args);
-          stepList.push(`⚙ ${TOOL_LABEL[ev.name] || ev.name} ${args.length > 70 ? args.slice(0, 70) + "…" : args}`);
-          steps.textContent = stepList.join("\n");
+          addStep(TOOL_LABEL[ev.name] || ev.name, buf,
+                  JSON.stringify(ev.args, null, 1));
           buf = ""; body.textContent = "⏳ 도구 실행 중…";
+          d.scrollIntoView(false);
         }
         else if (ev.type === "tool_end") {
+          const bd = pending.shift();
+          if (bd) bd.textContent += "\n\n📥 응답 (MCP/함수)\n" + (ev.result || "(빈 응답)");
           buf = ""; body.textContent = "✍️ 결과 검토 중…";
         }
         else if (ev.type === "answer") {
           body.classList.remove("streaming");
           body.innerHTML = marked.parse(ev.text || "(빈 답변)");
-          if (stepList.length)
-            steps.textContent = stepList.join("\n") + `\n⏱ ${ev.elapsed_sec}s`;
+          if (steps.children.length) {
+            const el = document.createElement("div");
+            el.className = "elapsed"; el.textContent = `⏱ ${ev.elapsed_sec}s`;
+            steps.appendChild(el);
+          }
           d.scrollIntoView(false);
         }
         else if (ev.type === "error") {

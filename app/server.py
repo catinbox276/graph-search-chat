@@ -115,8 +115,11 @@ async def chat_stream(inp: ChatIn):
                             yield sse({"type": "tool", "name": c["name"],
                                        "args": c["args"]})
                         if getattr(m, "type", "") == "tool":
+                            result = m.content if isinstance(m.content, str) \
+                                else json.dumps(m.content, ensure_ascii=False)
                             yield sse({"type": "tool_end",
-                                       "name": getattr(m, "name", "") or ""})
+                                       "name": getattr(m, "name", "") or "",
+                                       "result": result[:3000]})
                         if getattr(m, "type", "") == "ai" and m.content \
                                 and not getattr(m, "tool_calls", None):
                             answer = m.content if isinstance(m.content, str) \
