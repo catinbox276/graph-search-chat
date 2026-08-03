@@ -16,21 +16,20 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import oracledb
-import os
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from tools.oracle_checkpointer import OracleSaver
 from pydantic import BaseModel
 
 from agent.agent import build_agent
-from tools import model_registry
+from tools import config, model_registry
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 from tools.session_ctx import current_session
 
 app = FastAPI()
 _agents = {}          # model_name -> agent (모델별 캐시)
 _saver = None         # 공유 checkpointer (같은 세션이 모델 바꿔도 기억 유지)
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "poc-admin")
+ADMIN_TOKEN = config.ADMIN_TOKEN
 
 
 def check_admin(token):
@@ -45,8 +44,15 @@ async def get_agent(model_name: str | None):
     return _agents[name]
 
 
+# 서버 전용 커넥션 풀 — log_turn(대화 턴마다)·stats(readiness probe 15초마다) 등이
+# 매번 새로 접속하던 것을 재사용으로 전환. con.close()는 풀 반납으로 동작(실제 종료 아님).
+_db_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
+                                min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
+                                increment=config.ORACLE_POOL_INCREMENT)
+
+
 def db():
-    return oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    return _db_pool.acquire()
 
 
 @app.on_event("startup")
@@ -251,8 +257,7 @@ def reload_embeddings():
 def models():
     """사용자용: 선택 가능한 LLM 목록 + 현재 임베딩(정보만)."""
     llms = [m for m in model_registry.list_models("llm") if m["enabled"]]
-    emb = model_registry.get_default("embedding", "?")
-    return {"llm": llms, "embedding_in_use": emb}
+    return {"llm": llms, "embedding_in_use": config.EMBED_MODEL}  # 검색 경로 실사용값(.env)
 
 
 @app.post("/admin/models/sync")

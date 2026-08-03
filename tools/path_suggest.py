@@ -6,22 +6,23 @@
 - 노출 기록: suggestions 테이블 (추후 노출 대비 채택률 가중치 보정용)
 """
 import json
-import os
 import re
 
 import numpy as np
 import oracledb
 from openai import OpenAI
 
+from tools import config
 from tools.blog_search import DSN, PASSWORD, USER
 from tools.session_ctx import current_session
 
-from tools.model_registry import get_default
-EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
-SIM_ENTRY = 0.60  # 진입점 매칭 임계값 (dedup 0.72보다 완화 — 원질문 vs 정규화 문구)
+EMB_MODEL = config.EMBED_MODEL  # .env로 제어
+SIM_ENTRY = config.PATH_SIM_ENTRY  # 진입점 매칭 임계값 (dedup보다 완화 — 원질문 vs 정규화 문구)
 
-_llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
-_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN, min=1, max=2)
+_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
+_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
+                             min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
+                             increment=config.ORACLE_POOL_INCREMENT)
 
 
 def _ensure_table(cur):

@@ -9,6 +9,9 @@ import sqlite3
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from tools import config  # noqa: E402
+
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.rest_emitter import DatahubRestEmitter
 from datahub.metadata.schema_classes import (
@@ -27,7 +30,7 @@ from datahub.metadata.schema_classes import (
 )
 
 BIRD = Path(__file__).parent.parent / "data/bird_dev/dev_20240627/dev_databases"
-GMS = "http://localhost:8080"
+GMS = config.DATAHUB_GMS_URL
 
 TYPE_MAP = {
     "INTEGER": NumberTypeClass, "REAL": NumberTypeClass, "NUMERIC": NumberTypeClass,

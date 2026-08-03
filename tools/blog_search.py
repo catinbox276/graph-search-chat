@@ -7,7 +7,6 @@
 
 에이전트에 함수 툴로 직접 등록해서 쓴다 (MCP 아님 — MCP는 DataHub 공식만 사용).
 """
-import os
 import re
 import threading
 
@@ -15,16 +14,18 @@ import numpy as np
 import oracledb
 from openai import OpenAI
 
-DSN = os.environ.get("ORACLE_DSN", "localhost:1521/FREEPDB1")
-USER = os.environ.get("ORACLE_USER", "system")
-PASSWORD = os.environ.get("ORACLE_PASSWORD", "poc1234")
-from tools.model_registry import get_default
-EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
-RRF_K = 60
+from tools import config
 
-_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN, min=1, max=4)
-_llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"),
-              api_key="lm-studio")
+DSN = config.ORACLE_DSN            # 접속 상수는 관례상 이 모듈에서 import
+USER = config.ORACLE_USER
+PASSWORD = config.ORACLE_PASSWORD
+EMB_MODEL = config.EMBED_MODEL     # .env로 제어 (임베딩 호스트가 단일 모델 서빙)
+RRF_K = config.RRF_K
+
+_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
+                             min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
+                             increment=config.ORACLE_POOL_INCREMENT)
+_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 _matrix, _ids, _lock = None, None, threading.Lock()
 
 
@@ -78,8 +79,8 @@ def search_blog(query: str, limit: int = 5) -> str:
     """
     with _pool.acquire() as con:
         cur = con.cursor()
-        lex = _lexical(cur, query, 30)
-        sem = _semantic(query, 30)
+        lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL)
+        sem = _semantic(query, config.SEARCH_TOP_SEMANTIC)
         scores = {}
         for rank_list in (lex, sem):
             for r, pid in enumerate(rank_list):

@@ -6,7 +6,6 @@
 usage: .venv/bin/python scripts/embed_corpus.py
 """
 import asyncio
-import os
 import json
 import sys
 import time
@@ -18,15 +17,16 @@ from openai import AsyncOpenAI
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
+from tools import config  # noqa: E402
 from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 
 CORPUS = ROOT / "data" / "corpus" / "blog_corpus.jsonl"
-from tools.model_registry import get_default
-EMB_MODEL = get_default("embedding", "text-embedding-qwen3-embedding-0.6b")  # 관리자 선택
-BATCH = 64
-CONCURRENCY = 4  # LM Studio 동시 요청 수
+EMB_MODEL = config.EMBED_MODEL  # .env로 제어
+BATCH = config.EMBED_BATCH
+CONCURRENCY = config.EMBED_CONCURRENCY  # 임베딩 서빙 동시 요청 수
+TEXT_CHARS = config.EMBED_TEXT_CHARS    # 임베딩 대상: 제목 + 본문 앞 N자
 
-llm = AsyncOpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
+llm = AsyncOpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 
 
 async def main():
@@ -44,11 +44,11 @@ async def main():
         order = sorted(
             (json.loads(l) for l in open(CORPUS, encoding="utf-8")),
             key=lambda d: d["score"], reverse=True)
-        todo = [(d["id"], (d["title"] + " " + d["body"][:300])) for d in order
+        todo = [(d["id"], (d["title"] + " " + d["body"][:TEXT_CHARS])) for d in order
                 if d["id"] not in done]
     except FileNotFoundError:
-        cur.execute("""SELECT id, title || ' ' || dbms_lob.substr(body, 300, 1)
-                       FROM blog_posts WHERE embedding IS NULL""")
+        cur.execute("""SELECT id, title || ' ' || dbms_lob.substr(body, :n, 1)
+                       FROM blog_posts WHERE embedding IS NULL""", n=TEXT_CHARS)
         todo = cur.fetchall()
     print(f"임베딩 대상 {len(todo)}건 (완료 {len(done)}건 스킵)", flush=True)
 

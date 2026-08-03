@@ -10,11 +10,16 @@ output: data/corpus/blog_corpus.jsonl
 import html
 import json
 import re
+import sys
 from pathlib import Path
 
-DATA = Path(__file__).parent.parent / "data"
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+from tools import config  # noqa: E402
+
+DATA = ROOT / "data"
 OUT = DATA / "corpus"
-TOP_N = int(__import__("os").environ.get("TOP_N", "0"))  # 0 = 전체(채택답변 전부)
+TOP_N = config.CORPUS_TOP_N  # 0 = 전체(채택답변 전부). .env의 CORPUS_TOP_N(또는 구 TOP_N)
 
 TAG_RE = re.compile(r"<[^>]+>")
 

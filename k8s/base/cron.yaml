@@ -16,11 +16,9 @@ spec:
               image: graph-search-chat:latest
               imagePullPolicy: Never
               command: ["python", "-m", "poc.graph_pipeline"]
-              env:
-                - name: ORACLE_DSN
-                  value: oracle:1521/FREEPDB1
-                - name: MODEL_URL
-                  value: http://host.docker.internal:1234/v1
+              envFrom:
+                - configMapRef:
+                    name: gsc-env
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -39,11 +37,9 @@ spec:
               image: graph-search-chat:latest
               imagePullPolicy: Never
               command: ["python", "scripts/embed_corpus.py"]
-              env:
-                - name: ORACLE_DSN
-                  value: oracle:1521/FREEPDB1
-                - name: MODEL_URL
-                  value: http://host.docker.internal:1234/v1
+              envFrom:
+                - configMapRef:
+                    name: gsc-env
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -62,8 +58,6 @@ spec:
               image: graph-search-chat:latest
               imagePullPolicy: Never
               command: ["python", "-m", "poc.graph_maintenance"]
-              env:
-                - name: ORACLE_DSN
-                  value: oracle:1521/FREEPDB1
-                - name: MODEL_URL
-                  value: http://host.docker.internal:1234/v1
+              envFrom:
+                - configMapRef:
+                    name: gsc-env

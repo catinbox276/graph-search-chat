@@ -4,3 +4,12 @@ kind: Kustomization
 resources:
   - app.yaml
   - cron.yaml
+
+# 앱·CronJob 공통 환경설정 — gsc.env 한 파일에서 ConfigMap 생성 (envFrom으로 주입).
+# 값이 바뀌면 이름 해시가 바뀌어 롤링 재시작까지 자동.
+# gsc.env는 .gitignore 대상(사내 DNS·크리덴셜) — clone 후 반드시:
+#   cp k8s/base/gsc.env.example k8s/base/gsc.env  (그리고 값 채우기)
+configMapGenerator:
+  - name: gsc-env
+    envs:
+      - gsc.env

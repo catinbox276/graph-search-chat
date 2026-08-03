@@ -1,6 +1,75 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # graph-search-chat
 
 사용자(주로 데이터 분석가)의 질문에 에이전트가 두 도구 — **DataHub MCP**(복잡한 데이터 조회·조인·조립)와 **사내 블로그 검색**(문제해결 노하우 글) — 로 답하고, 그 대화 로그에서 온톨로지/지식그래프를 자동 추출·병합해, 신규 사용자에게 검증된 문제 해결 경로를 제안하는 시스템. **PoC 파이프라인 실증 완료** — self-play 47세션으로 추출·병합·가중치·실패 표식 전 순환 동작 확인 (docs/poc-results.md).
+
+## 커맨드
+
+테스트 스위트·린터는 없다 (PoC). 검증은 실행 + Oracle 조회 + `/stats`로 한다. 파이썬은 `.venv/bin/python` 사용.
+
+```bash
+# 앱 서버 (채팅 UI :8500, 그래프 뷰 :8500/graph)
+.venv/bin/uvicorn app.server:app --port 8500
+
+# 에이전트 단발 실행 (서버 없이 CLI로 질문 1건)
+.venv/bin/python agent/agent.py "financial DB에서 계좌 테이블 뭐 있어?"
+
+# self-play 세션 생성 (재실행 시 완료분 스킵하고 이어함)
+.venv/bin/python poc/selfplay.py [--only R1,R2]
+
+# 그래프 파이프라인: sessions → 게이트 판정 → 4계층 추출 → nodes/edges 병합
+.venv/bin/python poc/graph_pipeline.py
+
+# 그래프 유지보수 (멱등): 저빈도 형제 통합 + 오래된 잎 흡수
+.venv/bin/python -m poc.graph_maintenance [--age-days 14]
+
+# 데이터 준비 (1회, 순서대로): 코퍼스 빌드 → Oracle 적재 → 임베딩 백필 → BIRD 적재
+python3 scripts/build_corpus.py && python3 scripts/load_oracle.py \
+  && python3 scripts/embed_corpus.py && python3 scripts/ingest_bird.py
+
+# 배포 (전제: k8s + LM Studio :1234 — 상세 절차는 docs/implementation.md "실행 방법")
+docker build -t graph-search-chat:latest .
+kubectl apply -f k8s/oracle.yaml          # Oracle StatefulSet
+kubectl apply -k k8s/base                 # standalone (복제본 1) + CronJob
+kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤백은 base 재적용
+```
+
+### 환경변수 (`.env` 하나로 제어 — `tools/config.py`가 기동 시 로드)
+
+모든 설정은 프로젝트 루트 `.env`에서 조절한다. `tools/config.py`가 단일 소스이고 각 모듈은 `from tools import config`로 값을 가져온다(하드코딩 금지). `.env`는 gitignore 대상 — 템플릿은 `.env.example`. python-dotenv 미설치 환경에서도 config의 경량 파서가 `.env`를 읽는다. 우선순위: 실제 환경변수 > `.env` > 코드 기본값.
+
+| 변수 | 기본값 | 용도 |
+|---|---|---|
+| `ORACLE_DSN` / `ORACLE_USER` / `ORACLE_PASSWORD` | `localhost:1521/FREEPDB1` / `system` / `poc1234` | Oracle 접속. `DSN`/`USER`/`PASSWORD`는 관례상 `tools/blog_search.py`에서 re-export |
+| `CHAT_URL` / `MODEL_NAME` | `MODEL_URL` 폴백 / `qwen/qwen3.6-35b-a3b` | LLM(채팅) 엔드포인트·served-model-name |
+| `EMBED_URL` / `EMBED_MODEL` | `MODEL_URL` 폴백 / `text-embedding-qwen3-embedding-0.6b` | 임베딩 엔드포인트·모델 (검색·dedup·경로 진입점이 직접 사용) |
+| `RERANK_URL` / `RERANK_MODEL` | `MODEL_URL` 폴백 / (빈값) | 리랭커 (레지스트리 슬롯만 — 리랭크 단계 미구현) |
+| `MODEL_URL` | `http://127.0.0.1:1234/v1` | 단일 서빙 폴백. CHAT/EMBED/RERANK_URL이 비면 여기로(LM Studio 단일 서빙 호환) |
+| `MODEL_API_KEY` | `lm-studio` | OpenAI 호환 키. vLLM에 `--api-key` 미설정 시 더미값이면 됨 |
+| `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
+| `ADMIN_TOKEN` | `poc-admin` | 모델 관리 API (`X-Admin-Token` 헤더) |
+
+사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 전체 재백필 필요(`scripts/embed_corpus.py`).
+
+**튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마(`DATAHUB_TOOLS`·`LAYER_KIND`)와 프롬프트 길이 가드는 옵션이 아니라 코드에 둔다.
+
+**배포(k8s)**: 컨테이너별 env를 나열하지 않고 `k8s/base/gsc.env` 한 파일 → `configMapGenerator`로 ConfigMap 생성 → 앱·CronJob이 `envFrom`으로 주입받는다(클러스터 DNS·사내 모델 값). 로컬 `.env`와는 별개 파일. 값 변경 시 ConfigMap 이름 해시가 바뀌어 롤링 재시작까지 자동.
+
+## 구현 아키텍처 (큰 그림)
+
+상세 지도·테이블·API는 docs/implementation.md. 코드 흐름의 핵심:
+
+- **모놀리스 이미지 1개** — `app/server.py`(FastAPI)가 SSE 스트리밍·세션 기록·그래프 데이터·모델 관리 API를 전부 담당. 기동 시 Oracle에서 임베딩 행렬 1.4GB를 메모리에 로드(`tools/blog_search.load_matrix`). CronJob(파이프라인·유지보수·백필)도 같은 이미지.
+- **에이전트** — `agent/agent.py`가 DeepAgents로 조립. 툴 = `suggest_paths`(새 문제 시 최우선 호출, 시스템 프롬프트로 강제) + `search_blog`/`read_blog_post`(함수 직접 등록) + DataHub 공식 MCP(stdio, 유일한 MCP). 모델별 에이전트 캐시는 server.py의 `_agents`.
+- **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical) top-30 + 인메모리 행렬 코사인(semantic) top-30 → RRF 융합. 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작.
+- **경로 제안** (`tools/path_suggest.py`) — 그래프에서 검증 경로 제안 + 실패 이력 경고. 노출을 `suggestions` 테이블에 기록(채택률 보정용). 성공/실패는 판정 카운트로 관리 (불리언 금지 — PoC에서 실증된 결정).
+- **멀티턴 기억** — `tools/oracle_checkpointer.py` (LangGraph 체크포인터를 Oracle `lg_checkpoints`/`lg_writes`로 외부화). thread_id=세션id. 복제본 공유·재시작 생존이라 cluster 모드에서 세션 고정 불필요.
+- **그래프 파이프라인** (`poc/graph_pipeline.py`) — 세션 게이트(LLM 판정) → 4계층 추출(도메인은 닫힌 목록, 목표·접근법은 LLM, 행동은 tool_calls에서 결정적) → dedup 병합. dedup 임계값: 코사인 ≥0.92 즉시 병합, 0.70~0.92는 LLM 동일 의도 확인 (캘리브레이션 근거는 파일 상단 주석).
+- **Oracle 단일 DB** — 테이블: `blog_posts`(+embedding BLOB), `sessions`, `nodes`/`edges`/`node_evidence`, `suggestions`, `model_registry`, `lg_checkpoints`/`lg_writes`. DSN 등 접속 상수는 `tools/blog_search.py`에서 import하는 게 관례.
+- **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:20 유지보수, 03:30 임베딩 백필.
 
 ## 문서
 - `docs/research.md` — 오픈소스/논문/문제점 조사 (출처 링크 포함)
@@ -16,7 +85,6 @@
 3. **추천 + 자유 이탈** — 경로 제안은 강제 아님. 시스템이 유도한 통행은 가중치 기여 할인(피드백 루프 보정).
 4. **실패 경로는 진입 직전에만 경고, 하드 차단 금지** — 재시도 성공 시 bi-temporal supersession으로 표식 무효화.
 5. **저장소: Oracle 19c 단독** (사내 표준 DB 고정) — nodes/edges 테이블 + 재귀 CTE(≤3 hop) + Oracle Text(한국어). 벡터 검색은 진입점 LLM 분류(닫힌 1~2층)와 애플리케이션 브루트포스 dedup으로 대체. Graphiti는 Oracle 미지원이라 추출 파이프라인 직접 구현. 상세: docs/design.md §5.
-
 6. **책임 경계** — 클러스터된 데이터·메타데이터는 DataHub 공식 MCP로만 접근 (DataHub 내부 저장·인덱싱·스케일링은 우리 관심 밖). 우리가 만들고 운영하는 저장·검색은 Oracle 19c 하나뿐. 별도 검색 엔진(벡터DB 등) 도입 금지.
 
 ## 최우선 위험 (설계 리뷰 시 항상 확인)

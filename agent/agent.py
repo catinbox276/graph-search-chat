@@ -1,13 +1,12 @@
-"""PoC 에이전트 (A) — LangChain DeepAgents + 로컬 모델 서빙(LM Studio).
+"""PoC 에이전트 (A) — LangChain DeepAgents + OpenAI 호환 모델 서빙.
 
-- 모델: http://127.0.0.1:1234 (OpenAI 호환, 기본 qwen3.6-27b-mtp)
+- 모델: .env의 CHAT_URL/MODEL_NAME로 지정 (tools/config.py). 로컬은 LM Studio, 사내는 vLLM
 - 툴 1: 블로그 검색 함수 2개 (Oracle 조회, 함수 직접 등록)
 - 툴 2: DataHub 공식 MCP 서버 (langchain-mcp-adapters로 연결)
 
 usage: .venv/bin/python agent/agent.py "financial DB에서 계좌 테이블 뭐 있어?"
 """
 import asyncio
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -19,12 +18,13 @@ from deepagents import create_deep_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
+from tools import config
 from tools.blog_search import read_blog_post, search_blog
 from tools.path_suggest import suggest_paths
 
-MODEL_URL = os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1")
-MODEL_NAME = os.environ.get("MODEL_NAME", "qwen/qwen3.6-35b-a3b")
-DATAHUB_GMS = os.environ.get("DATAHUB_GMS_URL", "http://localhost:8080")
+MODEL_URL = config.CHAT_URL
+MODEL_NAME = config.CHAT_MODEL
+DATAHUB_GMS = config.DATAHUB_GMS_URL
 
 SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴트다.
 
@@ -58,9 +58,9 @@ async def build_agent(checkpointer=None, model_name=None):
         print(f"[경고] DataHub MCP 연결 실패, 블로그 검색만 사용: {e}", file=sys.stderr)
     model = ChatOpenAI(
         base_url=MODEL_URL,
-        api_key=os.environ.get("MODEL_API_KEY", "lm-studio"),
+        api_key=config.MODEL_API_KEY,
         model=model_name or MODEL_NAME,
-        temperature=0,
+        temperature=config.LLM_TEMPERATURE,
     )
     return create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT,
                              checkpointer=checkpointer)

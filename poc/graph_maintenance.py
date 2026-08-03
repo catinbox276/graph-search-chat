@@ -20,11 +20,12 @@ import numpy as np
 import oracledb
 
 from poc.graph_pipeline import LAYER_KIND, SIM_THRESHOLD, cosine, llm_same
+from tools import config
 from tools.blog_search import DSN, PASSWORD, USER
 
-LOW_COUNT = 2      # 패스1: 이 이하 통행이면 흡수 후보
-ABSORB_COUNT = 1   # 패스2: 이 이하 통행인 잎만 흡수
-MIN_AGE_DAYS = 14  # 패스2: "오래 지나도" 기준
+LOW_COUNT = config.MAINT_LOW_COUNT       # 패스1: 이 이하 통행이면 흡수 후보
+ABSORB_COUNT = config.MAINT_ABSORB_COUNT  # 패스2: 이 이하 통행인 잎만 흡수
+MIN_AGE_DAYS = config.MAINT_MIN_AGE_DAYS  # 패스2: "오래 지나도" 기준 (--age-days로 오버라이드)
 
 
 def evidence_count(cur, nid):

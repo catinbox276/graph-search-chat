@@ -1,19 +1,25 @@
 """blog_corpus.jsonl -> Oracle blog_posts 테이블 + Oracle Text 인덱스.
 
 usage: python3 scripts/load_oracle.py
-전제: docker run gvenzl/oracle-xe (localhost:1521/FREEPDB1, system/poc1234)
+전제: Oracle 기동 + .env의 ORACLE_DSN/USER/PASSWORD (tools/config.py)
 """
 import json
+import re
+import sys
 from pathlib import Path
 
 import oracledb
 
-CORPUS = Path(__file__).parent.parent / "data" / "corpus" / "blog_corpus.jsonl"
-DSN = "localhost:1521/FREEPDB1"
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+from tools import config  # noqa: E402
+
+CORPUS = ROOT / "data" / "corpus" / "blog_corpus.jsonl"
+DSN = config.ORACLE_DSN
 
 
 def main():
-    con = oracledb.connect(user="system", password="poc1234", dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=DSN)
     cur = con.cursor()
 
     cur.execute("""
@@ -46,12 +52,15 @@ def main():
     con.commit()
     print(f"적재: {total}건")
 
-    # Oracle Text: WORLD_LEXER = 한국어/영어 혼합 자동 처리
-    # (사내 19c에서 한국어 정밀도가 필요하면 KOREAN_MORPH_LEXER로 교체)
-    cur.execute("""
+    # Oracle Text 렉서는 .env의 ORACLE_TEXT_LEXER로 제어 (기본 WORLD_LEXER = 한/영 혼합 자동).
+    # 사내 19c 한국어 정밀도가 필요하면 KOREAN_MORPH_LEXER로. 렉서명은 DDL이라 바인드 불가 → 검증 후 삽입.
+    lexer = config.ORACLE_TEXT_LEXER
+    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
+        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r} (영숫자·밑줄만 허용)")
+    cur.execute(f"""
         BEGIN
           BEGIN ctx_ddl.drop_preference('blog_lexer'); EXCEPTION WHEN OTHERS THEN NULL; END;
-          ctx_ddl.create_preference('blog_lexer', 'WORLD_LEXER');
+          ctx_ddl.create_preference('blog_lexer', '{lexer}');
         END;
     """)
     cur.execute("""

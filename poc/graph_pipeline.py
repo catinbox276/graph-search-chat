@@ -11,7 +11,6 @@ design.md §2~§5 구현:
 usage: .venv/bin/python poc/graph_pipeline.py
 """
 import json
-import os
 import re
 import sys
 import uuid
@@ -24,13 +23,16 @@ import oracledb
 import yaml
 from openai import OpenAI
 
+from tools import config
 from tools.blog_search import DSN, PASSWORD, USER
 
-llm = OpenAI(base_url=os.environ.get("MODEL_URL", "http://127.0.0.1:1234/v1"), api_key="lm-studio")
-CHAT_MODEL = "qwen/qwen3.6-35b-a3b"
-EMB_MODEL = "text-embedding-qwen3-embedding-0.6b"
-SIM_HIGH = 0.92       # 이 이상은 명백히 동일 — LLM 확인 생략하고 병합
-SIM_THRESHOLD = 0.70  # 후보 하한 — 이 구간(0.70~0.92)은 LLM이 동일 의도 여부 확인
+# LLM과 임베딩이 별도 호스트라 클라이언트를 2개로 분리 (.env로 제어)
+llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY)
+emb_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
+CHAT_MODEL = config.CHAT_MODEL
+EMB_MODEL = config.EMBED_MODEL
+SIM_HIGH = config.DEDUP_SIM_HIGH       # 이 이상은 명백히 동일 — LLM 확인 생략하고 병합
+SIM_THRESHOLD = config.DEDUP_SIM_THRESHOLD  # 후보 하한 — 이 구간은 LLM이 동일 의도 여부 확인
 # 캘리브레이션: 같은 의도 0.81~0.98, 다른 의도 0.34~0.46. 인접 주제 과병합(도커 사례)이 0.7대에서 발생
 DATAHUB_TOOLS = {"search", "get_entities", "list_schema_fields", "get_lineage",
                  "get_lineage_paths_between", "get_dataset_queries"}
@@ -77,7 +79,7 @@ def ddl(cur):
 
 
 def embed(text: str) -> list:
-    return llm.embeddings.create(model=EMB_MODEL, input=text).data[0].embedding
+    return emb_llm.embeddings.create(model=EMB_MODEL, input=text).data[0].embedding
 
 
 def cosine(a, b):
@@ -93,7 +95,7 @@ LAYER_KIND = {2: "목표(사용자가 이루려는 것)", 3: "접근법(문제�
 def llm_same(kind: str, a: str, b: str) -> bool:
     """2단계 판정: 임베딩 후보를 LLM이 최종 확인 (인접 주제 과병합 차단)."""
     resp = llm.chat.completions.create(
-        model=CHAT_MODEL, temperature=0,
+        model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
         messages=[{"role": "user", "content":
                    f'두 문구가 같은 {kind}를 가리키면 true. '
                    f'주제·도구가 비슷해도 의도가 다르면 false. JSON만 출력: {{"same": true|false}}\n'
@@ -199,7 +201,7 @@ def main():
             question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
             answer=answer[:3000], expect=expect)
         resp = llm.chat.completions.create(
-            model=CHAT_MODEL, temperature=0,
+            model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}])
         text = resp.choices[0].message.content
         m = re.search(r"\{.*\}", text, re.S)
