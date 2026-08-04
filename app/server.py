@@ -285,6 +285,57 @@ def admin_select(inp: SelectIn, x_admin_token: str = Header(default="")):
     return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
 
 
+class DomainIn(BaseModel):
+    name: str
+    tools: str          # 쉼표구분 도구명 — 이 도구를 쓴 세션이 이 도메인으로 분류됨
+    priority: int = 100  # 낮을수록 먼저 대조. 최하순위가 폴백 도메인
+    extract_hint: str = ""  # 도메인별 추출 지침 — 이 도메인 세션의 목표·접근법 추출 프롬프트에 주입
+
+
+@app.get("/admin/domains")
+def admin_domains(x_admin_token: str = Header(default="")):
+    """관리자: 1층 도메인 닫힌 목록 조회 (시드 테이블 domain_registry)."""
+    check_admin(x_admin_token)
+    from poc.graph_pipeline import ensure_domain_registry
+    con = db()
+    cur = con.cursor()
+    ensure_domain_registry(cur)
+    con.commit()
+    cur.execute("""SELECT name, tools, priority, extract_hint
+                   FROM domain_registry ORDER BY priority, name""")
+    rows = [{"name": r[0], "tools": r[1], "priority": r[2], "extract_hint": r[3] or ""}
+            for r in cur.fetchall()]
+    con.close()
+    return {"domains": rows}
+
+
+@app.post("/admin/domains")
+def admin_domain_add(inp: DomainIn, x_admin_token: str = Header(default="")):
+    """관리자: 도메인 추가/수정 — 닫힌 1층 목록의 유일한 확장 통로 (사람 전용).
+
+    다음 파이프라인 실행(야간 03:00 또는 수동)부터 신규 세션 분류에 반영된다.
+    기존 세션 소급 재분류는 하지 않는다(안전 기본값). 삭제 API는 일부러 없음 —
+    도메인 삭제·병합은 기존 노드 재배치가 필요한 신중한 작업이라 SQL로만.
+    """
+    check_admin(x_admin_token)
+    if not inp.name.strip() or not inp.tools.strip():
+        raise HTTPException(400, "name과 tools(쉼표구분)는 필수입니다")
+    from poc.graph_pipeline import ensure_domain_registry
+    con = db()
+    cur = con.cursor()
+    ensure_domain_registry(cur)
+    cur.execute("""MERGE INTO domain_registry d USING dual ON (d.name = :n)
+                   WHEN MATCHED THEN UPDATE SET tools = :t, priority = :p, extract_hint = :h
+                   WHEN NOT MATCHED THEN INSERT (name, tools, priority, extract_hint)
+                   VALUES (:n, :t, :p, :h)""",
+                {"n": inp.name.strip(), "t": inp.tools.strip(), "p": inp.priority,
+                 "h": inp.extract_hint.strip() or None})
+    con.commit()
+    con.close()
+    return {"ok": True, "name": inp.name.strip(),
+            "note": "다음 파이프라인 실행부터 신규 세션 분류에 반영 (소급 재분류 없음)"}
+
+
 @app.get("/stats")
 def stats():
     """헤더 상태칩용 현황."""

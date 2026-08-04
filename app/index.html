@@ -41,6 +41,28 @@
   button#b { padding: 10px 20px; border-radius: 10px; border: 0; background: var(--path);
              color: #fff; font-size: 1rem; cursor: pointer; }
   button#b:disabled { opacity: .5; }
+  /* 관리자 모달 — 셸과 같은 색 문법 */
+  dialog#adminDlg { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+                    width: min(640px, 92vw); }
+  dialog#adminDlg::backdrop { background: #0006; }
+  #adminDlg h3 { margin: 0 0 10px; font-size: 1rem; }
+  #adminDlg h3 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .78rem; }
+  #adminDlg .tok { display: flex; align-items: center; gap: 8px; font-size: .82rem;
+                   color: var(--mut); margin-bottom: 10px; }
+  #adminDlg input { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+                    font-size: .85rem; background: #fff; color: var(--ink); }
+  #dlist { border-collapse: collapse; width: 100%; font-size: .82rem; margin-bottom: 12px; }
+  #dlist th, #dlist td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+  #dlist th { color: var(--mut); font-weight: 600; }
+  #dlist td.tools { font-family: ui-monospace, monospace; font-size: .75rem; word-break: break-all; }
+  #dform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap; }
+  #dform #dname { width: 130px; } #dform #dtools { flex: 1; } #dform #dprio { width: 70px; }
+  #dform #dhint { flex-basis: 100%; }
+  #dform button { padding: 7px 12px; border-radius: 8px; border: 0; background: var(--path);
+                  color: #fff; font-size: .85rem; cursor: pointer; }
+  #dform button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  #adminDlg .hint { font-size: .74rem; color: var(--mut); line-height: 1.5; margin: 10px 0 0; }
+  #adminDlg .hint.err { color: var(--fail); min-height: 1em; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -54,7 +76,29 @@
   <span class="spacer"></span>
   <select id="model" title="답변에 사용할 LLM"></select>
   <button class="ghost" id="newchat" title="기억을 비우고 새 대화 시작">새 대화</button>
+  <button class="ghost" id="admin" title="관리자: 1층 도메인 시드 관리">⚙ 관리</button>
 </header>
+
+<dialog id="adminDlg">
+  <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
+  <label class="tok">관리자 토큰
+    <input id="atk" type="password" placeholder="X-Admin-Token" autocomplete="off">
+  </label>
+  <table id="dlist"><thead><tr><th>도메인</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
+    <tbody></tbody></table>
+  <form id="dform" method="dialog">
+    <input id="dname" placeholder="도메인 이름" required>
+    <input id="dtools" placeholder="도구명 쉼표구분 (예: search_confluence,read_incident)" required>
+    <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
+    <input id="dhint" placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨">
+    <button id="dsave">추가/수정</button>
+    <button type="button" class="ghost" id="dclose">닫기</button>
+  </form>
+  <p class="hint">같은 이름으로 저장하면 수정(upsert). 어떤 도구와도 매칭 안 되는 세션은 최하순위
+     도메인으로 분류됩니다. 변경은 다음 파이프라인 실행(야간 03:00)부터 신규 세션에 반영 —
+     기존 세션 소급 재분류 없음. 삭제는 의도적으로 UI에 없습니다(노드 재배치가 필요한 작업).</p>
+  <p class="hint err" id="derr"></p>
+</dialog>
 
 <main>
   <div id="hello">
@@ -97,6 +141,50 @@ fetch("/stats").then(r => r.json()).then(s => {
     `<span>축적 세션 <b>${s.sessions.toLocaleString()}</b></span>`;
 });
 $("newchat").onclick = () => { sid = null; log.innerHTML = ""; hello.style.display = ""; q.focus(); };
+
+// 관리자: 도메인 시드 관리 (기존 목록 조회 + 추가/수정 — 삭제는 UI에 없음)
+const dlg = $("adminDlg"), atk = $("atk"), derr = $("derr");
+atk.value = localStorage.getItem("admin_token") || "";
+async function loadDomains() {
+  derr.textContent = "";
+  if (!atk.value) { derr.textContent = "관리자 토큰을 입력하세요"; return; }
+  localStorage.setItem("admin_token", atk.value);
+  const r = await fetch("/admin/domains", {headers: {"X-Admin-Token": atk.value}});
+  if (!r.ok) { derr.textContent = `조회 실패 (${r.status}) — 토큰을 확인하세요`; return; }
+  const tb = $("dlist").querySelector("tbody");
+  tb.innerHTML = "";
+  (await r.json()).domains.forEach(d => {
+    const tr = document.createElement("tr");
+    [d.name, d.tools, d.priority, d.extract_hint].forEach(v => {  // textContent — XSS 차단
+      const td = document.createElement("td");
+      td.textContent = v ?? "";
+      tr.appendChild(td);
+    });
+    tr.children[1].className = "tools";
+    tr.onclick = () => {  // 행 클릭 = 폼에 채워 수정
+      $("dname").value = d.name; $("dtools").value = d.tools; $("dprio").value = d.priority;
+      $("dhint").value = d.extract_hint || "";
+    };
+    tb.appendChild(tr);
+  });
+}
+$("admin").onclick = () => { dlg.showModal(); loadDomains(); };
+atk.onchange = loadDomains;
+$("dclose").onclick = () => dlg.close();
+$("dform").onsubmit = async (e) => {
+  e.preventDefault();
+  derr.textContent = "";
+  const r = await fetch("/admin/domains", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-Admin-Token": atk.value},
+    body: JSON.stringify({name: $("dname").value.trim(), tools: $("dtools").value.trim(),
+                          priority: parseInt($("dprio").value) || 100,
+                          extract_hint: $("dhint").value.trim()}),
+  });
+  if (!r.ok) { derr.textContent = `저장 실패 (${r.status})`; return; }
+  $("dname").value = ""; $("dtools").value = ""; $("dprio").value = 100; $("dhint").value = "";
+  loadDomains();
+};
 document.querySelectorAll(".chips button").forEach(c =>
   c.onclick = () => { q.value = c.textContent; f.requestSubmit(); });
 
