@@ -32,6 +32,7 @@ flowchart LR
 | [docs/poc-results.md](docs/poc-results.md) | PoC 실증 결과 — 병합·가중치 검증, 캘리브레이션 수치, 방향 제안 E2E |
 | [docs/research.md](docs/research.md) | 조사 보고 — 기존 오픈소스(Graphiti·cognee·GraphRAG 등) 커버리지, 관련 논문 20여 편, 알려진 문제점 6가지 (전부 출처 링크 포함) |
 | [system-overview.drawio](system-overview.drawio) | 시각 자료 5페이지 — [draw.io](https://app.diagrams.net)에서 열기 |
+| [docs/component-architecture.drawio](docs/component-architecture.drawio) | **컴포넌트별 아키텍처 8페이지** — 에이전트·앱 서버·검색·경로 제안·파이프라인·유지보수·저장소·배포 |
 | [CLAUDE.md](CLAUDE.md) | Claude Code용 프로젝트 컨텍스트 |
 
 ## 조사 핵심 결론

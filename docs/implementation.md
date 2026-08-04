@@ -1,6 +1,7 @@
 # 구현 아키텍처 (PoC 실물)
 
 > 설계 근거는 [design.md](design.md), 실증 수치는 [poc-results.md](poc-results.md).
+> 컴포넌트별 상세 다이어그램: [component-architecture.drawio](component-architecture.drawio) (8페이지 — draw.io에서 열기).
 > 이 문서는 **현재 리포에서 실제로 돌아가는 것**의 지도다. (2026-08-02 기준)
 > **배치 형태: LM Studio(모델 서빙)를 제외한 전부가 k8s 파드** — 앱(Deployment), Oracle(StatefulSet), DataHub(helm), 배치(CronJob).
 
@@ -71,6 +72,7 @@ flowchart LR
 - `POST /chat/stream` — SSE: token(생각·답변 실시간) / tool / tool_end(정리된 응답) / answer
 - `POST /chat` — 비스트리밍 (스크립트용). 둘 다 `model` 필드로 LLM 선택, 멀티턴 기억
 - `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(X-Admin-Token)
+- `GET/POST /admin/domains` — 1층 도메인 닫힌 목록 조회/추가 (`domain_registry` 시드 테이블, 관리자 전용. 삭제 API는 의도적으로 없음)
 - `GET /graph/data` — 노드(사용·성공·실패 카운트)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 
 ## 실행 방법 (전부 파드)

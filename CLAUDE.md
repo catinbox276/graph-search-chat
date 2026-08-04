@@ -54,7 +54,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 
 사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 전체 재백필 필요(`scripts/embed_corpus.py`).
 
-**튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마(`DATAHUB_TOOLS`·`LAYER_KIND`)와 프롬프트 길이 가드는 옵션이 아니라 코드에 둔다.
+**튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 시간 감쇠 `MAINT_DECAY_HALF_LIFE_DAYS`/`MAINT_DECAY_GRACE_DAYS`/`MAINT_DECAY_FLOOR`, 게이트 행동 신호 `SIG_REPEAT_SIM`/`SIG_TOPIC_MOVE_SIM`/`SIG_HASTY_RATIO`/`RECUR_DAYS`(재발 창), 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마 중 **1층 도메인은 Oracle `domain_registry` 테이블**이 닫힌 목록(기본 2종은 코드가 시드, 확장은 관리자 API `GET/POST /admin/domains` — 사람 전용, 소급 재분류 없음). `DATAHUB_TOOLS`(기본 시드 원천)·`LAYER_KIND`와 프롬프트 길이 가드는 코드에 둔다.
 
 **배포(k8s)**: 컨테이너별 env를 나열하지 않고 `k8s/base/gsc.env` 한 파일 → `configMapGenerator`로 ConfigMap 생성 → 앱·CronJob이 `envFrom`으로 주입받는다(클러스터 DNS·사내 모델 값). 로컬 `.env`와는 별개 파일. 값 변경 시 ConfigMap 이름 해시가 바뀌어 롤링 재시작까지 자동.
 
@@ -67,7 +67,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical) top-30 + 인메모리 행렬 코사인(semantic) top-30 → RRF 융합. 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작.
 - **경로 제안** (`tools/path_suggest.py`) — 그래프에서 검증 경로 제안 + 실패 이력 경고. 노출을 `suggestions` 테이블에 기록(채택률 보정용). 성공/실패는 판정 카운트로 관리 (불리언 금지 — PoC에서 실증된 결정).
 - **멀티턴 기억** — `tools/oracle_checkpointer.py` (LangGraph 체크포인터를 Oracle `lg_checkpoints`/`lg_writes`로 외부화). thread_id=세션id. 복제본 공유·재시작 생존이라 cluster 모드에서 세션 고정 불필요.
-- **그래프 파이프라인** (`poc/graph_pipeline.py`) — 세션 게이트(LLM 판정) → 4계층 추출(도메인은 닫힌 목록, 목표·접근법은 LLM, 행동은 tool_calls에서 결정적) → dedup 병합. dedup 임계값: 코사인 ≥0.92 즉시 병합, 0.70~0.92는 LLM 동일 의도 확인 (캘리브레이션 근거는 파일 상단 주석).
+- **그래프 파이프라인** (`poc/graph_pipeline.py`) — 세션 게이트 2갈래(태스크 세션=expect 기준 LLM 판정 / UI 세션=행동 신호 코드 판정 — 후퇴 2개↑ fail, 전진만 있으면 success, 나머지 미판정) → 4계층 추출(도메인은 닫힌 목록, 목표·접근법은 LLM, 행동은 tool_calls에서 결정적) → dedup 병합 → 재발 소급 취소(같은 증상 `RECUR_DAYS` 내 재방문 시 success를 'retracted'로, 기여 가중치 회수). dedup 임계값: 코사인 ≥0.92 즉시 병합, 0.70~0.92는 LLM 동일 의도 확인 (캘리브레이션 근거는 파일 상단 주석). 유지보수(`poc/graph_maintenance.py`)는 형제 통합·잎 흡수에 더해 패스3 시간 감쇠(유휴 3층 접근법 가중치를 반감기 곡선으로 하강, 멱등).
 - **Oracle 단일 DB** — 테이블: `blog_posts`(+embedding BLOB), `sessions`, `nodes`/`edges`/`node_evidence`, `suggestions`, `model_registry`, `lg_checkpoints`/`lg_writes`. DSN 등 접속 상수는 `tools/blog_search.py`에서 import하는 게 관례.
 - **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:20 유지보수, 03:30 임베딩 백필.
 
@@ -78,6 +78,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - `docs/poc-results.md` — PoC 실증 결과 (병합·가중치 검증, 캘리브레이션 수치, 남은 이슈)
 - `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
 - `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
+- `docs/component-architecture.drawio` — 컴포넌트별 아키텍처 8페이지 (에이전트 / 앱 서버 / 검색 / 경로 제안 / 파이프라인 / 유지보수 / 저장소 / 배포)
 
 ## 핵심 설계 결정 (변경 시 docs/design.md도 갱신)
 1. **4계층 스키마, 위는 닫고 아래는 연다** — 1~2층(도메인·목표)은 사람이 고정한 시드 스키마, 3~4층(접근법·행동)은 LLM 자동 확장. 3층 "접근법"이 추천 단위.
