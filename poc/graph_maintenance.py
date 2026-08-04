@@ -5,12 +5,16 @@
     -> 2단계 판정의 과분리를 사후 교정. 가중치·출처는 흡수한 형제로 합산.
 패스 2 (잎 흡수): 생성 후 MIN_AGE_DAYS 지나도 통행<=1인 3층 말단을 부모(목표)로
     흡수 -> 장기 비대화 방지. (접근법이 추천 단위라 신생 노드는 건드리지 않음)
+패스 3 (시간 감쇠): 유예 기간 넘게 통행 없는 3층 접근법의 가중치를 반감기 곡선으로
+    가라앉힘 (삭제 금지 — design §2 운영 규칙 5). 근거: AWM 표11 — 분포가 다른
+    낡은 워크플로우가 새 것을 훼손. 신선도는 원인이 아니라 조치(접근법)에 붙는다.
 
 멱등. 야간 CronJob(03:20) 또는 수동 실행.
 usage: python -m poc.graph_maintenance [--age-days 14]
 """
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -120,6 +124,47 @@ def pass2_leaf_absorb(cur, age_days):
     return absorbed
 
 
+def pass3_decay(cur):
+    """유예(GRACE) 넘게 통행 없는 3층 접근법 엣지의 weight를 반감기 곡선으로 감쇠.
+
+    멱등 보장: 현재 weight에 배수를 곱하지 않는다(반복 실행 시 겹감쇠).
+    대신 raw_count·채택률에서 기준 가중치를 재계산(graph_pipeline.recompute_weights와
+    같은 식)한 뒤 유휴 기간에서 유도한 감쇠 배수를 곱한다 — 몇 번 돌려도 같은 값.
+    마지막 통행 = 그 노드를 증거로 가진 세션의 최신 ts (없으면 노드 생성 시각).
+    """
+    half = config.MAINT_DECAY_HALF_LIFE_DAYS
+    grace = config.MAINT_DECAY_GRACE_DAYS
+    floor = config.MAINT_DECAY_FLOOR
+    now = datetime.now()
+    decayed = 0
+    cur.execute("""SELECT e.src, e.dst, e.raw_count, e.weight, n.name,
+                          NVL((SELECT MAX(s.ts) FROM node_evidence ev
+                               JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
+                               WHERE ev.node_id = n.id), n.valid_from) AS last_use
+                   FROM edges e JOIN nodes n ON n.id = e.dst
+                   WHERE n.layer = 3""")
+    for src, dst, raw, w, name, last in cur.fetchall():
+        idle = (now - last).total_seconds() / 86400 if last else 0.0
+        if idle <= grace:
+            continue
+        cur.execute("""SELECT COUNT(*), SUM(CASE WHEN adopted='Y' THEN 1 ELSE 0 END)
+                       FROM suggestions WHERE node_id = :1 AND adopted IS NOT NULL""",
+                    [dst])
+        e_cnt, a_cnt = cur.fetchone()
+        a_cnt = a_cnt or 0
+        rate = (a_cnt / e_cnt) if e_cnt else 1.0
+        base = max((raw or 0) - a_cnt, 0) + a_cnt * rate  # 노출 대비 채택률 보정 기준치
+        factor = max(floor, 0.5 ** ((idle - grace) / half))
+        new_w = round(base * factor, 2)
+        if abs(new_w - (w or 0)) >= 0.01:
+            cur.execute("UPDATE edges SET weight = :1 WHERE src = :2 AND dst = :3",
+                        [new_w, src, dst])
+            decayed += 1
+            print(f"  [감쇠] '{name[:40]}' 유휴 {idle:.0f}d -> x{factor:.2f} "
+                  f"(w {w} -> {new_w})", flush=True)
+    return decayed
+
+
 def main():
     age = MIN_AGE_DAYS
     if "--age-days" in sys.argv:
@@ -131,9 +176,11 @@ def main():
     print(f"유지보수 시작 (노드 {before})", flush=True)
     m = pass1_sibling_merge(cur)
     a = pass2_leaf_absorb(cur, age)
+    d = pass3_decay(cur)
     con.commit()
     cur.execute("SELECT COUNT(*) FROM nodes")
-    print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d) — 노드 {before} -> {cur.fetchone()[0]}")
+    print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d), 감쇠 {d}건 "
+          f"— 노드 {before} -> {cur.fetchone()[0]}")
     con.close()
 
 

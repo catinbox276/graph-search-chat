@@ -1,7 +1,12 @@
 """그래프 파이프라인 — sessions -> 게이트 판정 -> 4계층 추출 -> nodes/edges 적재.
 
 design.md §2~§5 구현:
-- 세션 게이트: LLM이 tasks.yaml의 expect 기준으로 success/fail/unknown 판정
+- 세션 게이트 (2갈래):
+  · 태스크 세션(selfplay) — LLM이 tasks.yaml의 expect 기준으로 판정
+  · 실사용(UI) 세션 — expect가 없으므로 행동 신호를 코드로 세서 판정 (design §3 보강.
+    판단은 코드, LLM은 목표/접근법 표현 추출만). 감정·말투 분석 금지.
+- 재발 소급 취소: success 세션과 같은 증상이 RECUR_DAYS 안에 다시 오면
+  그 성공 판정을 'retracted'로 바꾸고 기여 가중치 회수 (design §4 역방향 supersession)
 - 4계층: 도메인(닫힌 목록, 툴 사용으로 결정) -> 목표 -> 접근법 (LLM 추출)
           -> 행동(tool_calls에서 결정적으로 생성)
 - dedup: 같은 부모 밑 형제 노드와 임베딩 코사인 >= 0.85면 병합 (브루트포스)
@@ -12,6 +17,7 @@ usage: .venv/bin/python poc/graph_pipeline.py
 """
 import json
 import re
+import statistics
 import sys
 import uuid
 from pathlib import Path
@@ -56,6 +62,28 @@ JUDGE_PROMPT = """세션을 판정하고 지식을 추출하라. JSON만 출력.
   (기준이 '실패 인정'이면 인정했을 때 fail)
 - unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우"""
 
+# UI 세션용: 판정은 행동 신호(코드)가 이미 끝냈고, LLM은 지식 표현만 뽑는다
+EXTRACT_PROMPT = """대화에서 지식을 추출하라. JSON만 출력.
+
+[첫 질문] {question}
+[사용한 도구] {tools}
+[최종 답변] {answer}
+
+출력 형식:
+{{"goal": "사용자 목표 (10단어 이내, 일반화된 표현)",
+  "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')"}}"""
+
+# 정정 언어 — 사용자 턴 앞머리의 부정·정정 표현 (design §3: 사용자 턴만 본다)
+CORRECTION_RE = re.compile(
+    r"^\s*(아니|아뇨|아니요|아닌데)\b|그게 아니라|그거 말고|내가 말한 건|틀렸|잘못 (알|이해|찾)")
+# 구체화 신호용 식별자 — 영문 식별자(테이블·컴포넌트명)나 3자리 이상 숫자(로그ID 등)
+IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{2,}|\d{3,}")
+# 명시적 실패 인정 — 에이전트 최종 답변의 "접근이 막혔음" 표지 (design §3 NG 분기).
+# 사용자 감정 분석이 아니라 결정적 텍스트 표지 — 조용한 종료의 오탐(포기=성공)을 막는다.
+FAIL_ADMIT_RE = re.compile(
+    r"찾지 못했|찾을 수 없|존재하지 않|조회(가|할 수) 불가능|접근 권한이 없|"
+    r"데이터가 없|해당하는 (글|문서|데이터셋?)[이가] 없")
+
 
 def ddl(cur):
     for stmt in (
@@ -76,6 +104,67 @@ def ddl(cur):
                     [table.upper()])
         if not cur.fetchone()[0]:
             cur.execute(stmt)
+    # 구버전 sessions 테이블에 ts가 없으면 추가 (신호 계산·재발 판정에 필요)
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SESSIONS' AND column_name = 'TS'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE sessions ADD (ts TIMESTAMP DEFAULT SYSTIMESTAMP)")
+    ensure_domain_registry(cur)
+
+
+# 기본 도메인 시드: (이름, 도구 csv, 우선순위, 추출 지침)
+# 추출 지침은 이 도메인으로 분류된 세션의 목표·접근법 추출 프롬프트에 그대로 주입된다.
+SEED_DOMAINS = (
+    ("데이터 조회", None, 1,  # tools=None → DATAHUB_TOOLS에서 채움
+     "목표는 데이터 탐색 의도(무엇을 찾고/조인하고/추적하려 했나)로, "
+     "접근법은 도구+방법(테이블 탐색, 스키마 확인, 조인 키, 리니지)으로 일반화하라"),
+    ("사내 노하우", "search_blog,read_blog_post", 2,
+     "목표는 해결하려던 문제 증상으로, 접근법은 검색으로 찾은 해법의 핵심 조치로 일반화하라"),
+)
+
+
+def ensure_domain_registry(cur):
+    """1층 도메인의 닫힌 목록 저장소 — 없으면 만들고 기본 2종을 시드.
+
+    확장은 사람만 한다(관리자 API /admin/domains 또는 SQL). LLM에게 쓰기 경로 없음.
+    design §2 결정 1(위는 닫고 아래는 연다)의 '닫힌 목록'이 코드 하드코딩에서
+    이 테이블로 옮겨진 것 — 도메인 추가에 재배포가 필요 없어진다.
+    extract_hint = 도메인별 추출 지침. 분류(도구 대조)는 코드가, 표현(목표·접근법을
+    어떻게 일반화할지)은 이 지침이 프롬프트에 실려 LLM에 전달된다.
+    """
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOMAIN_REGISTRY'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE domain_registry (
+            name         VARCHAR2(100) PRIMARY KEY,
+            tools        VARCHAR2(2000),           -- 쉼표구분 도구명: 이 도구를 쓰면 이 도메인
+            priority     NUMBER DEFAULT 100,       -- 낮을수록 먼저 대조. 최하순위가 폴백
+            extract_hint VARCHAR2(2000),           -- 도메인별 추출 지침 (프롬프트 주입)
+            created      TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+        for name, tools, prio, hint in SEED_DOMAINS:
+            cur.execute("INSERT INTO domain_registry (name, tools, priority, extract_hint) "
+                        "VALUES (:1, :2, :3, :4)",
+                        [name, tools or ",".join(sorted(DATAHUB_TOOLS)), prio, hint])
+        return
+    # 기존 테이블에 extract_hint가 없으면 추가하고 기본 시드 지침을 백필
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'DOMAIN_REGISTRY' AND column_name = 'EXTRACT_HINT'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE domain_registry ADD (extract_hint VARCHAR2(2000))")
+        for name, _tools, _prio, hint in SEED_DOMAINS:
+            cur.execute("UPDATE domain_registry SET extract_hint = :1 "
+                        "WHERE name = :2 AND extract_hint IS NULL", [hint, name])
+
+
+def classify_domain(cur, tool_names):
+    """닫힌 1층 분류 — LLM이 아니라 도구 사용으로 결정적으로. priority 순 첫 매칭,
+    매칭 없으면 최하순위 도메인(범용 폴백). 반환: (도메인명, 추출 지침)."""
+    cur.execute("""SELECT name, tools, extract_hint FROM domain_registry
+                   ORDER BY priority, name""")
+    rows = cur.fetchall()
+    for name, tools, hint in rows:
+        if tool_names & {t.strip() for t in (tools or "").split(",") if t.strip()}:
+            return name, (hint or "")
+    return (rows[-1][0], rows[-1][2] or "") if rows else ("사내 노하우", "")
 
 
 def embed(text: str) -> list:
@@ -105,6 +194,18 @@ def llm_same(kind: str, a: str, b: str) -> bool:
         return bool(json.loads(m.group()).get("same")) if m else False
     except json.JSONDecodeError:
         return False
+
+
+def _llm_json(prompt: str) -> dict:
+    """LLM 호출 후 응답에서 JSON 오브젝트 1개를 파싱 (실패 시 빈 dict)."""
+    resp = llm.chat.completions.create(
+        model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
+        messages=[{"role": "user", "content": prompt}])
+    m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
+    try:
+        return json.loads(m.group()) if m else {}
+    except json.JSONDecodeError:
+        return {}
 
 
 def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
@@ -183,6 +284,124 @@ def expects():
     return out
 
 
+def _read(v):
+    return v.read() if hasattr(v, "read") else (v or "")
+
+
+def session_turns(cur, sid):
+    """세션의 전 턴을 시간순으로 — 신호 계산과 다턴 집계용."""
+    cur.execute("""SELECT turn, ts, question, tool_calls, answer FROM sessions
+                   WHERE id = :1 ORDER BY turn""", [sid])
+    return [{"turn": t, "ts": ts, "q": _read(q),
+             "calls": json.loads(_read(c) or "[]"), "a": _read(a)}
+            for t, ts, q, c, a in cur.fetchall()]
+
+
+def judge_by_signals(turns):
+    """실사용(UI) 세션 판정 — 감정·말투가 아니라 행동 신호를 코드로 센다 (design §3 보강).
+
+    후퇴 2개 이상 -> fail / 전진 있고 후퇴 없음 -> success / 나머지 -> unknown(미판정 유지).
+    '이탈'(답변 후 무응답 종료)은 배치 시점엔 모든 세션이 그렇게 보여 신호로 쓰지 않는다.
+    재발(N일 내 같은 증상 재방문)은 즉시 신호가 아니라 retract_recurrences()의
+    소급 취소로 처리한다 — "조용한 종료"를 지금 success로 주고 재발이 나중에 교정.
+    """
+    qs = [t["q"] for t in turns]
+    retreat, forward = [], []
+    # 명시적 실패 인정 — 에이전트가 최종 답변에서 접근 불가를 인정하면 즉시 fail
+    # (design §3 NG 분기: 데이터/글이 존재하지 않아 목표 달성 불가 + 답변이 인정)
+    if turns and FAIL_ADMIT_RE.search(turns[-1]["a"]):
+        return "fail", "명시적 실패 인정"
+    # 후퇴: 정정 언어 (2턴째부터 — 첫 질문의 "아니"는 정정이 아님)
+    if any(CORRECTION_RE.search(q) for q in qs[1:]):
+        retreat.append("정정 언어")
+    # 후퇴: 문서 재방문 — 같은 글을 다른 턴에서 다시 읽음
+    seen = {}
+    for t in turns:
+        for c in t["calls"]:
+            if c.get("name") == "read_blog_post":
+                pid = json.dumps(c.get("args", {}), sort_keys=True, ensure_ascii=False)
+                seen.setdefault(pid, set()).add(t["turn"])
+    if any(len(v) > 1 for v in seen.values()):
+        retreat.append("문서 재방문")
+    # 후퇴: 조급함 — 턴 간격이 중앙값 대비 급감
+    ts = [t["ts"] for t in turns if t["ts"]]
+    gaps = [(b - a).total_seconds() for a, b in zip(ts, ts[1:])]
+    if len(gaps) >= 2 and gaps[-1] < statistics.median(gaps) * config.SIG_HASTY_RATIO:
+        retreat.append("조급함")
+    # 재질문(후퇴) vs 화제 전진(전진) — 질문 임베딩, 2턴 이상일 때만 계산
+    if len(qs) >= 2:
+        vecs = [embed(q[:500]) for q in qs]
+        adj = [cosine(a, b) for a, b in zip(vecs, vecs[1:])]
+        if max(adj) >= config.SIG_REPEAT_SIM:
+            retreat.append("재질문")
+        elif cosine(vecs[0], vecs[-1]) < config.SIG_TOPIC_MOVE_SIM:
+            forward.append("화제 전진")  # 멀어지고 되돌아오지 않음 (재질문 없음이 전제)
+        # 전진: 구체화 — 증상 서술에서 컴포넌트명·식별자로 좁혀 들어감
+        if len(IDENT_RE.findall(qs[-1])) > len(IDENT_RE.findall(qs[0])):
+            forward.append("구체화")
+    # 전진: 조용한 종료 — 정정 없이, 도구 근거가 있는 답으로 끝남
+    if not retreat and any(t["calls"] for t in turns) \
+            and not turns[-1]["a"].startswith("[에이전트 오류]"):
+        forward.append("조용한 종료")
+    if len(retreat) >= 2:
+        return "fail", ", ".join(retreat)
+    if forward and not retreat:
+        return "success", ", ".join(forward)
+    return "unknown", ", ".join(retreat + forward)
+
+
+def retract_recurrences(cur, task_ids):
+    """재발 = 지연 판정기 (design §3·§4 역방향 supersession).
+
+    success로 판정된 UI 세션과 첫 질문이 유사한(코사인 >= SIG_REPEAT_SIM) UI 세션이
+    RECUR_DAYS 안에 다시 시작되면 — 그때의 해결은 사실이 아니었으므로 — 앞선 판정을
+    'retracted'로 소급 취소하고 그 세션이 올린 엣지 가중치·통행을 1씩 회수한다.
+    노드·증거는 보존 (성공/실패는 불리언이 아니라 판정 카운트 — 'retracted'는
+    path_suggest의 success 집계에서 자연히 빠진다).
+    태스크 세션(selfplay)은 제외 — 반복 태스크는 의도된 재실행이지 재발이 아니다.
+    PoC 한계: 사용자 식별이 없어 전 세션을 같은 사용자로 근사한다.
+    """
+    cur.execute("SELECT id, ts, question, verdict FROM sessions WHERE turn = 1 ORDER BY ts")
+    sess = [(sid, ts, _read(q), v) for sid, ts, q, v in cur.fetchall()
+            if sid.split("-")[0] not in task_ids and ts is not None]
+    vec_cache = {}
+
+    def qvec(sid, q):
+        if sid not in vec_cache:
+            vec_cache[sid] = embed(q[:500])
+        return vec_cache[sid]
+
+    retracted = 0
+    for i, (sid, ts0, q, v) in enumerate(sess):
+        if v != "success":
+            continue
+        for sid2, ts2, q2, _v2 in sess[i + 1:]:
+            if (ts2 - ts0).total_seconds() / 86400 > config.RECUR_DAYS:
+                break
+            if cosine(qvec(sid, q), qvec(sid2, q2)) < config.SIG_REPEAT_SIM:
+                continue
+            cur.execute("SELECT node_id FROM node_evidence WHERE session_id = :1", [sid])
+            nids = [r[0] for r in cur.fetchall()]
+            for j in range(0, len(nids), 100):
+                chunk = nids[j:j + 100]
+                src_marks = ",".join(f":s{k}" for k in range(len(chunk)))
+                dst_marks = ",".join(f":d{k}" for k in range(len(chunk)))
+                binds = {f"s{k}": v for k, v in enumerate(chunk)}
+                binds.update({f"d{k}": v for k, v in enumerate(chunk)})
+                cur.execute(  # 이 세션이 +1씩 올렸던 경로 엣지에서 기여 회수
+                    f"""UPDATE edges SET raw_count = GREATEST(raw_count - 1, 0),
+                                         weight = GREATEST(weight - 1, 0)
+                        WHERE src IN ({src_marks}) AND dst IN ({dst_marks})""",
+                    binds)
+            cur.execute("UPDATE sessions SET verdict = 'retracted' "
+                        "WHERE id = :1 AND turn = 1", [sid])
+            retracted += 1
+            print(f"  [재발 소급취소] {sid} <- {sid2} "
+                  f"({(ts2 - ts0).total_seconds() / 86400:.1f}일 뒤 같은 증상)", flush=True)
+            break
+    return retracted
+
+
 def main():
     exp = expects()
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
@@ -195,29 +414,41 @@ def main():
     for n, (sid, q, calls_json, answer) in enumerate(rows, 1):
         calls = json.loads(calls_json or "[]")
         task_id = sid.split("-")[0]
-        expect = exp.get(task_id,  # 실사용(UI) 세션은 일반 기준으로 판정
-                         "사용자의 질문이 근거(데이터/문서)와 함께 실질적으로 해결되었는가")
-        prompt = JUDGE_PROMPT.format(
-            question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
-            answer=answer[:3000], expect=expect)
-        resp = llm.chat.completions.create(
-            model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
-            messages=[{"role": "user", "content": prompt}])
-        text = resp.choices[0].message.content
-        m = re.search(r"\{.*\}", text, re.S)
-        try:
-            j = json.loads(m.group()) if m else {}
-        except json.JSONDecodeError:
+        sig_detail = ""
+        if task_id in exp:
+            # 태스크 세션(selfplay) — expect 기준 LLM 판정 (기존 흐름)
+            tool_names = {c["name"] for c in calls}
+            domain, hint = classify_domain(cur, tool_names)
+            prompt = JUDGE_PROMPT.format(
+                question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
+                answer=answer[:3000], expect=exp[task_id])
+            if hint:
+                prompt += f"\n\n[도메인 추출 지침 — {domain}] {hint}"
+            j = _llm_json(prompt)
+            verdict = j.get("verdict", "unknown")
+            if verdict not in ("success", "fail"):
+                verdict = "unknown"
+        else:
+            # 실사용(UI) 세션 — 판단은 코드(행동 신호), LLM은 표현 추출만 (design §3 보강)
+            turns = session_turns(cur, sid)
+            verdict, sig_detail = judge_by_signals(turns)
+            calls = [c for t in turns for c in t["calls"]]  # 4층 추출에 전 턴 반영
+            tool_names = {c["name"] for c in calls}
+            domain, hint = classify_domain(cur, tool_names)
             j = {}
-        verdict = j.get("verdict", "unknown")
-        if verdict not in ("success", "fail"):
-            verdict = "unknown"
+            if verdict != "unknown":
+                prompt = EXTRACT_PROMPT.format(
+                    question=q[:2000],
+                    tools=json.dumps(calls, ensure_ascii=False)[:2000],
+                    answer=(turns[-1]["a"] if turns else answer)[:3000])
+                if hint:
+                    prompt += f"\n\n[도메인 추출 지침 — {domain}] {hint}"
+                j = _llm_json(prompt)
+                if verdict == "fail":
+                    j["fail_reason"] = f"행동 신호: {sig_detail}"
         cur.execute("UPDATE sessions SET verdict = :1 WHERE id = :2 AND turn = 1",
                     [verdict, sid])
         if verdict != "unknown" and j.get("goal") and j.get("approach"):
-            tool_names = {c["name"] for c in calls}
-            domain = ("데이터 조회" if tool_names & DATAHUB_TOOLS
-                      else "사내 노하우")  # 닫힌 1층: 도구 사용으로 결정적 분류
             d = get_or_create(cur, 1, domain, None, sid, use_embedding=False)
             g = get_or_create(cur, 2, j["goal"], d, sid)
             a = get_or_create(cur, 3, j["approach"], g, sid)
@@ -233,8 +464,12 @@ def main():
                  THEN 'Y' ELSE 'N' END
             WHERE s.session_id = :sid AND s.adopted IS NULL""", {"sid": sid})
         con.commit()
-        print(f"[{n}/{len(rows)}] {sid} -> {verdict}", flush=True)
+        tag = f" ({sig_detail})" if sig_detail else ""
+        print(f"[{n}/{len(rows)}] {sid} -> {verdict}{tag}", flush=True)
 
+    r = retract_recurrences(cur, set(exp))  # 재발 = 지연 판정기 (소급 취소)
+    if r:
+        print(f"재발 소급 취소: {r}건", flush=True)
     recompute_weights(cur)
     con.commit()
 

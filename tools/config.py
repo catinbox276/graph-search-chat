@@ -94,6 +94,18 @@ MAINT_LOW_COUNT = _geti("MAINT_LOW_COUNT", 2)      # 패스1: 이 이하 통행�
 MAINT_ABSORB_COUNT = _geti("MAINT_ABSORB_COUNT", 1)  # 패스2: 이 이하 통행 잎만 흡수
 MAINT_MIN_AGE_DAYS = _geti("MAINT_MIN_AGE_DAYS", 14)  # 패스2 기준(--age-days로 오버라이드)
 
+# --- 시간 감쇠 (poc/graph_maintenance.py 패스3) — design §2 운영 규칙 5 ---
+# 낡은 접근법은 지우지 않고 가라앉힌다. 신선도는 조치(3층 접근법)에 붙는다.
+MAINT_DECAY_HALF_LIFE_DAYS = _getf("MAINT_DECAY_HALF_LIFE_DAYS", 90.0)  # 반감기
+MAINT_DECAY_GRACE_DAYS = _getf("MAINT_DECAY_GRACE_DAYS", 30.0)  # 이 유휴 기간까진 감쇠 없음
+MAINT_DECAY_FLOOR = _getf("MAINT_DECAY_FLOOR", 0.1)  # 감쇠 하한 배수 (0이면 사실상 삭제라 금지)
+
+# --- 실서비스 게이트 행동 신호 (poc/graph_pipeline.py) — design §3 보강 ---
+SIG_REPEAT_SIM = _getf("SIG_REPEAT_SIM", 0.85)      # 재질문·재발 판정 질문 유사도
+SIG_TOPIC_MOVE_SIM = _getf("SIG_TOPIC_MOVE_SIM", 0.50)  # 이보다 멀어지면 화제 전진
+SIG_HASTY_RATIO = _getf("SIG_HASTY_RATIO", 0.3)     # 턴 간격이 중앙값의 이 배수 미만이면 조급함
+RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) — design §7 미해결 값의 초기치
+
 # --- 임베딩 백필 (scripts/embed_corpus.py) ---
 EMBED_BATCH = _geti("EMBED_BATCH", 64)
 EMBED_CONCURRENCY = _geti("EMBED_CONCURRENCY", 4)  # 임베딩 서빙 동시 요청 수
