@@ -92,13 +92,16 @@ def main():
     for source_name, domain, hint in sources:
         if budget <= 0:
             break
-        cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '),
-                              dbms_lob.substr(body, 3000, 1)
+        cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
                        FROM corpus_docs
                        WHERE source_name = :1 AND graph_status IS NULL
                        ORDER BY src_id
                        FETCH FIRST :2 ROWS ONLY""", [source_name, budget])
-        docs = cur.fetchall()
+        # CLOB은 fetch 직후 바로 읽는다 — SQL dbms_lob.substr는 한글에서 VARCHAR2
+        # 4000바이트 한계로 ORA-06502가 나고, 로케이터를 커밋 뒤까지 들고 있지 않기 위해
+        docs = [(r[0], r[1], r[2],
+                 r[3].read() if hasattr(r[3], "read") else (r[3] or ""))
+                for r in cur.fetchall()]
         if not docs:
             continue
         print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작", flush=True)
