@@ -75,11 +75,13 @@ def main():
     doc_ddl(cur)
     con.commit()
 
-    # 도메인이 지정된 소스만 대상 (미지정 = 검색 전용, 그래프화 안 함)
+    # 도메인이 지정된 소스만 대상 (미지정 = 검색 전용, 그래프화 안 함).
+    # 대화 전용(scope=chat) 도메인은 제외 — 등록 API가 막지만 SQL 직접 수정 대비 2차 방어.
     cur.execute("""SELECT s.source_name, s.domain, NVL(d.extract_hint, ' ')
                    FROM source_registry s
                    JOIN domain_registry d ON d.name = s.domain
-                   WHERE s.enabled = 'Y' AND s.domain IS NOT NULL""")
+                   WHERE s.enabled = 'Y' AND s.domain IS NOT NULL
+                     AND NVL(d.scope, 'both') != 'chat'""")
     sources = cur.fetchall()
     if not sources:
         print("그래프 구조화 대상 소스 없음 (소스 관리에서 도메인을 지정하면 대상이 됨)")

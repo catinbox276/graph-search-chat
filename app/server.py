@@ -353,9 +353,10 @@ def admin_select(inp: SelectIn, request: Request,
 
 class DomainIn(BaseModel):
     name: str
-    tools: str          # 쉼표구분 도구명 — 이 도구를 쓴 세션이 이 도메인으로 분류됨
+    tools: str = ""     # 쉼표구분 도구명 — 이 도구를 쓴 세션이 이 도메인으로 분류됨 (scope=doc이면 불필요)
     priority: int = 100  # 낮을수록 먼저 대조. 최하순위가 폴백 도메인
-    extract_hint: str = ""  # 도메인별 추출 지침 — 이 도메인 세션의 목표·접근법 추출 프롬프트에 주입
+    extract_hint: str = ""  # 도메인별 추출 지침 — 목표·접근법 추출 프롬프트에 주입 (대화·문서 공통)
+    scope: str = "both"  # 사용 목적: both(대화+문서) | chat(대화 전용) | doc(문서 전용)
 
 
 @app.get("/admin/domains")
@@ -367,9 +368,10 @@ def admin_domains(request: Request, x_admin_token: str = Header(default="")):
     cur = con.cursor()
     ensure_domain_registry(cur)
     con.commit()
-    cur.execute("""SELECT name, tools, priority, extract_hint
+    cur.execute("""SELECT name, tools, priority, extract_hint, NVL(scope, 'both')
                    FROM domain_registry ORDER BY priority, name""")
-    rows = [{"name": r[0], "tools": r[1], "priority": r[2], "extract_hint": r[3] or ""}
+    rows = [{"name": r[0], "tools": r[1] or "", "priority": r[2],
+             "extract_hint": r[3] or "", "scope": r[4]}
             for r in cur.fetchall()]
     con.close()
     return {"domains": rows}
@@ -380,27 +382,37 @@ def admin_domain_add(inp: DomainIn, request: Request,
                      x_admin_token: str = Header(default="")):
     """관리자: 도메인 추가/수정 — 닫힌 1층 목록의 유일한 확장 통로 (사람 전용).
 
-    다음 파이프라인 실행(야간 03:00 또는 수동)부터 신규 세션 분류에 반영된다.
-    기존 세션 소급 재분류는 하지 않는다(안전 기본값). 삭제 API는 일부러 없음 —
-    도메인 삭제·병합은 기존 노드 재배치가 필요한 신중한 작업이라 SQL로만.
+    등록 때 사용 목적(scope)을 명시 선택한다: both(대화+문서)/chat(대화 전용)/
+    doc(문서 전용). doc 도메인은 대화 분류·폴백에 안 끼고 소스(📚) 지정으로만 쓴다.
+    다음 파이프라인 실행(야간)부터 반영되고, 기존 세션 소급 재분류는 하지 않는다
+    (안전 기본값). 삭제 API는 일부러 없음 — 도메인 삭제·병합은 기존 노드 재배치가
+    필요한 신중한 작업이라 SQL로만.
     """
     check_admin(request, x_admin_token)
-    if not inp.name.strip() or not inp.tools.strip():
-        raise HTTPException(400, "name과 tools(쉼표구분)는 필수입니다")
+    if not inp.name.strip():
+        raise HTTPException(400, "name은 필수입니다")
+    scope = inp.scope.strip().lower() or "both"
+    if scope not in ("both", "chat", "doc"):
+        raise HTTPException(400, "scope는 both/chat/doc 중 하나입니다")
+    if scope != "doc" and not inp.tools.strip():
+        raise HTTPException(400, "대화 분류에 쓰는 도메인(both/chat)은 tools(쉼표구분)가 필요합니다")
     from poc.graph_pipeline import ensure_domain_registry
     con = db()
     cur = con.cursor()
     ensure_domain_registry(cur)
     cur.execute("""MERGE INTO domain_registry d USING dual ON (d.name = :n)
-                   WHEN MATCHED THEN UPDATE SET tools = :t, priority = :p, extract_hint = :h
-                   WHEN NOT MATCHED THEN INSERT (name, tools, priority, extract_hint)
-                   VALUES (:n, :t, :p, :h)""",
-                {"n": inp.name.strip(), "t": inp.tools.strip(), "p": inp.priority,
-                 "h": inp.extract_hint.strip() or None})
+                   WHEN MATCHED THEN UPDATE SET tools = :t, priority = :p,
+                        extract_hint = :h, scope = :s
+                   WHEN NOT MATCHED THEN INSERT (name, tools, priority, extract_hint, scope)
+                   VALUES (:n, :t, :p, :h, :s)""",
+                {"n": inp.name.strip(), "t": inp.tools.strip() or None, "p": inp.priority,
+                 "h": inp.extract_hint.strip() or None, "s": scope})
     con.commit()
     con.close()
-    return {"ok": True, "name": inp.name.strip(),
-            "note": "다음 파이프라인 실행부터 신규 세션 분류에 반영 (소급 재분류 없음)"}
+    note = {"doc": "문서 전용 — 소스(📚)에 지정하면 문서 구조화에 사용 (대화 분류엔 안 낌)",
+            "chat": "대화 전용 — 다음 파이프라인 실행부터 신규 세션 분류에 반영",
+            "both": "대화+문서 — 세션 분류와 소스 문서 구조화 양쪽에 사용"}[scope]
+    return {"ok": True, "name": inp.name.strip(), "scope": scope, "note": note}
 
 
 class SourceIn(BaseModel):
@@ -448,13 +460,19 @@ def admin_source_add(inp: SourceIn, request: Request,
         con.close()
         raise HTTPException(400, err)
     domain = inp.domain.strip()
-    if domain:  # 지정 시 닫힌 도메인 목록에 실존해야 함
+    if domain:  # 지정 시 닫힌 도메인 목록에 실존 + 문서 용도(both/doc)여야 함
         from poc.graph_pipeline import ensure_domain_registry
         ensure_domain_registry(cur)
-        cur.execute("SELECT COUNT(*) FROM domain_registry WHERE name = :1", [domain])
-        if not cur.fetchone()[0]:
+        cur.execute("SELECT NVL(scope, 'both') FROM domain_registry WHERE name = :1",
+                    [domain])
+        r = cur.fetchone()
+        if not r:
             con.close()
             raise HTTPException(400, f"등록되지 않은 도메인: {domain} (⚙ 관리에서 먼저 추가)")
+        if r[0] == "chat":
+            con.close()
+            raise HTTPException(400, f"도메인 '{domain}'은 대화 전용입니다 — "
+                                     "문서 구조화에 쓰려면 용도를 '대화+문서'나 '문서 전용'으로")
     source_registry.upsert(cur, inp.source_name.strip(), inp.table_name.strip(),
                            inp.id_column.strip(), inp.ts_column.strip(),
                            inp.field_map, inp.content_kind.strip(), inp.enabled,

@@ -144,6 +144,7 @@ def ensure_domain_registry(cur):
             tools        VARCHAR2(2000),           -- 쉼표구분 도구명: 이 도구를 쓰면 이 도메인
             priority     NUMBER DEFAULT 100,       -- 낮을수록 먼저 대조. 최하순위가 폴백
             extract_hint VARCHAR2(2000),           -- 도메인별 추출 지침 (프롬프트 주입)
+            scope        VARCHAR2(10) DEFAULT 'both',  -- 사용 목적: both|chat(대화 전용)|doc(문서 전용)
             created      TIMESTAMP DEFAULT SYSTIMESTAMP)""")
         for name, tools, prio, hint in SEED_DOMAINS:
             cur.execute("INSERT INTO domain_registry (name, tools, priority, extract_hint) "
@@ -158,16 +159,26 @@ def ensure_domain_registry(cur):
         for name, _tools, _prio, hint in SEED_DOMAINS:
             cur.execute("UPDATE domain_registry SET extract_hint = :1 "
                         "WHERE name = :2 AND extract_hint IS NULL", [hint, name])
+    # 사용 목적(scope) 컬럼 — 등록 때 대화/문서/둘 다를 명시 선택 (기존 행은 both)
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'DOMAIN_REGISTRY' AND column_name = 'SCOPE'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE domain_registry ADD (scope VARCHAR2(10) DEFAULT 'both')")
+        cur.execute("UPDATE domain_registry SET scope = 'both' WHERE scope IS NULL")
 
 
 def classify_domain(cur, tool_names):
     """닫힌 1층 분류 — LLM이 아니라 도구 사용으로 결정적으로. priority 순 첫 매칭,
-    매칭 없으면 최하순위 도메인(범용 폴백). 반환: (도메인명, 추출 지침)."""
+    매칭 없으면 최하순위 도메인(범용 폴백). 반환: (도메인명, 추출 지침).
+
+    사용 목적(scope)이 doc(문서 전용)인 도메인은 대화 분류·폴백에서 제외 —
+    소스 구조화용 도메인이 최하순위 폴백이 되어 대화를 먹는 사고 방지.
+    """
     cur.execute("""SELECT name, tools, extract_hint FROM domain_registry
-                   ORDER BY priority, name""")
-    rows = cur.fetchall()
+                   WHERE NVL(scope, 'both') != 'doc' ORDER BY priority, name""")
+    rows = [(n, t, h) for n, t, h in cur.fetchall() if (t or "").strip()]
     for name, tools, hint in rows:
-        if tool_names & {t.strip() for t in (tools or "").split(",") if t.strip()}:
+        if tool_names & {t.strip() for t in tools.split(",") if t.strip()}:
             return name, (hint or "")
     return (rows[-1][0], rows[-1][2] or "") if rows else ("사내 노하우", "")
 

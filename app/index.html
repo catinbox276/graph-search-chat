@@ -133,19 +133,26 @@
   <label class="tok">관리자 토큰
     <input id="atk" type="password" placeholder="X-Admin-Token — SSO 관리자로 로그인했다면 비워두세요" autocomplete="off">
   </label>
-  <table id="dlist"><thead><tr><th>도메인</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
+  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
     <tbody></tbody></table>
   <form id="dform" method="dialog">
     <input id="dname" placeholder="도메인 이름" required>
-    <input id="dtools" placeholder="도구명 쉼표구분 (예: search_confluence,read_incident)" required>
+    <select id="dscope" title="이 도메인을 어디에 쓸지 — 문서 전용은 대화 분류·폴백에 끼지 않음">
+      <option value="both">대화+문서</option>
+      <option value="chat">대화 전용</option>
+      <option value="doc">문서 전용</option>
+    </select>
+    <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
     <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
     <input id="dhint" placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨">
     <button id="dsave">추가/수정</button>
     <button type="button" class="ghost" id="dclose">닫기</button>
   </form>
-  <p class="hint">같은 이름으로 저장하면 수정(upsert). 어떤 도구와도 매칭 안 되는 세션은 최하순위
-     도메인으로 분류됩니다. 변경은 다음 파이프라인 실행(야간 03:00)부터 신규 세션에 반영 —
-     기존 세션 소급 재분류 없음. 삭제는 의도적으로 UI에 없습니다(노드 재배치가 필요한 작업).</p>
+  <p class="hint">같은 이름으로 저장하면 수정(upsert). <b>용도</b>를 등록 때 선택합니다 —
+     <b>문서 전용</b>은 대화 분류·폴백에 끼지 않고 소스(📚)에 지정해 문서 구조화에만,
+     <b>대화 전용</b>은 세션 분류에만, <b>대화+문서</b>는 양쪽에 쓰입니다. 대화 용도 도메인 중
+     어떤 도구와도 매칭 안 되는 세션은 그중 최하순위 도메인으로 분류됩니다. 변경은 다음 파이프라인
+     실행(야간)부터 신규분에 반영 — 소급 재분류 없음. 삭제는 의도적으로 UI에 없습니다.</p>
   <p class="hint err" id="derr"></p>
 </dialog>
 
@@ -289,20 +296,23 @@ async function loadDomains(selName) {
   if (!r.ok) { dmsg(`조회 실패 (${r.status}) — SSO 관리자로 로그인했거나 토큰이 맞는지 확인하세요`); return; }
   const tb = $("dlist").querySelector("tbody");
   tb.innerHTML = "";
+  const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
   (await r.json()).domains.forEach(d => {
     const tr = document.createElement("tr");
-    [d.name, d.tools, d.priority, d.extract_hint].forEach(v => {  // textContent — XSS 차단
+    [d.name, SCOPE_LABEL[d.scope] || d.scope, d.tools, d.priority,
+     d.extract_hint].forEach(v => {  // textContent — XSS 차단
       const td = document.createElement("td");
       td.textContent = v ?? "";
       tr.appendChild(td);
     });
-    tr.children[1].className = "tools";
+    tr.children[2].className = "tools";
     if (d.name === selName) tr.classList.add("sel");
     tr.onclick = () => {  // 행 클릭 = 선택 표시 + 폼에 채워 수정
       tb.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel"));
       tr.classList.add("sel");
       dmsg("");
-      $("dname").value = d.name; $("dtools").value = d.tools; $("dprio").value = d.priority;
+      $("dname").value = d.name; $("dscope").value = d.scope || "both";
+      $("dtools").value = d.tools; $("dprio").value = d.priority;
       $("dhint").value = d.extract_hint || "";
     };
     tb.appendChild(tr);
@@ -320,9 +330,15 @@ $("dform").onsubmit = async (e) => {
     headers: {"Content-Type": "application/json", ...adminHdr()},
     body: JSON.stringify({name, tools: $("dtools").value.trim(),
                           priority: parseInt($("dprio").value) || 100,
-                          extract_hint: $("dhint").value.trim()}),
+                          extract_hint: $("dhint").value.trim(),
+                          scope: $("dscope").value}),
   });
-  if (!r.ok) { dmsg(`저장 실패 (${r.status})`); return; }
+  if (!r.ok) {
+    let msg = `저장 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    dmsg(msg);
+    return;
+  }
   await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
   dmsg(`✓ 저장 완료 — "${name}" (다음 파이프라인 실행부터 반영)`, true);
 };
@@ -381,7 +397,8 @@ async function loadDomainOptions() {
   if (!r.ok) return;
   const sel = $("sdomain"), cur = sel.value;
   sel.length = 1;
-  (await r.json()).domains.forEach(d => sel.add(new Option(d.name, d.name)));
+  (await r.json()).domains.filter(d => d.scope !== "chat")  // 대화 전용은 소스에 못 씀
+    .forEach(d => sel.add(new Option(d.name, d.name)));
   sel.value = cur;
 }
 async function loadCols(t) {
