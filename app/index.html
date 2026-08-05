@@ -201,6 +201,10 @@
     <input id="psPack" type="number" min="0" placeholder="묶음 토큰 (0=1건씩)" title="입력 이 토큰 예산까지 문서를 묶어 요청 1건으로 판정 (예: 10000). 묶음당 최대 8건. 누락 문서는 단건 자동 폴백" style="width:140px">
     <select id="psModel" title="전처리 전용 모델 — 빈값이면 대화 모델 사용 (같은 채팅 호스트에서 서빙돼야 함)">
       <option value="">전처리 모델 (빈값=대화 모델)</option></select>
+    <label style="font-size:.75rem;color:var(--mut);display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="psThink" checked>생각 끄기
+      <span title="추론 모델의 생각(thinking) 출력을 끄고 판정 — 실측 7~8배 빠름, 판정 품질 동일 (A/B 검증)">ⓘ</span>
+    </label>
     <button id="pssave">설정 저장</button>
     <span class="hint" id="psmsg" style="margin:0"></span>
   </form>
@@ -448,6 +452,7 @@ async function loadPipelineSettings() {
   const s = await r.json();
   $("psLimit").value = s.doc_extract_limit; $("psConc").value = s.doc_concurrency;
   $("psChars").value = s.doc_body_chars; $("psPack").value = s.doc_pack_tokens;
+  $("psThink").checked = s.doc_no_think !== 0;
   const sel = $("psModel");
   if (sel.options.length <= 1) {
     const m = await fetch("/models").then(x => x.json()).catch(() => null);
@@ -462,6 +467,7 @@ $("psform").onsubmit = async (e) => {
     method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
     body: JSON.stringify({doc_extract_limit: $("psLimit").value, doc_concurrency: $("psConc").value,
                           doc_body_chars: $("psChars").value, doc_pack_tokens: $("psPack").value,
+                          doc_no_think: $("psThink").checked ? "1" : "0",
                           doc_extract_model: $("psModel").value}),
   });
   if (!r.ok) {

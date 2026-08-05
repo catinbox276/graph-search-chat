@@ -75,8 +75,20 @@ fits=false로 판정할 것: 도메인과 무관 / 문제도 해법도 없음 / 
 PACK_MAX_DOCS = 8  # 묶음당 문서 상한 — 출력 길이·판정 품질 보호
 
 
+def _gen_kwargs(no_think: bool, max_tokens: int) -> dict:
+    """생성 옵션 — no_think면 추론(생각) 출력을 끄고 출력 상한을 건다.
+
+    출력(디코드)이 배치의 병목이라 생각 토큰 제거가 최대 지렛대 (A/B 실측 7~8배,
+    판정 품질 동일). Qwen3 계열 chat_template_kwargs — 다른 서빙이면 무시될 수 있음.
+    """
+    if not no_think:
+        return {}
+    return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+            "max_tokens": max_tokens}
+
+
 def judge_pack(domain: str, hint: str, pack: list, model: str = "",
-               body_chars: int = 3000) -> list:
+               body_chars: int = 3000, no_think: bool = True) -> list:
     """문서 묶음을 요청 1건으로 판정 — [(doc, verdict)] 반환.
 
     묶음 응답에서 누락·파싱 실패한 문서는 단건 판정으로 자동 폴백 (유실 없음).
@@ -85,7 +97,8 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
     if len(pack) == 1:
         d = pack[0]
         return [(d, judge_doc(domain, hint, d[2], d[1], d[3],
-                              model=model, body_chars=body_chars))]
+                              model=model, body_chars=body_chars,
+                              no_think=no_think))]
     blocks = [f"===[{d[0]}]===\n제목: {(d[1] or '').strip()[:300]}\n{(d[3] or '')[:body_chars]}"
               for d in pack]
     prompt = PACK_PROMPT.format(
@@ -95,7 +108,8 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
     try:
         resp = llm.chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
-            messages=[{"role": "user", "content": prompt}])
+            messages=[{"role": "user", "content": prompt}],
+            **_gen_kwargs(no_think, 1600))
         m = re.search(r"\[.*\]", resp.choices[0].message.content, re.S)
         for item in (json.loads(m.group()) if m else []):
             if isinstance(item, dict) and item.get("id") is not None:
@@ -107,13 +121,13 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
         j = by_id.get(str(d[0]))
         if j is None:  # 묶음 응답 누락 → 단건 재판정
             j = judge_doc(domain, hint, d[2], d[1], d[3],
-                          model=model, body_chars=body_chars)
+                          model=model, body_chars=body_chars, no_think=no_think)
         out.append((d, j))
     return out
 
 
 def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
-              model: str = "", body_chars: int = 3000) -> dict:
+              model: str = "", body_chars: int = 3000, no_think: bool = True) -> dict:
     """문서 1건 LLM 판정 — DB를 만지지 않아 스레드 병렬 안전. 서버 드라이런도 사용."""
     prompt = DOC_PROMPT.format(
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
@@ -122,7 +136,8 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
     try:
         resp = llm.chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
-            messages=[{"role": "user", "content": prompt}])
+            messages=[{"role": "user", "content": prompt}],
+            **_gen_kwargs(no_think, 400))
         m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
         return json.loads(m.group()) if m else {}
     except Exception as e:  # 판정 1건 실패가 배치를 죽이지 않게
@@ -161,9 +176,11 @@ def main():
     conc = max(1, settings.get_int(st, "doc_concurrency", config.DOC_CONCURRENCY))
     body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
     pack_tokens = settings.get_int(st, "doc_pack_tokens", config.DOC_PACK_TOKENS)
+    no_think = bool(settings.get_int(st, "doc_no_think", config.DOC_NO_THINK))
     model = (st.get("doc_extract_model") or "").strip()
     print(f"설정: limit={limit} concurrency={conc} body_chars={body_chars} "
-          f"pack_tokens={pack_tokens} model={model or CHAT_MODEL}", flush=True)
+          f"pack_tokens={pack_tokens} no_think={no_think} "
+          f"model={model or CHAT_MODEL}", flush=True)
 
     # 도메인이 지정된 소스만 대상 (미지정 = 검색 전용, 그래프화 안 함).
     # 대화 전용(scope=chat) 도메인은 제외 — 등록 API가 막지만 SQL 직접 수정 대비 2차 방어.
@@ -221,14 +238,15 @@ def main():
         pending = set()
         for p in packs[:conc]:
             next(it)
-            pending.add(ex.submit(judge_pack, domain, hint, p, model, body_chars))
+            pending.add(ex.submit(judge_pack, domain, hint, p, model, body_chars,
+                                  no_think))
         while pending:
             finished, pending = wait(pending, return_when=FIRST_COMPLETED)
             for fut in finished:
                 np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
                 if np_ is not None:
                     pending.add(ex.submit(judge_pack, domain, hint, np_,
-                                          model, body_chars))
+                                          model, body_chars, no_think))
                 for (src_id, title, kind, body), j in fut.result():
                     ref = f"doc:{source_name}:{src_id}"[:400]
                     if not j or j.get("_error"):

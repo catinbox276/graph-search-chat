@@ -130,6 +130,12 @@ DOC_EXTRACT_LIMIT = _geti("DOC_EXTRACT_LIMIT", 200)  # 실행당 처리 문서 �
 DOC_CONCURRENCY = _geti("DOC_CONCURRENCY", 6)        # LLM 판정 동시 요청 수
 DOC_BODY_CHARS = _geti("DOC_BODY_CHARS", 3000)       # 판정에 넣는 본문 길이(자)
 DOC_PACK_TOKENS = _geti("DOC_PACK_TOKENS", 0)        # 0=문서 1건씩 / N=입력 N토큰 예산으로 묶음 판정
+DOC_NO_THINK = _geti("DOC_NO_THINK", 1)              # 1=판정 시 추론(생각) 출력 끔 — A/B 실측 7~8배 빠름, 품질 동일
+
+# --- 보조 LLM 판정 (같음/다름 이지선다 등 — graph_pipeline.llm_same) ---
+# 추론 모델의 생각 출력을 끈다 (Qwen3 chat_template_kwargs). 이지선다는 생각 없이도
+# 품질이 유지되고(문서 판정 A/B로 실측), 켜두면 dedup 확인 1건에 20~30초가 걸린다.
+LLM_AUX_NO_THINK = _geti("LLM_AUX_NO_THINK", 1)
 
 # --- 임베딩 백필 (scripts/embed_corpus.py) ---
 EMBED_BATCH = _geti("EMBED_BATCH", 64)

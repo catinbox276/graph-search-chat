@@ -528,6 +528,7 @@ def admin_pipeline_settings(request: Request, x_admin_token: str = Header(defaul
                                                config.DOC_BODY_CHARS),
             "doc_pack_tokens": settings.get_int(st, "doc_pack_tokens",
                                                 config.DOC_PACK_TOKENS),
+            "doc_no_think": settings.get_int(st, "doc_no_think", config.DOC_NO_THINK),
             "doc_extract_model": st.get("doc_extract_model") or "",
             "overridden": sorted(st.keys())}
 
@@ -537,6 +538,7 @@ class PipelineSettingsIn(BaseModel):
     doc_concurrency: str = ""
     doc_body_chars: str = ""
     doc_pack_tokens: str = ""     # 0=1건씩 / N=입력 N토큰 예산으로 묶음 판정
+    doc_no_think: str = ""        # 1=추론(생각) 출력 끔 (기본) / 0=켬
     doc_extract_model: str = ""   # 빈값 = 대화 모델 사용
 
 
@@ -550,7 +552,8 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
     for key, raw, lo, hi in (("doc_extract_limit", inp.doc_extract_limit, 1, 100000),
                              ("doc_concurrency", inp.doc_concurrency, 1, 32),
                              ("doc_body_chars", inp.doc_body_chars, 200, 20000),
-                             ("doc_pack_tokens", inp.doc_pack_tokens, 0, 30000)):
+                             ("doc_pack_tokens", inp.doc_pack_tokens, 0, 30000),
+                             ("doc_no_think", inp.doc_no_think, 0, 1)):
         raw = raw.strip()
         if raw:
             try:

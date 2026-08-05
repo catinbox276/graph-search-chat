@@ -199,12 +199,15 @@ LAYER_KIND = {2: "목표(사용자가 이루려는 것)", 3: "접근법(문제�
 
 def llm_same(kind: str, a: str, b: str) -> bool:
     """2단계 판정: 임베딩 후보를 LLM이 최종 확인 (인접 주제 과병합 차단)."""
+    kw = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+           "max_tokens": 80}
+          if config.LLM_AUX_NO_THINK else {})  # 이지선다 — 생각 출력 불필요 (config 참조)
     resp = llm.chat.completions.create(
         model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
         messages=[{"role": "user", "content":
                    f'두 문구가 같은 {kind}를 가리키면 true. '
                    f'주제·도구가 비슷해도 의도가 다르면 false. JSON만 출력: {{"same": true|false}}\n'
-                   f'A: {a}\nB: {b}'}])
+                   f'A: {a}\nB: {b}'}], **kw)
     m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
     try:
         return bool(json.loads(m.group()).get("same")) if m else False
