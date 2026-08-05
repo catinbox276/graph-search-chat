@@ -77,6 +77,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:10 원천 증분 적재, 03:20 유지보수, 03:30 임베딩 백필.
 
 ## 문서
+- `docs/plan.md` — 기획 보고 (비전공자용: 배경·별도 프로젝트 결정·도구 3종·대화 자산화 근거·관리 방안)
 - `docs/research.md` — 오픈소스/논문/문제점 조사 (출처 링크 포함)
 - `docs/design.md` — 확정된 설계 결정 (Mermaid 다이어그램 포함)
 - `docs/poc-datasets.md` — PoC용 공개 데이터셋 카탈로그 (다운로드 링크·라이선스)

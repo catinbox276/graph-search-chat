@@ -27,6 +27,7 @@ flowchart LR
 
 | 문서 | 내용 |
 |---|---|
+| [docs/plan.md](docs/plan.md) | **기획 보고** — 무엇을 왜 만드는지, 비전공자용 (배경·도구 3종·대화 자산화 근거·관리 방안, 출처 포함) |
 | [docs/design.md](docs/design.md) | 확정된 설계 결정 — 전체 흐름, 그래프 4계층 스키마, 세션 판정 3갈래 분기, 실패 경로 노출 정책 (Mermaid 다이어그램 포함) |
 | [docs/implementation.md](docs/implementation.md) | **구현 아키텍처** — 컴포넌트 지도, 테이블·API, 실행 방법, 알려진 한계 |
 | [docs/integration.md](docs/integration.md) | **사내 전환 통합 설계** — 외부 의존 2개(SSO 사용자 식별, 구조화 원천 테이블)와 접점 정의 |
