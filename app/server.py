@@ -218,6 +218,53 @@ async def chat(inp: ChatIn, request: Request):
             "elapsed_sec": round(time.time() - t0, 1)}
 
 
+@app.get("/sessions")
+def list_sessions(request: Request):
+    """내 대화 목록 — 사용자별 독립 (다른 사람 세션은 안 보임).
+
+    AUTH_MODE=none(로컬)에선 user_id 없는 세션만 보인다 — 같은 규칙의 자연스러운 귀결.
+    """
+    u = auth.require_user(request)
+    uid = (u or {}).get("user")
+    con = db()
+    cur = con.cursor()
+    cur.execute("""
+        SELECT s1.id, s1.question, x.turns, x.last_ts
+        FROM sessions s1
+        JOIN (SELECT id, COUNT(*) AS turns, MAX(ts) AS last_ts FROM sessions
+              WHERE (:u IS NULL AND user_id IS NULL) OR user_id = :u
+              GROUP BY id) x ON x.id = s1.id
+        WHERE s1.turn = 1
+        ORDER BY x.last_ts DESC
+        FETCH FIRST 30 ROWS ONLY""", {"u": uid})
+    out = [{"id": r[0], "title": (r[1].read() if r[1] is not None else "")[:80],
+            "turns": r[2], "last_ts": r[3].isoformat() if r[3] else None}
+           for r in cur.fetchall()]
+    con.close()
+    return {"sessions": out}
+
+
+@app.get("/sessions/{sid}")
+def get_session(sid: str, request: Request):
+    """세션 대화 복원 — 본인 것만 (이어하기는 같은 session_id로 /chat 호출하면
+    Oracle 체크포인터가 기억을 이어준다)."""
+    u = auth.require_user(request)
+    uid = (u or {}).get("user")
+    con = db()
+    cur = con.cursor()
+    cur.execute("""SELECT turn, question, answer, user_id FROM sessions
+                   WHERE id = :1 ORDER BY turn""", [sid])
+    rows = [(t, q.read() if q else "", a.read() if a else "", owner)
+            for t, q, a, owner in cur.fetchall()]
+    con.close()
+    if not rows:
+        raise HTTPException(404, "세션이 없습니다")
+    if rows[0][3] != uid:
+        raise HTTPException(403, "본인 세션만 볼 수 있습니다")
+    return {"session_id": sid,
+            "turns": [{"turn": t, "question": q, "answer": a} for t, q, a, _ in rows]}
+
+
 @app.get("/static/shell.css")
 def shell_css():
     return FileResponse(ROOT / "app" / "shell.css",
@@ -356,13 +403,93 @@ def admin_domain_add(inp: DomainIn, request: Request,
             "note": "다음 파이프라인 실행부터 신규 세션 분류에 반영 (소급 재분류 없음)"}
 
 
+class SourceIn(BaseModel):
+    source_name: str
+    table_name: str      # 원천 테이블 (읽기 전용 — 우리는 SELECT만)
+    id_column: str       # 고유 id 필드
+    ts_column: str = ""  # 생성시간 필드 — 증분 워터마크 (빈값 = 전량 1회 소스)
+    field_map: dict      # {역할: 컬럼} 역할=title|body|question|answer|meta
+    content_kind: str = ""  # 문제해결/가이드 등 — 프롬프트 힌트
+    enabled: bool = True
+
+
+@app.get("/admin/sources")
+def admin_sources(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 구조화 원천 테이블 목록 (source_registry)."""
+    check_admin(request, x_admin_token)
+    from tools import source_registry
+    con = db()
+    cur = con.cursor()
+    rows = source_registry.list_sources(cur)
+    con.commit()
+    con.close()
+    return {"sources": rows}
+
+
+@app.post("/admin/sources")
+def admin_source_add(inp: SourceIn, request: Request,
+                     x_admin_token: str = Header(default="")):
+    """관리자: 원천 테이블 등록/수정 — 테이블·컬럼 실존을 검증하고 저장.
+
+    다음 적재 배치부터 반영. 원천 테이블은 읽기 전용(우리는 SELECT만)이고,
+    삭제 API는 domain_registry와 같은 이유로 없음(enabled='N'으로 끄는 것까지만).
+    """
+    check_admin(request, x_admin_token)
+    from tools import source_registry
+    if not inp.source_name.strip() or not inp.table_name.strip() or not inp.id_column.strip():
+        raise HTTPException(400, "source_name·table_name·id_column은 필수입니다")
+    con = db()
+    cur = con.cursor()
+    source_registry.ensure(cur)
+    err = source_registry.validate(cur, inp.table_name.strip(), inp.id_column.strip(),
+                                   inp.ts_column.strip(), inp.field_map)
+    if err:
+        con.close()
+        raise HTTPException(400, err)
+    source_registry.upsert(cur, inp.source_name.strip(), inp.table_name.strip(),
+                           inp.id_column.strip(), inp.ts_column.strip(),
+                           inp.field_map, inp.content_kind.strip(), inp.enabled)
+    con.commit()
+    con.close()
+    return {"ok": True, "source_name": inp.source_name.strip(),
+            "note": "다음 적재 배치부터 반영 (원천 테이블은 읽기 전용)"}
+
+
+@app.get("/admin/sources/tables")
+def admin_source_tables(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 접속 DB의 등록 후보 테이블 목록 (Oracle 내부·우리 테이블 제외)."""
+    check_admin(request, x_admin_token)
+    from tools import source_registry
+    con = db()
+    cur = con.cursor()
+    tables = source_registry.browse_tables(cur)
+    con.close()
+    return {"tables": tables}
+
+
+@app.get("/admin/sources/tables/{tname}")
+def admin_source_columns(tname: str, request: Request,
+                         x_admin_token: str = Header(default="")):
+    """관리자: 테이블의 컬럼 목록 — 등록 폼의 컬럼 선택용."""
+    check_admin(request, x_admin_token)
+    from tools import source_registry
+    con = db()
+    cur = con.cursor()
+    cols = source_registry.table_columns(cur, tname)
+    con.close()
+    if not cols:
+        raise HTTPException(404, f"테이블이 없습니다: {tname}")
+    return {"columns": [{"name": k, "type": v} for k, v in cols.items()]}
+
+
 @app.get("/stats")
 def stats():
     """헤더 상태칩용 현황."""
     con = db()
     cur = con.cursor()
     out = {}
-    for k, q in [("posts", "SELECT COUNT(*) FROM blog_posts"),
+    # posts = 통합 코퍼스 수 (전환 전이면 구 blog_posts로 폴백)
+    for k, q in [("posts", "SELECT COUNT(*) FROM corpus_docs"),
                  ("nodes", "SELECT COUNT(*) FROM nodes"),
                  ("edges", "SELECT COUNT(*) FROM edges"),
                  ("sessions", "SELECT COUNT(DISTINCT id) FROM sessions")]:
@@ -371,5 +498,11 @@ def stats():
             out[k] = cur.fetchone()[0]
         except oracledb.DatabaseError:
             out[k] = 0
+    if not out["posts"]:
+        try:
+            cur.execute("SELECT COUNT(*) FROM blog_posts")
+            out["posts"] = cur.fetchone()[0]
+        except oracledb.DatabaseError:
+            pass
     con.close()
     return out

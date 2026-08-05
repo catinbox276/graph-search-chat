@@ -9,13 +9,44 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"   # 사이드카가 남으면 Job이 안 끝난다
         spec:
           restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
           containers:
             - name: pipeline
-              image: graph-search-chat:latest
-              imagePullPolicy: Never
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
               command: ["python", "-m", "poc.graph_pipeline"]
+              envFrom:
+                - configMapRef:
+                    name: gsc-env
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ingest-sources
+spec:
+  schedule: "10 3 * * *"   # 매일 03:10 — 등록 원천 테이블 증분 적재 → corpus_docs
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"   # 사이드카가 남으면 Job이 안 끝난다
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
+          containers:
+            - name: ingest
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
+              command: ["python", "scripts/ingest_sources.py"]
               envFrom:
                 - configMapRef:
                     name: gsc-env
@@ -30,12 +61,17 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"   # 사이드카가 남으면 Job이 안 끝난다
         spec:
           restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
           containers:
             - name: embed
-              image: graph-search-chat:latest
-              imagePullPolicy: Never
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
               command: ["python", "scripts/embed_corpus.py"]
               envFrom:
                 - configMapRef:
@@ -51,12 +87,17 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"   # 사이드카가 남으면 Job이 안 끝난다
         spec:
           restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
           containers:
             - name: maintenance
-              image: graph-search-chat:latest
-              imagePullPolicy: Never
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
               command: ["python", "-m", "poc.graph_maintenance"]
               envFrom:
                 - configMapRef:

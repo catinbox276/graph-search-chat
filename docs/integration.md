@@ -93,7 +93,7 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 | `content_kind` | 내용 유형 — 추출·검색 프롬프트에 반영 | `문제해결` / `가이드` |
 | `enabled` | 적재 대상 여부 | `Y/N` |
 
-- **역할(role) 어휘는 닫아둔다**: `title / body / question / answer / meta`.
+- **역할(role) 어휘는 닫아둔다**: `title / body / question / answer / meta / url`.
   1필드 블로그형은 `body` 하나, QA형은 `question`+`answer`, N필드는 조합.
   역할이 검색 문서 조립 방식(아래)을 결정한다 — 필드 간 관계는 역할 조합으로 표현.
 - 관리 통로는 domain_registry와 동일: 관리자 API(`GET/POST /admin/sources`) + 관리 UI 모달.
@@ -108,8 +108,8 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 2. **임베딩 백필** — 기존 03:30 CronJob이 corpus_docs 기준으로 동작 (embed_corpus.py 일반화).
 3. **검색** — 하이브리드 검색(blog_search.py)이 corpus_docs를 대상으로 동작.
    `content_kind`는 검색 결과 라벨과 (도메인 extract_hint처럼) 프롬프트 힌트에 쓴다.
-4. **읽기 도구** — `read_blog_post` → `read_source_doc(source, id)`로 일반화
-   (원문은 원천 테이블에서 id로 직접 읽음 — 원본 훼손 없음, 우리는 절대 쓰지 않음).
+4. **읽기 도구** — `read_blog_post`가 문서 id `"소스명:원천id"`를 받도록 일반화
+   (도구명은 기존 그래프 4층 행동·도메인 시드와의 호환을 위해 유지. 구형 blog id도 동작).
 
 ### 원칙 재확인
 
@@ -131,6 +131,7 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 ### 남은 구현 (착수 전 확인용 목록)
 
 - [x] `header` 인증 모드 (auth.py — userId·role 헤더 2개 소비)
-- [ ] 사용자별 세션 목록·이어하기 (GET /sessions + UI 사이드바)
-- [ ] `source_registry` 테이블 + 관리자 API/UI (테이블·컬럼 브라우저 포함)
-- [ ] 적재 일반화: corpus_docs + 증분 적재 배치 + embed/검색/read 도구 전환
+- [x] 사용자별 세션 목록·이어하기 (GET /sessions + UI 사이드바 — 소유권 검사 포함)
+- [x] `source_registry` 테이블 + 관리자 API/UI (`/admin/sources`, 테이블·컬럼 브라우저 포함)
+- [x] 적재 일반화: corpus_docs + 증분 적재 배치(scripts/ingest_sources.py, 야간 03:10)
+      + embed/검색/read 도구 전환 (corpus 없으면 blog_posts 폴백 — 전환기 무중단)

@@ -30,6 +30,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python3 scripts/build_corpus.py && python3 scripts/load_oracle.py \
   && python3 scripts/embed_corpus.py && python3 scripts/ingest_bird.py
 
+# 원천 테이블 증분 적재: source_registry 등록분 → corpus_docs (야간 03:10과 동일, 멱등)
+python3 scripts/ingest_sources.py
+
 # 배포 (전제: k8s + LM Studio :1234 — 상세 절차는 docs/implementation.md "실행 방법")
 docker build -t graph-search-chat:latest .
 kubectl apply -f k8s/oracle.yaml          # Oracle StatefulSet
@@ -65,12 +68,13 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 
 - **모놀리스 이미지 1개** — `app/server.py`(FastAPI)가 SSE 스트리밍·세션 기록·그래프 데이터·모델 관리 API를 전부 담당. 기동 시 Oracle에서 임베딩 행렬 1.4GB를 메모리에 로드(`tools/blog_search.load_matrix`). CronJob(파이프라인·유지보수·백필)도 같은 이미지.
 - **에이전트** — `agent/agent.py`가 DeepAgents로 조립. 툴 = `suggest_paths`(새 문제 시 최우선 호출, 시스템 프롬프트로 강제) + `search_blog`/`read_blog_post`(함수 직접 등록) + DataHub 공식 MCP(stdio, 유일한 MCP). 모델별 에이전트 캐시는 server.py의 `_agents`.
-- **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical) top-30 + 인메모리 행렬 코사인(semantic) top-30 → RRF 융합. 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작.
+- **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical) top-30 + 인메모리 행렬 코사인(semantic) top-30 → RRF 융합. 검색 대상은 통합 코퍼스 `corpus_docs`(문서 id=`소스명:원천id`, 없으면 구 blog_posts 폴백). 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작.
+- **원천 테이블 적재** (`tools/source_registry.py` + `scripts/ingest_sources.py`) — 구조화할 저쪽 테이블은 관리자가 `source_registry`에 등록(테이블·id·시간 컬럼·필드→역할 매핑 title/body/question/answer/meta/url·content_kind — API `GET/POST /admin/sources`, UI 📚 소스). 야간 배치가 ts 워터마크 증분으로 역할 조립해 corpus_docs에 MERGE. **원천 테이블은 읽기 전용(SELECT만)**. 상세: docs/integration.md 접점 2.
 - **경로 제안** (`tools/path_suggest.py`) — 그래프에서 검증 경로 제안 + 실패 이력 경고. 노출을 `suggestions` 테이블에 기록(채택률 보정용). 성공/실패는 판정 카운트로 관리 (불리언 금지 — PoC에서 실증된 결정).
 - **멀티턴 기억** — `tools/oracle_checkpointer.py` (LangGraph 체크포인터를 Oracle `lg_checkpoints`/`lg_writes`로 외부화). thread_id=세션id. 복제본 공유·재시작 생존이라 cluster 모드에서 세션 고정 불필요.
 - **그래프 파이프라인** (`poc/graph_pipeline.py`) — 세션 게이트 2갈래(태스크 세션=expect 기준 LLM 판정 / UI 세션=행동 신호 코드 판정 — 후퇴 2개↑ fail, 전진만 있으면 success, 나머지 미판정) → 4계층 추출(도메인은 닫힌 목록, 목표·접근법은 LLM, 행동은 tool_calls에서 결정적) → dedup 병합 → 재발 소급 취소(같은 증상 `RECUR_DAYS` 내 재방문 시 success를 'retracted'로, 기여 가중치 회수). dedup 임계값: 코사인 ≥0.92 즉시 병합, 0.70~0.92는 LLM 동일 의도 확인 (캘리브레이션 근거는 파일 상단 주석). 유지보수(`poc/graph_maintenance.py`)는 형제 통합·잎 흡수에 더해 패스3 시간 감쇠(유휴 3층 접근법 가중치를 반감기 곡선으로 하강, 멱등).
-- **Oracle 단일 DB** — 테이블: `blog_posts`(+embedding BLOB), `sessions`, `nodes`/`edges`/`node_evidence`, `suggestions`, `model_registry`, `lg_checkpoints`/`lg_writes`. DSN 등 접속 상수는 `tools/blog_search.py`에서 import하는 게 관례.
-- **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:20 유지보수, 03:30 임베딩 백필.
+- **Oracle 단일 DB** — 테이블: `corpus_docs`(통합 코퍼스+embedding BLOB, 구 `blog_posts`는 소스 1호로 흡수), `source_registry`, `domain_registry`, `sessions`(+user_id), `nodes`/`edges`/`node_evidence`, `suggestions`, `model_registry`, `lg_checkpoints`/`lg_writes`. DSN 등 접속 상수는 `tools/blog_search.py`에서 import하는 게 관례.
+- **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:10 원천 증분 적재, 03:20 유지보수, 03:30 임베딩 백필.
 
 ## 문서
 - `docs/research.md` — 오픈소스/논문/문제점 조사 (출처 링크 포함)

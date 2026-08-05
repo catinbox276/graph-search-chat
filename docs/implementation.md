@@ -47,10 +47,13 @@ flowchart LR
 
 | 테이블 | 내용 | 만든 곳 |
 |---|---|---|
-| `blog_posts` | 노하우 코퍼스 343,045건 + `embedding` BLOB(질의·dedup용 원본) | load_oracle.py / embed_corpus.py |
-| `sessions` | 대화 증거 계층: 질문·툴호출·답변·게이트 판정(verdict) | server.py / selfplay.py |
+| `corpus_docs` | 통합 검색 코퍼스 (등록 소스 조립본 + `embedding` BLOB). 문서 id=`소스명:원천id` | ingest_sources.py |
+| `source_registry` | 구조화 원천 테이블 등록 (테이블·id·시간·필드 역할 매핑 — 사람 전용) | source_registry.py |
+| `blog_posts` | 구 노하우 코퍼스 — corpus_docs에 '소스 1호'로 흡수(임베딩 SQL 복사) | load_oracle.py / embed_corpus.py |
+| `sessions` | 대화 증거 계층: 질문·툴호출·답변·게이트 판정(verdict)·user_id(SSO) | server.py / selfplay.py |
 | `nodes` / `edges` / `node_evidence` | 4계층 지식그래프 + 가중치 + 출처 | graph_pipeline.py |
 | `suggestions` | 경로 제안 노출 기록 (채택률 보정용 데이터) | path_suggest.py |
+| `domain_registry` | 1층 도메인 닫힌 목록 + 도메인별 추출 지침 (사람 전용) | graph_pipeline.py |
 | `model_registry` | 모델 등록·기본값 (LLM=사용자, 임베딩·리랭커=관리자) | model_registry.py |
 
 ## 주요 컴포넌트와 파일
@@ -73,6 +76,9 @@ flowchart LR
 - `POST /chat` — 비스트리밍 (스크립트용). 둘 다 `model` 필드로 LLM 선택, 멀티턴 기억
 - `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(X-Admin-Token)
 - `GET/POST /admin/domains` — 1층 도메인 닫힌 목록 조회/추가 (`domain_registry` 시드 테이블, 관리자 전용. 삭제 API는 의도적으로 없음)
+- `GET/POST /admin/sources` · `GET /admin/sources/tables[/{t}]` — 구조화 원천 테이블 등록 + 접속 DB 테이블·컬럼 브라우저 (관리자 전용, docs/integration.md 접점 2)
+- `GET /sessions` · `GET /sessions/{id}` — 내 대화 목록·복원 (본인 것만 — SSO user_id 기준, 이어하기는 같은 session_id로 /chat)
+- `GET /oidc/login·callback·logout` · `GET /me` — SSO (AUTH_MODE에 따라 활성, app/auth.py)
 - `GET /graph/data` — 노드(사용·성공·실패 카운트)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 
 ## 실행 방법 (전부 파드)
@@ -96,7 +102,7 @@ kubectl apply -f k8s/app.yaml -f k8s/cron.yaml   # 앱 Deployment + 야간 CronJ
 
 1. 로컬은 대형 LLM 1개만 동시 로드(LM Studio, 유일한 비파드 구성요소) — GPU 서빙(vLLM 파드)에서 드롭다운 선택 그대로 동작
 2. ~~멀티턴 기억은 서버 메모리~~ → **Oracle 체크포인터로 외부화 완료** (lg_checkpoints/lg_writes) — 복제본 공유·재시작 생존
-3. 관리자 인증은 단일 토큰(PoC) — 사내는 SSO 연동
+3. ~~관리자 인증은 단일 토큰~~ → **SSO 구현 완료** (AUTH_MODE: header=전단 SSO 헤더 소비/keycloak=직접 OIDC — docs/integration.md 접점 1. X-Admin-Token은 스크립트용 병행)
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
 5. 야간 CronJob이 UI 세션 포함 미판정분을 자동 처리 (03:00 파이프라인, 03:30 임베딩). 로컬은 야간에 맥·LM Studio가 켜져 있어야 동작
 6. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정, supersession 자동화 등)

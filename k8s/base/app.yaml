@@ -1,5 +1,5 @@
 # 앱 파드 (프론트+백+MCP 클라이언트가 한 컨테이너 — 모놀리스)
-# 사내 전환: image를 레지스트리 경로로. 환경설정은 gsc.env(configMapGenerator)에서 주입
+# 기준 환경 = 사내 클러스터(하버 레지스트리). 환경설정은 gsc.env(configMapGenerator)에서 주입
 apiVersion: v1
 kind: Service
 metadata:
@@ -25,11 +25,17 @@ spec:
     metadata:
       labels:
         app: gsc-app
+      annotations:
+        # Kubeflow 프로필 네임스페이스의 Istio RBAC이 nginx 인그레스발 트래픽을
+        # 사이드카에서 차단 → 주입 제외 (keycloak.yaml과 동일한 이유)
+        sidecar.istio.io/inject: "false"
     spec:
+      imagePullSecrets:
+        - name: harbor-cred      # 하버 pull 인증 (kubectl create secret docker-registry)
       containers:
         - name: app
-          image: graph-search-chat:latest
-          imagePullPolicy: Never   # 로컬 빌드 이미지. 사내에선 레지스트리로
+          image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+          imagePullPolicy: Always  # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never로 교체
           ports:
             - containerPort: 8500
           envFrom:
