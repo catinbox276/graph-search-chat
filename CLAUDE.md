@@ -50,7 +50,8 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `MODEL_URL` | `http://127.0.0.1:1234/v1` | 단일 서빙 폴백. CHAT/EMBED/RERANK_URL이 비면 여기로(LM Studio 단일 서빙 호환) |
 | `MODEL_API_KEY` | `lm-studio` | OpenAI 호환 키. vLLM에 `--api-key` 미설정 시 더미값이면 됨 |
 | `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
-| `ADMIN_TOKEN` | `poc-admin` | 모델 관리 API (`X-Admin-Token` 헤더) |
+| `ADMIN_TOKEN` | `poc-admin` | 모델 관리 API (`X-Admin-Token` 헤더) — SSO 관리자 역할로도 통과 |
+| `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). `header`=사내 기본 — 전단 SSO가 준 `SSO_USER_HEADER`(userId)·`SSO_ROLE_HEADER`(role) 2개만 소비, 로그인 UI 없음. `keycloak`=전단 없는 환경용 직접 OIDC(`KEYCLOAK_*`/`OIDC_*` 필요, PoC 파드는 `k8s/keycloak.yaml`). 관리자 = `OIDC_ADMIN_ROLE`(기본 `gsc-admin`) 역할 보유 |
 
 사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 전체 재백필 필요(`scripts/embed_corpus.py`).
 
@@ -77,6 +78,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - `docs/poc-datasets.md` — PoC용 공개 데이터셋 카탈로그 (다운로드 링크·라이선스)
 - `docs/poc-results.md` — PoC 실증 결과 (병합·가중치 검증, 캘리브레이션 수치, 남은 이슈)
 - `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
+- `docs/integration.md` — 사내 전환 통합 설계 (외부 의존 2개: SSO 사용자 식별 소비 + 원천 테이블 source_registry)
 - `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
 - `docs/component-architecture.drawio` — 컴포넌트별 아키텍처 8페이지 (에이전트 / 앱 서버 / 검색 / 경로 제안 / 파이프라인 / 유지보수 / 저장소 / 배포)
 
