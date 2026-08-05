@@ -601,6 +601,16 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
     if inp.mode != "reset":
         con.close()
         raise HTTPException(400, "mode는 errors 또는 reset")
+    n, retracted = _reset_source(cur, sname)
+    con.commit()
+    con.close()
+    return {"ok": True, "reset": n, "evidence_retracted": retracted,
+            "note": "그래프 기여 회수 완료 — 다음 배치가 처음부터 재구조화 "
+                    "(고아 노드는 야간 유지보수가 정리)"}
+
+
+def _reset_source(cur, sname: str):
+    """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1
     cur.execute("""SELECT DISTINCT session_id FROM node_evidence
                    WHERE session_id LIKE :1""", [f"doc:{sname}:%"])
@@ -621,12 +631,44 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
         cur.execute("DELETE FROM node_evidence WHERE session_id = :1", [ref])
     cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
                    WHERE source_name = :1 AND graph_status IS NOT NULL""", [sname])
-    n = cur.rowcount
+    return cur.rowcount, len(refs)
+
+
+@app.post("/admin/domains/{dname}/reset")
+def admin_domain_reset(dname: str, request: Request,
+                       x_admin_token: str = Header(default="")):
+    """관리자: 도메인 초기화 — 이 도메인에 물린 모든 소스의 문서 구조화를 회수·리셋.
+    대화 세션 기여는 건드리지 않는다 (문서 쪽만)."""
+    check_admin(request, x_admin_token)
+    con = db()
+    cur = con.cursor()
+    cur.execute("SELECT source_name FROM source_registry WHERE domain = :1", [dname])
+    names = [r[0] for r in cur.fetchall()]
+    if not names:
+        con.close()
+        raise HTTPException(404, f"도메인 '{dname}'에 지정된 소스가 없습니다")
+    per = {s: _reset_source(cur, s) for s in names}
     con.commit()
     con.close()
-    return {"ok": True, "reset": n, "evidence_retracted": len(refs),
-            "note": "그래프 기여 회수 완료 — 다음 배치가 처음부터 재구조화 "
-                    "(고아 노드는 야간 유지보수가 정리)"}
+    return {"ok": True, "sources": {s: {"reset": n, "evidence_retracted": r}
+                                    for s, (n, r) in per.items()},
+            "note": "다음 배치가 처음부터 재구조화 (고아 노드는 야간 유지보수가 정리)"}
+
+
+@app.post("/admin/reset-all-docs")
+def admin_reset_all_docs(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 전체 초기화 — 도메인 지정된 모든 소스의 문서 구조화를 회수·리셋."""
+    check_admin(request, x_admin_token)
+    con = db()
+    cur = con.cursor()
+    cur.execute("SELECT source_name FROM source_registry WHERE domain IS NOT NULL")
+    names = [r[0] for r in cur.fetchall()]
+    per = {s: _reset_source(cur, s) for s in names}
+    con.commit()
+    con.close()
+    return {"ok": True, "sources": {s: {"reset": n, "evidence_retracted": r}
+                                    for s, (n, r) in per.items()},
+            "note": "다음 배치가 처음부터 재구조화 (고아 노드는 야간 유지보수가 정리)"}
 
 
 class DryrunIn(BaseModel):

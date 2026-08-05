@@ -81,7 +81,8 @@
                   background: var(--path); color: #fff; font-size: .85rem; cursor: pointer; }
   #sform button.ghost, #psform button.ghost { background: #fff; color: var(--ink);
                   border: 1px solid var(--line); }
-  #sform button.warn { background: #fff; color: var(--fail); border: 1px solid var(--fail); }
+  #sform button.warn, #dform button.warn, #psform button.warn {
+    background: #fff; color: var(--fail); border: 1px solid var(--fail); }
   #psform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap;
             align-items: center; margin-top: 6px; }
   #psform input, #psform select { padding: 7px 10px; border-radius: 8px;
@@ -156,6 +157,8 @@
     <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
     <input id="dhint" placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨">
     <button id="dsave">추가/수정</button>
+    <button type="button" class="warn" id="dreset"
+            title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
     <button type="button" class="ghost" id="dclose">닫기</button>
   </form>
   <p class="hint">같은 이름으로 저장하면 수정(upsert). <b>용도</b>를 등록 때 선택합니다 —
@@ -196,7 +199,7 @@
   <h4>전처리 설정 <small>전역 — 저장하면 다음 배치(야간 03:40 또는 수동)부터, 재배포 불필요</small></h4>
   <form id="psform" method="dialog">
     <input id="psLimit" type="number" min="1" placeholder="실행당 건수" title="배치 1회에 처리할 문서 수" style="width:110px">
-    <input id="psConc" type="number" min="1" max="32" placeholder="동시 요청" title="LLM 판정 동시 요청 수 — 클수록 빠름 (서빙 부하 고려)" style="width:100px">
+    <input id="psConc" type="number" min="1" max="256" placeholder="동시 요청" title="LLM 판정 동시 요청 수 — 클수록 빠름 (서빙 부하 고려)" style="width:100px">
     <input id="psChars" type="number" min="200" placeholder="본문 길이(자)" title="판정 프롬프트에 넣는 본문 최대 길이" style="width:110px">
     <input id="psPack" type="number" min="0" placeholder="묶음 토큰 (0=1건씩)" title="입력 이 토큰 예산까지 문서를 묶어 요청 1건으로 판정 (예: 10000). 묶음당 최대 8건. 누락 문서는 단건 자동 폴백" style="width:140px">
     <select id="psModel" title="전처리 전용 모델 — 빈값이면 대화 모델 사용 (같은 채팅 호스트에서 서빙돼야 함)">
@@ -206,6 +209,8 @@
       <span title="추론 모델의 생각(thinking) 출력을 끄고 판정 — 실측 7~8배 빠름, 판정 품질 동일 (A/B 검증)">ⓘ</span>
     </label>
     <button id="pssave">설정 저장</button>
+    <button type="button" class="warn" id="psresetall"
+            title="도메인 지정된 모든 소스의 문서 구조화 기여를 회수하고 전부 재구조화 — 대화 세션 기여는 유지">⚠ 전체 문서 초기화</button>
     <span class="hint" id="psmsg" style="margin:0"></span>
   </form>
   <p class="hint">같은 소스 이름으로 저장하면 수정(upsert). 시간 컬럼이 있으면 야간 배치가 그 기준으로
@@ -523,6 +528,37 @@ async function reprocess(mode, label) {
 }
 $("sretry").onclick = () => reprocess("errors", "실패 재시도");
 $("sreset").onclick = () => reprocess("reset", "초기화 재처리");
+const fmtResetSummary = (j) => {
+  const tot = Object.values(j.sources).reduce((a, x) => a + x.reset, 0);
+  return `${Object.keys(j.sources).length}개 소스 ${tot}건 미처리로 — ${j.note}`;
+};
+$("dreset").onclick = async () => {
+  const name = $("dname").value.trim();
+  if (!name) { dmsg("도메인을 먼저 선택하세요 (목록 행 클릭)"); return; }
+  if (!confirm(`"${name}" 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고\n` +
+               "처음부터 재구조화합니다. 대화 세션 기여는 유지됩니다. 계속할까요?")) return;
+  dmsg("⏳ 도메인 문서 초기화 중…");
+  const r = await fetch(`/admin/domains/${encodeURIComponent(name)}/reset`,
+                        {method: "POST", headers: adminHdr()});
+  if (!r.ok) {
+    let msg = `초기화 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    dmsg(msg); return;
+  }
+  dmsg(`✓ 도메인 초기화: ${fmtResetSummary(await r.json())}`, true);
+};
+$("psresetall").onclick = async () => {
+  if (!confirm("도메인 지정된 모든 소스의 문서 구조화 기여를 회수하고\n" +
+               "전부 처음부터 재구조화합니다. 대화 세션 기여는 유지됩니다. 계속할까요?")) return;
+  $("psmsg").textContent = "⏳ 전체 문서 초기화 중…";
+  const r = await fetch("/admin/reset-all-docs", {method: "POST", headers: adminHdr()});
+  if (!r.ok) {
+    let msg = `초기화 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    $("psmsg").textContent = msg; return;
+  }
+  $("psmsg").textContent = `✓ 전체 초기화: ${fmtResetSummary(await r.json())}`;
+};
 $("stable").onchange = () => loadCols($("stable").value);
 $("sclose").onclick = () => sdlg.close();
 $("sform").onsubmit = async (e) => {
