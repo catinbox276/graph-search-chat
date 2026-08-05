@@ -152,13 +152,15 @@
 <dialog id="srcDlg">
   <h3>구조화 원천 테이블 <small>접점 2 — 저쪽 테이블은 읽기 전용, 등록은 사람 전용</small></h3>
   <table id="slist"><thead><tr><th>소스</th><th>테이블</th><th>id</th><th>시간</th>
-    <th>역할 매핑</th><th>유형</th><th>사용</th></tr></thead><tbody></tbody></table>
+    <th>역할 매핑</th><th>유형</th><th>그래프 도메인</th><th>사용</th></tr></thead><tbody></tbody></table>
   <form id="sform" method="dialog">
     <input id="sname" placeholder="소스 이름" required style="width:120px">
     <select id="stable" required><option value="">테이블…</option></select>
     <select id="sidc" required><option value="">id 컬럼…</option></select>
     <select id="stsc"><option value="">시간 컬럼 (없음=전량 1회)</option></select>
     <input id="skind" placeholder="유형 (문제해결/가이드…)" style="width:150px">
+    <select id="sdomain" title="지정하면 야간 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프화 (기준 미달은 제외). 빈값=검색 전용">
+      <option value="">그래프 도메인 (없음=검색만)</option></select>
     <label><input type="checkbox" id="senabled" checked>사용</label>
     <span style="flex-basis:100%;font-size:.75rem;color:var(--mut)">역할 매핑 — 본문(body) 또는 지문(question)+답(answer) 중 최소 하나:</span>
     <select id="r_title"><option value="">title 컬럼…</option></select>
@@ -172,6 +174,8 @@
   </form>
   <p class="hint">같은 소스 이름으로 저장하면 수정(upsert). 시간 컬럼이 있으면 야간 배치가 그 기준으로
      신규분만 증분 적재합니다. 원천 테이블에는 절대 쓰지 않습니다(SELECT만) — 끄려면 '사용' 해제.
+     <b>그래프 도메인</b>을 지정하면 야간 03:40 배치가 그 도메인의 정의·추출 지침(⚙ 관리)을 기준으로
+     문서를 LLM 판정·구조화해 지식그래프에 병합합니다 — 기준 미달 문서는 제외(excluded)됩니다.
      관리자 토큰은 ⚙ 관리와 공유됩니다.</p>
   <p class="hint err" id="serr"></p>
 </dialog>
@@ -338,7 +342,7 @@ async function loadSources(selName) {
     const tr = document.createElement("tr");
     const fmap = Object.entries(s.field_map).map(([k, v]) => `${k}:${v}`).join(" ");
     [s.source_name, s.table_name, s.id_column, s.ts_column, fmap,
-     s.content_kind, s.enabled ? "Y" : "N"].forEach((v, i) => {  // textContent — XSS 차단
+     s.content_kind, s.domain, s.enabled ? "Y" : "N"].forEach((v, i) => {  // textContent — XSS 차단
       const td = document.createElement("td");
       td.textContent = v ?? "";
       if (i >= 1 && i <= 4) td.className = "mono";
@@ -350,6 +354,7 @@ async function loadSources(selName) {
       tr.classList.add("sel");
       smsg("");
       $("sname").value = s.source_name; $("skind").value = s.content_kind;
+      $("sdomain").value = s.domain || "";
       $("senabled").checked = s.enabled;
       if ($("stable").value !== s.table_name || $("sidc").options.length <= 1) {
         $("stable").value = s.table_name;
@@ -370,6 +375,15 @@ async function loadTables() {
   (await r.json()).tables.forEach(t => sel.add(new Option(t, t)));
   sel.value = cur;
 }
+async function loadDomainOptions() {
+  if ($("sdomain").options.length > 1) return;  // 모달 연 동안 1회만
+  const r = await fetch("/admin/domains", {headers: adminHdr()});
+  if (!r.ok) return;
+  const sel = $("sdomain"), cur = sel.value;
+  sel.length = 1;
+  (await r.json()).domains.forEach(d => sel.add(new Option(d.name, d.name)));
+  sel.value = cur;
+}
 async function loadCols(t) {
   const selects = ["sidc", "stsc", ...ROLE_IDS];
   if (!t) { selects.forEach(id => { $(id).length = 1; }); return; }
@@ -383,7 +397,7 @@ async function loadCols(t) {
     _colCache[t].forEach(c => $(id).add(new Option(`${c.name} (${c.type})`, c.name)));
   });
 }
-$("srcBtn").onclick = () => { sdlg.showModal(); loadSources(); loadTables(); };
+$("srcBtn").onclick = () => { sdlg.showModal(); loadSources(); loadTables(); loadDomainOptions(); };
 $("stable").onchange = () => loadCols($("stable").value);
 $("sclose").onclick = () => sdlg.close();
 $("sform").onsubmit = async (e) => {
@@ -398,6 +412,7 @@ $("sform").onsubmit = async (e) => {
     body: JSON.stringify({source_name: name, table_name: $("stable").value,
                           id_column: $("sidc").value, ts_column: $("stsc").value,
                           field_map: fmap, content_kind: $("skind").value.trim(),
+                          domain: $("sdomain").value,
                           enabled: $("senabled").checked}),
   });
   if (!r.ok) {

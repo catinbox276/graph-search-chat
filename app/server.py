@@ -408,8 +408,9 @@ class SourceIn(BaseModel):
     table_name: str      # 원천 테이블 (읽기 전용 — 우리는 SELECT만)
     id_column: str       # 고유 id 필드
     ts_column: str = ""  # 생성시간 필드 — 증분 워터마크 (빈값 = 전량 1회 소스)
-    field_map: dict      # {역할: 컬럼} 역할=title|body|question|answer|meta
+    field_map: dict      # {역할: 컬럼} 역할=title|body|question|answer|meta|url
     content_kind: str = ""  # 문제해결/가이드 등 — 프롬프트 힌트
+    domain: str = ""     # 그래프 구조화 도메인 — 지정 시 doc_pipeline이 LLM 판정·구조화 (빈값=검색만)
     enabled: bool = True
 
 
@@ -446,9 +447,18 @@ def admin_source_add(inp: SourceIn, request: Request,
     if err:
         con.close()
         raise HTTPException(400, err)
+    domain = inp.domain.strip()
+    if domain:  # 지정 시 닫힌 도메인 목록에 실존해야 함
+        from poc.graph_pipeline import ensure_domain_registry
+        ensure_domain_registry(cur)
+        cur.execute("SELECT COUNT(*) FROM domain_registry WHERE name = :1", [domain])
+        if not cur.fetchone()[0]:
+            con.close()
+            raise HTTPException(400, f"등록되지 않은 도메인: {domain} (⚙ 관리에서 먼저 추가)")
     source_registry.upsert(cur, inp.source_name.strip(), inp.table_name.strip(),
                            inp.id_column.strip(), inp.ts_column.strip(),
-                           inp.field_map, inp.content_kind.strip(), inp.enabled)
+                           inp.field_map, inp.content_kind.strip(), inp.enabled,
+                           domain=domain)
     con.commit()
     con.close()
     return {"ok": True, "source_name": inp.source_name.strip(),

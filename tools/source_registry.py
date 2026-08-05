@@ -39,8 +39,9 @@ def ensure(cur):
             table_name     VARCHAR2(128) NOT NULL,   -- 원천 테이블 (읽기 전용)
             id_column      VARCHAR2(128) NOT NULL,   -- 고유 id 필드
             ts_column      VARCHAR2(128),            -- 생성시간 필드 (증분 워터마크, 없으면 전량 1회)
-            field_map      VARCHAR2(4000) NOT NULL,  -- JSON {역할: 컬럼} 역할=title|body|question|answer|meta
+            field_map      VARCHAR2(4000) NOT NULL,  -- JSON {역할: 컬럼} 역할=title|body|question|answer|meta|url
             content_kind   VARCHAR2(100),            -- 내용 유형 (문제해결/가이드 등) — 프롬프트 힌트
+            domain         VARCHAR2(100),            -- 그래프 구조화 도메인 (NULL=검색만, 지정 시 doc_pipeline 대상)
             enabled        CHAR(1) DEFAULT 'Y',
             last_ingest_ts TIMESTAMP,                -- 증분 적재 워터마크 (배치가 갱신)
             created_at     TIMESTAMP DEFAULT SYSTIMESTAMP
@@ -51,6 +52,12 @@ def ensure(cur):
                            VALUES (:1, :2, :3, :4, :5, :6)""",
                         [name, tbl, idc, tsc or None,
                          json.dumps(fmap, ensure_ascii=False), kind])
+        return
+    # 구버전 테이블에 domain 컬럼이 없으면 추가 (그래프 구조화 대상 지정)
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SOURCE_REGISTRY' AND column_name = 'DOMAIN'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE source_registry ADD (domain VARCHAR2(100))")
 
 
 def table_columns(cur, table_name: str) -> dict:
@@ -114,27 +121,30 @@ def assemble_doc(row: dict) -> tuple:
 def list_sources(cur) -> list:
     ensure(cur)
     cur.execute("""SELECT source_name, table_name, id_column, ts_column, field_map,
-                          content_kind, enabled, last_ingest_ts
+                          content_kind, domain, enabled, last_ingest_ts
                    FROM source_registry ORDER BY source_name""")
     return [{"source_name": r[0], "table_name": r[1], "id_column": r[2],
              "ts_column": r[3] or "", "field_map": json.loads(r[4]),
-             "content_kind": r[5] or "", "enabled": r[6] == "Y",
-             "last_ingest_ts": r[7].isoformat() if r[7] else None}
+             "content_kind": r[5] or "", "domain": r[6] or "",
+             "enabled": r[7] == "Y",
+             "last_ingest_ts": r[8].isoformat() if r[8] else None}
             for r in cur.fetchall()]
 
 
 def upsert(cur, source_name: str, table_name: str, id_column: str, ts_column: str,
-           field_map: dict, content_kind: str, enabled: bool):
+           field_map: dict, content_kind: str, enabled: bool, domain: str = ""):
     ensure(cur)
     cur.execute("""MERGE INTO source_registry s USING dual ON (s.source_name = :n)
                    WHEN MATCHED THEN UPDATE SET table_name = :t, id_column = :i,
-                        ts_column = :ts, field_map = :f, content_kind = :k, enabled = :e
+                        ts_column = :ts, field_map = :f, content_kind = :k,
+                        domain = :dm, enabled = :e
                    WHEN NOT MATCHED THEN INSERT
                         (source_name, table_name, id_column, ts_column, field_map,
-                         content_kind, enabled)
-                   VALUES (:n, :t, :i, :ts, :f, :k, :e)""",
+                         content_kind, domain, enabled)
+                   VALUES (:n, :t, :i, :ts, :f, :k, :dm, :e)""",
                 {"n": source_name, "t": table_name.upper(), "i": id_column.upper(),
                  "ts": ts_column.upper() if ts_column else None,
                  "f": json.dumps({k: v.upper() for k, v in field_map.items()},
                                  ensure_ascii=False),
-                 "k": content_kind or None, "e": "Y" if enabled else "N"})
+                 "k": content_kind or None, "dm": domain or None,
+                 "e": "Y" if enabled else "N"})

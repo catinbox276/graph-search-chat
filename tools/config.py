@@ -124,6 +124,9 @@ SIG_TOPIC_MOVE_SIM = _getf("SIG_TOPIC_MOVE_SIM", 0.50)  # 이보다 멀어지면
 SIG_HASTY_RATIO = _getf("SIG_HASTY_RATIO", 0.3)     # 턴 간격이 중앙값의 이 배수 미만이면 조급함
 RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) — design §7 미해결 값의 초기치
 
+# --- 문서 그래프 구조화 (poc/doc_pipeline.py) ---
+DOC_EXTRACT_LIMIT = _geti("DOC_EXTRACT_LIMIT", 200)  # 실행당 처리 문서 수 (야간 반복으로 소진)
+
 # --- 임베딩 백필 (scripts/embed_corpus.py) ---
 EMBED_BATCH = _geti("EMBED_BATCH", 64)
 EMBED_CONCURRENCY = _geti("EMBED_CONCURRENCY", 4)  # 임베딩 서빙 동시 요청 수

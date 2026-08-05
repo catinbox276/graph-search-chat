@@ -54,6 +54,32 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  name: doc-pipeline
+spec:
+  schedule: "40 3 * * *"   # 매일 03:40 — 도메인 지정 소스의 문서를 LLM 판정·그래프화 (실행당 DOC_EXTRACT_LIMIT건)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"   # 사이드카가 남으면 Job이 안 끝난다
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
+          containers:
+            - name: docs
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
+              command: ["python", "-m", "poc.doc_pipeline"]
+              envFrom:
+                - configMapRef:
+                    name: gsc-env
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
   name: embed-backfill
 spec:
   schedule: "30 3 * * *"   # 매일 03:30 — 새 문서 임베딩 (없으면 즉시 종료)
