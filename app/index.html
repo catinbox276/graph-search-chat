@@ -43,7 +43,7 @@
   button#b:disabled { opacity: .5; }
   /* 관리자 모달 — 셸과 같은 색 문법 */
   dialog#adminDlg { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
-                    width: min(640px, 92vw); }
+                    width: min(880px, 94vw); max-height: 90vh; overflow-y: auto; }
   dialog#adminDlg::backdrop { background: #0006; }
   #adminDlg h3 { margin: 0 0 10px; font-size: 1rem; }
   #adminDlg h3 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .78rem; }
@@ -65,7 +65,7 @@
   #adminDlg .hint.err { color: var(--fail); min-height: 1em; margin-top: 4px; }
   /* 소스 관리 모달 — 관리자 모달과 같은 문법 */
   dialog#srcDlg { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
-                  width: min(760px, 94vw); }
+                  width: min(1020px, 96vw); max-height: 92vh; overflow-y: auto; }
   dialog#srcDlg::backdrop { background: #0006; }
   #srcDlg h3 { margin: 0 0 10px; font-size: 1rem; }
   #srcDlg h3 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .78rem; }
@@ -82,6 +82,12 @@
   #sform button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
   #srcDlg .hint { font-size: .74rem; color: var(--mut); line-height: 1.5; margin: 10px 0 0; }
   #srcDlg .hint.err { color: var(--fail); min-height: 1em; margin-top: 4px; }
+  /* 목록 행: 클릭해서 수정 — 선택된 행은 명확히 표시 */
+  #dlist tbody tr, #slist tbody tr { cursor: pointer; }
+  #dlist tbody tr:hover, #slist tbody tr:hover { background: #0001; }
+  #dlist tbody tr.sel td, #slist tbody tr.sel td { background: var(--path); color: #fff; }
+  /* 저장 성공 메시지 (err 자리 재사용) */
+  #adminDlg .hint.err.ok, #srcDlg .hint.err.ok { color: var(--ok); }
   /* 대화 목록 패널 — 내 세션만, 클릭으로 이어하기 */
   #histPane { position: fixed; left: 0; top: 49px; bottom: 0; width: 272px; z-index: 5;
               background: var(--card); border-right: 1px solid var(--line);
@@ -160,6 +166,7 @@
     <select id="r_question"><option value="">question 컬럼…</option></select>
     <select id="r_answer"><option value="">answer 컬럼…</option></select>
     <select id="r_meta"><option value="">meta 컬럼…</option></select>
+    <select id="r_url"><option value="">url 컬럼…</option></select>
     <button id="ssave">추가/수정</button>
     <button type="button" class="ghost" id="sclose">닫기</button>
   </form>
@@ -270,12 +277,12 @@ fetch("/me").then(r => r.json()).then(m => {
 // 관리자: 도메인 시드 관리 (기존 목록 조회 + 추가/수정 — 삭제는 UI에 없음)
 const dlg = $("adminDlg"), atk = $("atk"), derr = $("derr");
 atk.value = localStorage.getItem("admin_token") || "";
-async function loadDomains() {
-  derr.textContent = "";
-  if (!atk.value) { derr.textContent = "관리자 토큰을 입력하세요"; return; }
-  localStorage.setItem("admin_token", atk.value);
-  const r = await fetch("/admin/domains", {headers: {"X-Admin-Token": atk.value}});
-  if (!r.ok) { derr.textContent = `조회 실패 (${r.status}) — 토큰을 확인하세요`; return; }
+const dmsg = (t, ok) => { derr.textContent = t; derr.classList.toggle("ok", !!ok); };
+async function loadDomains(selName) {
+  dmsg("");
+  if (atk.value) localStorage.setItem("admin_token", atk.value);
+  const r = await fetch("/admin/domains", {headers: adminHdr()});
+  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — SSO 관리자로 로그인했거나 토큰이 맞는지 확인하세요`); return; }
   const tb = $("dlist").querySelector("tbody");
   tb.innerHTML = "";
   (await r.json()).domains.forEach(d => {
@@ -286,7 +293,11 @@ async function loadDomains() {
       tr.appendChild(td);
     });
     tr.children[1].className = "tools";
-    tr.onclick = () => {  // 행 클릭 = 폼에 채워 수정
+    if (d.name === selName) tr.classList.add("sel");
+    tr.onclick = () => {  // 행 클릭 = 선택 표시 + 폼에 채워 수정
+      tb.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel"));
+      tr.classList.add("sel");
+      dmsg("");
       $("dname").value = d.name; $("dtools").value = d.tools; $("dprio").value = d.priority;
       $("dhint").value = d.extract_hint || "";
     };
@@ -294,30 +305,33 @@ async function loadDomains() {
   });
 }
 $("admin").onclick = () => { dlg.showModal(); loadDomains(); };
-atk.onchange = loadDomains;
+atk.onchange = () => loadDomains();
 $("dclose").onclick = () => dlg.close();
 $("dform").onsubmit = async (e) => {
   e.preventDefault();
-  derr.textContent = "";
+  dmsg("");
+  const name = $("dname").value.trim();
   const r = await fetch("/admin/domains", {
     method: "POST",
-    headers: {"Content-Type": "application/json", "X-Admin-Token": atk.value},
-    body: JSON.stringify({name: $("dname").value.trim(), tools: $("dtools").value.trim(),
+    headers: {"Content-Type": "application/json", ...adminHdr()},
+    body: JSON.stringify({name, tools: $("dtools").value.trim(),
                           priority: parseInt($("dprio").value) || 100,
                           extract_hint: $("dhint").value.trim()}),
   });
-  if (!r.ok) { derr.textContent = `저장 실패 (${r.status})`; return; }
-  $("dname").value = ""; $("dtools").value = ""; $("dprio").value = 100; $("dhint").value = "";
-  loadDomains();
+  if (!r.ok) { dmsg(`저장 실패 (${r.status})`); return; }
+  await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
+  dmsg(`✓ 저장 완료 — "${name}" (다음 파이프라인 실행부터 반영)`, true);
 };
 // 관리자: 구조화 원천 테이블 등록 (source_registry — docs/integration.md 접점 2)
 const sdlg = $("srcDlg"), serr = $("serr");
-const ROLE_IDS = ["r_title", "r_body", "r_question", "r_answer", "r_meta"];
+const ROLE_IDS = ["r_title", "r_body", "r_question", "r_answer", "r_meta", "r_url"];
 const adminHdr = () => ({"X-Admin-Token": atk.value});
-async function loadSources() {
-  serr.textContent = "";
+const smsg = (t, ok) => { serr.textContent = t; serr.classList.toggle("ok", !!ok); };
+const _colCache = {};  // 테이블→컬럼 캐시 (행 클릭 때 재조회·깜빡임 방지)
+async function loadSources(selName) {
+  smsg("");
   const r = await fetch("/admin/sources", {headers: adminHdr()});
-  if (!r.ok) { serr.textContent = `조회 실패 (${r.status}) — ⚙ 관리에서 토큰을 확인하세요`; return; }
+  if (!r.ok) { smsg(`조회 실패 (${r.status}) — SSO 관리자 로그인 또는 ⚙ 관리의 토큰이 필요합니다`); return; }
   const tb = $("slist").querySelector("tbody");
   tb.innerHTML = "";
   (await r.json()).sources.forEach(s => {
@@ -330,11 +344,17 @@ async function loadSources() {
       if (i >= 1 && i <= 4) td.className = "mono";
       tr.appendChild(td);
     });
-    tr.onclick = async () => {  // 행 클릭 = 폼에 채워 수정
+    if (s.source_name === selName) tr.classList.add("sel");
+    tr.onclick = async () => {  // 행 클릭 = 선택 표시 + 폼에 채워 수정
+      tb.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel"));
+      tr.classList.add("sel");
+      smsg("");
       $("sname").value = s.source_name; $("skind").value = s.content_kind;
       $("senabled").checked = s.enabled;
-      await loadTables(); $("stable").value = s.table_name;
-      await loadCols(s.table_name);
+      if ($("stable").value !== s.table_name || $("sidc").options.length <= 1) {
+        $("stable").value = s.table_name;
+        await loadCols(s.table_name);  // 같은 테이블이면 건드리지 않음 — 깜빡임 방지
+      }
       $("sidc").value = s.id_column; $("stsc").value = s.ts_column || "";
       ROLE_IDS.forEach(id => { $(id).value = s.field_map[id.slice(2)] || ""; });
     };
@@ -342,6 +362,7 @@ async function loadSources() {
   });
 }
 async function loadTables() {
+  if ($("stable").options.length > 1) return;  // 모달 연 동안 1회만
   const r = await fetch("/admin/sources/tables", {headers: adminHdr()});
   if (!r.ok) return;
   const sel = $("stable"), cur = sel.value;
@@ -351,25 +372,30 @@ async function loadTables() {
 }
 async function loadCols(t) {
   const selects = ["sidc", "stsc", ...ROLE_IDS];
-  selects.forEach(id => { $(id).length = 1; });
-  if (!t) return;
-  const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t), {headers: adminHdr()});
-  if (!r.ok) return;
-  const cols = (await r.json()).columns;
-  selects.forEach(id => cols.forEach(c => $(id).add(new Option(`${c.name} (${c.type})`, c.name))));
+  if (!t) { selects.forEach(id => { $(id).length = 1; }); return; }
+  if (!_colCache[t]) {
+    const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t), {headers: adminHdr()});
+    if (!r.ok) return;
+    _colCache[t] = (await r.json()).columns;
+  }
+  selects.forEach(id => {
+    $(id).length = 1;
+    _colCache[t].forEach(c => $(id).add(new Option(`${c.name} (${c.type})`, c.name)));
+  });
 }
 $("srcBtn").onclick = () => { sdlg.showModal(); loadSources(); loadTables(); };
 $("stable").onchange = () => loadCols($("stable").value);
 $("sclose").onclick = () => sdlg.close();
 $("sform").onsubmit = async (e) => {
   e.preventDefault();
-  serr.textContent = "";
+  smsg("");
   const fmap = {};
   ROLE_IDS.forEach(id => { if ($(id).value) fmap[id.slice(2)] = $(id).value; });
+  const name = $("sname").value.trim();
   const r = await fetch("/admin/sources", {
     method: "POST",
     headers: {"Content-Type": "application/json", ...adminHdr()},
-    body: JSON.stringify({source_name: $("sname").value.trim(), table_name: $("stable").value,
+    body: JSON.stringify({source_name: name, table_name: $("stable").value,
                           id_column: $("sidc").value, ts_column: $("stsc").value,
                           field_map: fmap, content_kind: $("skind").value.trim(),
                           enabled: $("senabled").checked}),
@@ -377,10 +403,11 @@ $("sform").onsubmit = async (e) => {
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;
     try { msg += " — " + (await r.json()).detail; } catch {}
-    serr.textContent = msg;
+    smsg(msg);
     return;
   }
-  loadSources();
+  await loadSources(name);  // 폼은 유지 — 이어서 수정 가능
+  smsg(`✓ 저장 완료 — "${name}" (다음 적재 배치부터 반영)`, true);
 };
 
 document.querySelectorAll(".chips button").forEach(c =>
