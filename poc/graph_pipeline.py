@@ -9,12 +9,16 @@ design.md §2~§5 구현:
   그 성공 판정을 'retracted'로 바꾸고 기여 가중치 회수 (design §4 역방향 supersession)
 - 4계층: 도메인(닫힌 목록, 툴 사용으로 결정) -> 목표 -> 접근법 (LLM 추출)
           -> 행동(tool_calls에서 결정적으로 생성)
-- dedup: 같은 부모 밑 형제 노드와 임베딩 코사인 >= 0.85면 병합 (브루트포스)
+- dedup: 같은 부모 밑 형제와 임베딩 비교 — >=0.92 & 문자 가드(짧은 이름 제외 +
+  difflib ratio) 통과 시 즉시 병합, 아니면 후보들을 LLM 선택 프롬프트로 1회 판정
+  (쌍별 이지선다보다 정확 — ComEM COLING'25. 가드 근거: Graphiti/Neo4j는 임베딩
+  단독 자동 병합을 안 함)
 - 실패 세션: 접근법 노드에 fail_flag + 이유
 - 출처: node_evidence(node_id, session_id)
 
 usage: .venv/bin/python poc/graph_pipeline.py
 """
+import difflib
 import json
 import re
 import statistics
@@ -215,6 +219,38 @@ def llm_same(kind: str, a: str, b: str) -> bool:
         return False
 
 
+def _auto_merge_ok(a: str, b: str) -> bool:
+    """임베딩 ≥HIGH 자동 병합 가드 — 짧은 이름 제외 + 문자 유사도 AND 조건.
+    임베딩 코사인 단독 즉시 병합은 업계 관행에 없음 (Graphiti 3-gram Jaccard,
+    Neo4j 편집거리 AND). 가드에 걸리면 병합을 버리는 게 아니라 LLM 판정으로 넘어간다."""
+    if min(len(a), len(b)) < config.DEDUP_SHORT_NAME_CHARS:
+        return False
+    return difflib.SequenceMatcher(None, a, b).ratio() >= config.DEDUP_CHAR_RATIO
+
+
+def llm_select(kind: str, name: str, cands: list) -> str | None:
+    """후보 형제 여러 개 중 같은 의도 하나를 LLM이 선택 (없으면 없음).
+    쌍별 이지선다 반복보다 정확하고 호출도 1회 (ComEM, COLING 2025).
+    cands: [(sim, node_id, name)] 유사도 내림차순. 반환: 병합 대상 node_id 또는 None."""
+    cands = cands[:config.DEDUP_SELECT_MAX]
+    kw = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+           "max_tokens": 80}
+          if config.LLM_AUX_NO_THINK else {})
+    lines = "\n".join(f"{i + 1}. {n}" for i, (_s, _id, n) in enumerate(cands))
+    resp = llm.chat.completions.create(
+        model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
+        messages=[{"role": "user", "content":
+                   f'기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. '
+                   f'주제·도구가 비슷해도 의도가 다르면 같은 것이 아니다. JSON만 출력: {{"pick": 번호}}\n'
+                   f'기준: {name}\n후보:\n{lines}'}], **kw)
+    m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
+    try:
+        pick = int(json.loads(m.group()).get("pick", 0)) if m else 0
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pick = 0
+    return cands[pick - 1][1] if 1 <= pick <= len(cands) else None
+
+
 def _llm_json(prompt: str) -> dict:
     """LLM 호출 후 응답에서 JSON 오브젝트 1개를 파싱 (실패 시 빈 dict)."""
     resp = llm.chat.completions.create(
@@ -243,10 +279,13 @@ def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
                 sim = cosine(vec, json.loads(nemb.read()))
                 if sim >= SIM_THRESHOLD:
                     cands.append((sim, nid, nname))
-        if node_id is None:
-            for sim, nid, nname in sorted(cands, reverse=True):
-                if sim >= SIM_HIGH or llm_same(LAYER_KIND.get(layer, "개념"), name, nname):
-                    node_id = nid; break
+        if node_id is None and cands:
+            cands.sort(reverse=True)
+            top_sim, top_id, top_name = cands[0]
+            if top_sim >= SIM_HIGH and _auto_merge_ok(name, top_name):
+                node_id = top_id  # 고신뢰 + 문자 가드 통과 — LLM 없이 즉시 병합
+            else:
+                node_id = llm_select(LAYER_KIND.get(layer, "개념"), name, cands)
     else:
         cur.execute("SELECT id FROM nodes WHERE layer = :1 AND name = :2",
                     [layer, name])

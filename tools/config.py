@@ -106,6 +106,11 @@ PATH_SIM_ENTRY = _getf("PATH_SIM_ENTRY", 0.60)
 # 캘리브레이션: 같은 의도 0.81~0.98, 다른 의도 0.34~0.46 (파일 상단 주석 참조)
 DEDUP_SIM_HIGH = _getf("DEDUP_SIM_HIGH", 0.92)     # 이상이면 LLM 확인 없이 즉시 병합
 DEDUP_SIM_THRESHOLD = _getf("DEDUP_SIM_THRESHOLD", 0.70)  # 후보 하한(이 구간은 LLM 확인)
+# 자동 병합 가드 — 임베딩 단독 즉시 병합은 업계에 없음 (Graphiti Jaccard, Neo4j 편집거리 AND).
+# 짧은 이름은 임베딩이 불안정하므로 자동 병합 제외(엔트로피 게이트 유사), 문자 유사도 AND 조건.
+DEDUP_SHORT_NAME_CHARS = _geti("DEDUP_SHORT_NAME_CHARS", 12)  # 미만이면 자동 병합 대신 LLM
+DEDUP_CHAR_RATIO = _getf("DEDUP_CHAR_RATIO", 0.4)  # difflib ratio 하한 (미달이면 LLM으로)
+DEDUP_SELECT_MAX = _geti("DEDUP_SELECT_MAX", 8)    # LLM 후보 선택 프롬프트에 넣는 최대 후보 수
 
 # --- 그래프 유지보수 (poc/graph_maintenance.py) ---
 MAINT_LOW_COUNT = _geti("MAINT_LOW_COUNT", 2)      # 패스1: 이 이하 통행이면 흡수 후보
