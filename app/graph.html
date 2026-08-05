@@ -146,7 +146,7 @@ function showPanel(id) {
   p.innerHTML = `<button class="close" onclick="hidePanel()">✕</button>
     <div style="color:var(--mut);font-size:.75rem">${LAYER_NAME[n.layer]}</div>
     <h3>${n.name}</h3>
-    <div class="kv">사용 <b>${n.uses}</b>회 · 성공 <b>${n.success}</b> · 실패 <b>${n.fail_cnt}</b></div>
+    <div class="kv">사용 <b>${n.uses}</b>회 (문서 ${n.docs} · 대화 ${n.uses - n.docs}) · 성공 <b>${n.success}</b> · 실패 <b>${n.fail_cnt}</b></div>
     ${n.fail_reason ? `<div class="warnbox">⚠ ${n.fail_reason}</div>` : ""}
     <div style="font-weight:600;margin-top:10px">연결 (${nb.length})</div>
     <ul>${nb.sort((a, b) => b.c - a.c).map(x =>

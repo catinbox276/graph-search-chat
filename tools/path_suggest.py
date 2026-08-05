@@ -77,22 +77,33 @@ def suggest_paths(problem: str) -> str:
                         WHERE ev.node_id = n.id AND s.verdict = 'success') AS sc,
                        (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
                         JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                        WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc
+                        WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc,
+                       (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+                        WHERE ev.node_id = n.id AND ev.session_id LIKE 'doc:%') AS dc,
+                       e.weight
                 FROM edges e JOIN nodes n ON n.id = e.dst
-                WHERE e.src = :1 AND n.layer = 3
-                ORDER BY e.weight DESC""", [gid])  # 보정 가중치 순 (원시 빈도 아님)
-            for aid, aname, cnt, reason, sc, fc in cur.fetchall():
+                WHERE e.src = :1 AND n.layer = 3""", [gid])
+            # 서열: 실전 검증(세션 성공) > 문서 근거만 > 실패 우세. 같은 단계 안에서는 보정 가중치 순
+            rows = sorted(cur.fetchall(),
+                          key=lambda r: (0 if r[4] > 0 and r[4] >= r[5]
+                                         else 2 if r[5] > r[4] else 1, -r[7]))
+            for aid, aname, cnt, reason, sc, fc, dc, _w in rows:
                 cur.execute("""SELECT n4.name FROM edges e4
                                JOIN nodes n4 ON n4.id = e4.dst
                                WHERE e4.src = :1 AND n4.layer = 4""", [aid])
                 tools = ", ".join(t[0].replace("tool:", "") for t in cur.fetchall())
+                docs = f", 참고 문서 {dc}건" if dc else ""
                 if fc > sc:  # 실패 우세일 때만 경고 (성공이 우세하면 검증 경로)
-                    out.append(f"  ⚠ 과거 실패 우세 접근 (성공 {sc}/실패 {fc}): {aname}"
+                    out.append(f"  ⚠ 과거 실패 우세 접근 (성공 {sc}/실패 {fc}{docs}): {aname}"
                                f"\n     실패 이유: {reason}"
                                f"\n     → 상황이 다르면 시도 가능하나, 사용자에게 이 이력을 알릴 것")
-                else:
+                elif sc:  # 실전 세션 성공이 있어야만 '검증'
                     mixed = f", 실패 {fc}회 있음" if fc else ""
-                    out.append(f"  ✅ 검증된 경로 (성공 {sc}회{mixed}): {aname}"
+                    out.append(f"  ✅ 검증된 경로 (성공 {sc}회{mixed}{docs}): {aname}"
+                               + (f"\n     사용 도구: {tools}" if tools else ""))
+                else:  # 세션 성공 없음 — 검증 아님을 명시 (대부분 문서 유래)
+                    src = f"문서 {dc}건" if dc else "성공 이력 소급 취소됨"
+                    out.append(f"  📄 미검증 경로 ({src}, 실전 검증 이력 없음): {aname}"
                                + (f"\n     사용 도구: {tools}" if tools else ""))
                 cur.execute("INSERT INTO suggestions (problem, node_id, weight, session_id) "
                             "VALUES (:1, :2, :3, :4)",

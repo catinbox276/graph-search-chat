@@ -292,10 +292,12 @@ def graph_data():
                 WHERE ev.node_id = n.id AND s.verdict = 'success') AS sc,
                (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
                 JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc
+                WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc,
+               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+                WHERE ev.node_id = n.id AND ev.session_id LIKE 'doc:%') AS dc
         FROM nodes n""")
     nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail_reason": r[3],
-              "uses": r[4], "success": r[5], "fail_cnt": r[6],
+              "uses": r[4], "success": r[5], "fail_cnt": r[6], "docs": r[7],
               "fail": r[6] > r[5]}  # 실패 우세만 빨강 (카운트 기준)
              for r in cur.fetchall()]
     cur.execute("SELECT src, dst, raw_count FROM edges")
