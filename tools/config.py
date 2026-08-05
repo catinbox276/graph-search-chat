@@ -129,6 +129,7 @@ RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) �
 DOC_EXTRACT_LIMIT = _geti("DOC_EXTRACT_LIMIT", 200)  # 실행당 처리 문서 수 (야간 반복으로 소진)
 DOC_CONCURRENCY = _geti("DOC_CONCURRENCY", 6)        # LLM 판정 동시 요청 수
 DOC_BODY_CHARS = _geti("DOC_BODY_CHARS", 3000)       # 판정에 넣는 본문 길이(자)
+DOC_PACK_TOKENS = _geti("DOC_PACK_TOKENS", 0)        # 0=문서 1건씩 / N=입력 N토큰 예산으로 묶음 판정
 
 # --- 임베딩 백필 (scripts/embed_corpus.py) ---
 EMBED_BATCH = _geti("EMBED_BATCH", 64)

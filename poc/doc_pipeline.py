@@ -57,6 +57,61 @@ fits=false로 판정할 것:
 - 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
 
 
+PACK_PROMPT = """여러 문서 각각이 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON 배열만 출력.
+
+도메인: {domain}
+도메인 기준·추출 지침: {hint}
+
+문서 목록 — 각 문서는 ===[문서id]=== 로 시작한다:
+{docs}
+
+출력 형식: 문서마다 1개씩, 입력 순서대로 JSON 배열.
+[{{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
+  "goal": "문제/목표 한 문장(fits=true일 때만)", "approach": "핵심 해법 한 문장(fits=true일 때만)"}}, ...]
+
+fits=false로 판정할 것: 도메인과 무관 / 문제도 해법도 없음 / 결말·결론 없음 / 내용이 빈약함.
+각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
+
+PACK_MAX_DOCS = 8  # 묶음당 문서 상한 — 출력 길이·판정 품질 보호
+
+
+def judge_pack(domain: str, hint: str, pack: list, model: str = "",
+               body_chars: int = 3000) -> list:
+    """문서 묶음을 요청 1건으로 판정 — [(doc, verdict)] 반환.
+
+    묶음 응답에서 누락·파싱 실패한 문서는 단건 판정으로 자동 폴백 (유실 없음).
+    pack 원소: (src_id, title, kind, body). DB를 만지지 않아 스레드 병렬 안전.
+    """
+    if len(pack) == 1:
+        d = pack[0]
+        return [(d, judge_doc(domain, hint, d[2], d[1], d[3],
+                              model=model, body_chars=body_chars))]
+    blocks = [f"===[{d[0]}]===\n제목: {(d[1] or '').strip()[:300]}\n{(d[3] or '')[:body_chars]}"
+              for d in pack]
+    prompt = PACK_PROMPT.format(
+        domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
+        docs="\n\n".join(blocks))
+    by_id = {}
+    try:
+        resp = llm.chat.completions.create(
+            model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
+            messages=[{"role": "user", "content": prompt}])
+        m = re.search(r"\[.*\]", resp.choices[0].message.content, re.S)
+        for item in (json.loads(m.group()) if m else []):
+            if isinstance(item, dict) and item.get("id") is not None:
+                by_id[str(item["id"])] = item
+    except Exception:
+        pass  # 아래 단건 폴백이 받는다
+    out = []
+    for d in pack:
+        j = by_id.get(str(d[0]))
+        if j is None:  # 묶음 응답 누락 → 단건 재판정
+            j = judge_doc(domain, hint, d[2], d[1], d[3],
+                          model=model, body_chars=body_chars)
+        out.append((d, j))
+    return out
+
+
 def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
               model: str = "", body_chars: int = 3000) -> dict:
     """문서 1건 LLM 판정 — DB를 만지지 않아 스레드 병렬 안전. 서버 드라이런도 사용."""
@@ -105,9 +160,10 @@ def main():
     limit = args.limit or settings.get_int(st, "doc_extract_limit", config.DOC_EXTRACT_LIMIT)
     conc = max(1, settings.get_int(st, "doc_concurrency", config.DOC_CONCURRENCY))
     body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
+    pack_tokens = settings.get_int(st, "doc_pack_tokens", config.DOC_PACK_TOKENS)
     model = (st.get("doc_extract_model") or "").strip()
     print(f"설정: limit={limit} concurrency={conc} body_chars={body_chars} "
-          f"model={model or CHAT_MODEL}", flush=True)
+          f"pack_tokens={pack_tokens} model={model or CHAT_MODEL}", flush=True)
 
     # 도메인이 지정된 소스만 대상 (미지정 = 검색 전용, 그래프화 안 함).
     # 대화 전용(scope=chat) 도메인은 제외 — 등록 API가 막지만 SQL 직접 수정 대비 2차 방어.
@@ -139,45 +195,60 @@ def main():
         if not docs:
             continue
         budget -= len(docs)
+        # 묶음 구성: 입력 토큰 예산(문자 ≈ 토큰×2 근사)까지 문서를 묶는다.
+        # 0이면 1건씩. 묶음당 상한 PACK_MAX_DOCS — 출력 길이·판정 품질 보호.
+        if pack_tokens <= 0:
+            packs = [[d] for d in docs]
+        else:
+            budget_chars = pack_tokens * 2
+            packs, pk, chars = [], [], 0
+            for d in docs:
+                dlen = min(len(d[3] or ""), body_chars) + 400  # 제목·스캐폴드 여유
+                if pk and (len(pk) >= PACK_MAX_DOCS or chars + dlen > budget_chars):
+                    packs.append(pk)
+                    pk, chars = [], 0
+                pk.append(d)
+                chars += dlen
+            if pk:
+                packs.append(pk)
         print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
-              f"(동시 {conc})", flush=True)
-        # 연속 파이프라인: 판정 요청을 항상 conc건 서버에 걸어둔다 — 하나 끝나면
-        # 즉시 다음 건 투입, 병합(직렬·메인 스레드)은 나머지가 도는 사이에 처리.
+              f"(동시 {conc}, 묶음 {len(packs)}개)", flush=True)
+        # 연속 파이프라인: 판정 요청(묶음)을 항상 conc건 서버에 걸어둔다 — 하나
+        # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
         # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
         ex = ThreadPoolExecutor(max_workers=conc)
-        it = iter(docs)
-        pending = {}
-        for d in docs[:conc]:
+        it = iter(packs)
+        pending = set()
+        for p in packs[:conc]:
             next(it)
-            pending[ex.submit(judge_doc, domain, hint, d[2], d[1], d[3],
-                              model, body_chars)] = d
+            pending.add(ex.submit(judge_pack, domain, hint, p, model, body_chars))
         while pending:
-            finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+            finished, pending = wait(pending, return_when=FIRST_COMPLETED)
             for fut in finished:
-                src_id, title, kind, body = pending.pop(fut)
-                j = fut.result()
-                nd = next(it, None)  # 병합 전에 먼저 다음 건 투입 — 파이프 안 끊김
-                if nd is not None:
-                    pending[ex.submit(judge_doc, domain, hint, nd[2], nd[1], nd[3],
-                                      model, body_chars)] = nd
-                ref = f"doc:{source_name}:{src_id}"[:400]
-                if not j or j.get("_error"):
-                    status, note = "error", (j.get("_error") if j else "LLM 응답 파싱 실패")
-                elif j.get("fits") and j.get("goal") and j.get("approach"):
-                    d = get_or_create(cur, 1, domain, None, ref, use_embedding=False)
-                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, ref)
-                    get_or_create(cur, 3, str(j["approach"])[:400], g, ref)
-                    status, note = "done", str(j.get("reason") or "")[:1000]
-                else:
-                    status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
-                cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
-                               WHERE source_name = :3 AND src_id = :4""",
-                            [status, (note or "")[:1000] or None, source_name, src_id])
-                con.commit()
-                stats[status] += 1
-                mark = {"done": "+", "excluded": "-", "error": "!"}[status]
-                print(f"  {mark} {src_id}: {status}"
-                      f"{' — ' + note if status != 'done' and note else ''}", flush=True)
+                np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
+                if np_ is not None:
+                    pending.add(ex.submit(judge_pack, domain, hint, np_,
+                                          model, body_chars))
+                for (src_id, title, kind, body), j in fut.result():
+                    ref = f"doc:{source_name}:{src_id}"[:400]
+                    if not j or j.get("_error"):
+                        status, note = "error", (j.get("_error") if j
+                                                 else "LLM 응답 파싱 실패")
+                    elif j.get("fits") and j.get("goal") and j.get("approach"):
+                        d = get_or_create(cur, 1, domain, None, ref, use_embedding=False)
+                        g = get_or_create(cur, 2, str(j["goal"])[:400], d, ref)
+                        get_or_create(cur, 3, str(j["approach"])[:400], g, ref)
+                        status, note = "done", str(j.get("reason") or "")[:1000]
+                    else:
+                        status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
+                    cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
+                                   WHERE source_name = :3 AND src_id = :4""",
+                                [status, (note or "")[:1000] or None, source_name, src_id])
+                    con.commit()
+                    stats[status] += 1
+                    mark = {"done": "+", "excluded": "-", "error": "!"}[status]
+                    print(f"  {mark} {src_id}: {status}"
+                          f"{' — ' + note if status != 'done' and note else ''}", flush=True)
         ex.shutdown()
 
     cur.execute("""SELECT NVL(graph_status, '미처리'), COUNT(*) FROM corpus_docs

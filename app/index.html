@@ -198,6 +198,7 @@
     <input id="psLimit" type="number" min="1" placeholder="실행당 건수" title="배치 1회에 처리할 문서 수" style="width:110px">
     <input id="psConc" type="number" min="1" max="32" placeholder="동시 요청" title="LLM 판정 동시 요청 수 — 클수록 빠름 (서빙 부하 고려)" style="width:100px">
     <input id="psChars" type="number" min="200" placeholder="본문 길이(자)" title="판정 프롬프트에 넣는 본문 최대 길이" style="width:110px">
+    <input id="psPack" type="number" min="0" placeholder="묶음 토큰 (0=1건씩)" title="입력 이 토큰 예산까지 문서를 묶어 요청 1건으로 판정 (예: 10000). 묶음당 최대 8건. 누락 문서는 단건 자동 폴백" style="width:140px">
     <select id="psModel" title="전처리 전용 모델 — 빈값이면 대화 모델 사용 (같은 채팅 호스트에서 서빙돼야 함)">
       <option value="">전처리 모델 (빈값=대화 모델)</option></select>
     <button id="pssave">설정 저장</button>
@@ -446,7 +447,7 @@ async function loadPipelineSettings() {
   if (!r.ok) return;
   const s = await r.json();
   $("psLimit").value = s.doc_extract_limit; $("psConc").value = s.doc_concurrency;
-  $("psChars").value = s.doc_body_chars;
+  $("psChars").value = s.doc_body_chars; $("psPack").value = s.doc_pack_tokens;
   const sel = $("psModel");
   if (sel.options.length <= 1) {
     const m = await fetch("/models").then(x => x.json()).catch(() => null);
@@ -460,7 +461,8 @@ $("psform").onsubmit = async (e) => {
   const r = await fetch("/admin/pipeline-settings", {
     method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
     body: JSON.stringify({doc_extract_limit: $("psLimit").value, doc_concurrency: $("psConc").value,
-                          doc_body_chars: $("psChars").value, doc_extract_model: $("psModel").value}),
+                          doc_body_chars: $("psChars").value, doc_pack_tokens: $("psPack").value,
+                          doc_extract_model: $("psModel").value}),
   });
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;
