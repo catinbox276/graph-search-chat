@@ -441,6 +441,31 @@ def admin_sources(request: Request, x_admin_token: str = Header(default="")):
     return {"sources": rows}
 
 
+@app.get("/admin/doc-status")
+def admin_doc_status(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 문서 구조화 진행 현황 — 도메인 지정 소스별 상태 카운트 (UI 프로그래스용)."""
+    check_admin(request, x_admin_token)
+    con = db()
+    cur = con.cursor()
+    cur.execute("""
+        SELECT r.source_name, r.domain,
+               COUNT(d.src_id),
+               SUM(CASE WHEN d.graph_status = 'done' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN d.graph_status = 'excluded' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN d.graph_status = 'error' THEN 1 ELSE 0 END),
+               SUM(CASE WHEN d.graph_status IS NULL AND d.src_id IS NOT NULL
+                        THEN 1 ELSE 0 END)
+        FROM source_registry r
+        LEFT JOIN corpus_docs d ON d.source_name = r.source_name
+        WHERE r.domain IS NOT NULL
+        GROUP BY r.source_name, r.domain ORDER BY r.domain, r.source_name""")
+    rows = [{"source": r[0], "domain": r[1], "total": r[2] or 0, "done": r[3] or 0,
+             "excluded": r[4] or 0, "error": r[5] or 0, "pending": r[6] or 0}
+            for r in cur.fetchall()]
+    con.close()
+    return {"sources": rows}
+
+
 @app.post("/admin/sources")
 def admin_source_add(inp: SourceIn, request: Request,
                      x_admin_token: str = Header(default="")):

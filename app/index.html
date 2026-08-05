@@ -83,6 +83,15 @@
                   border: 1px solid var(--line); }
   #sform button.warn, #dform button.warn, #psform button.warn {
     background: #fff; color: var(--fail); border: 1px solid var(--fail); }
+  #docstat .prow { display: flex; align-items: center; gap: 8px; margin: 3px 0;
+                   font-size: .78rem; }
+  #docstat .prow .plabel { width: 200px; text-align: right; color: var(--mut);
+                           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #docstat .prow.agg .plabel { font-weight: 600; color: var(--ink); }
+  #docstat .pbar { flex: 1; display: flex; height: 12px; border-radius: 6px;
+                   overflow: hidden; background: #e5e7eb; }
+  #docstat .pbar i { display: block; height: 100%; }
+  #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
   #psform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap;
             align-items: center; margin-top: 6px; }
   #psform input, #psform select { padding: 7px 10px; border-radius: 8px;
@@ -196,6 +205,8 @@
     <button type="button" class="ghost" id="sclose">닫기</button>
   </form>
   <div id="dryout"></div>
+  <h4>처리 현황 <small>문서 구조화 진행도 — 열려 있는 동안 5초마다 갱신</small></h4>
+  <div id="docstat"><span class="hint">불러오는 중…</span></div>
   <h4>전처리 설정 <small>전역 — 저장하면 다음 배치(야간 03:40 또는 수동)부터, 재배포 불필요</small></h4>
   <form id="psform" method="dialog">
     <input id="psLimit" type="number" min="1" placeholder="실행당 건수" title="배치 1회에 처리할 문서 수" style="width:110px">
@@ -448,7 +459,45 @@ async function loadCols(t) {
     _colCache[t].forEach(c => $(id).add(new Option(`${c.name} (${c.type})`, c.name)));
   });
 }
-$("srcBtn").onclick = () => { sdlg.showModal(); loadSources(); loadTables(); loadDomainOptions(); loadPipelineSettings(); };
+$("srcBtn").onclick = () => { sdlg.showModal(); loadSources(); loadTables(); loadDomainOptions(); loadPipelineSettings(); startDocStatus(); };
+
+// 처리 현황 프로그래스 — 전체 > 도메인 > 소스 3단, 대화상자 열려 있는 동안 폴링
+let dsTimer = null;
+function startDocStatus() {
+  loadDocStatus();
+  clearInterval(dsTimer);
+  dsTimer = setInterval(() => sdlg.open ? loadDocStatus() : clearInterval(dsTimer), 5000);
+}
+function pRow(label, s, agg) {
+  const seg = (n, c) => s.total ? `<i style="width:${n / s.total * 100}%;background:${c}"></i>` : "";
+  const procd = s.done + s.excluded + s.error;
+  const pct = s.total ? Math.round(procd / s.total * 100) : 0;
+  return `<div class="prow${agg ? " agg" : ""}">
+    <span class="plabel" title="${label}">${label}</span>
+    <span class="pbar">${seg(s.done, "#16a34a")}${seg(s.excluded, "#9ca3af")}${seg(s.error, "#dc2626")}</span>
+    <span class="pnum">${pct}% — 반영 ${s.done} · 제외 ${s.excluded}${s.error ? ` · <b style="color:#dc2626">오류 ${s.error}</b>` : ""} · 미처리 ${s.pending}</span>
+  </div>`;
+}
+async function loadDocStatus() {
+  const box = $("docstat");
+  const r = await fetch("/admin/doc-status", {headers: adminHdr()}).catch(() => null);
+  if (!r?.ok) { box.innerHTML = `<span class="hint">현황 조회 실패 — 관리자 인증을 확인하세요</span>`; return; }
+  const rows = (await r.json()).sources;
+  if (!rows.length) { box.innerHTML = `<span class="hint">그래프 도메인이 지정된 소스가 없습니다</span>`; return; }
+  const zero = () => ({total: 0, done: 0, excluded: 0, error: 0, pending: 0});
+  const add = (a, s) => ["total", "done", "excluded", "error", "pending"].forEach(k => a[k] += s[k]);
+  const tot = zero(), doms = {};
+  rows.forEach(s => { add(tot, s); (doms[s.domain] ??= zero()); add(doms[s.domain], s); });
+  let html = pRow("전체", tot, true);
+  Object.entries(doms).forEach(([d, agg]) => {
+    html += pRow(`도메인: ${d}`, agg, true);
+    rows.filter(s => s.domain === d).forEach(s => { html += pRow(`└ ${s.source}`, s); });
+  });
+  box.innerHTML = html +
+    `<div class="hint" style="margin-top:4px"><i style="color:#16a34a">■</i> 그래프 반영
+     <i style="color:#9ca3af">■</i> 기준 미달 제외 <i style="color:#dc2626">■</i> 오류
+     <i style="color:#e5e7eb">■</i> 미처리 — 초기화하면 미처리로 돌아가고 다음 배치가 재구조화</div>`;
+}
 
 // 전처리 설정 (전역) + 소스별 액션 (드라이런 / 실패 재시도 / 초기화 재처리)
 async function loadPipelineSettings() {
@@ -525,6 +574,7 @@ async function reprocess(mode, label) {
   }
   const j = await r.json();
   smsg(`✓ ${label}: ${j.reset}건 미처리로 — ${j.note}`, true);
+  loadDocStatus();
 }
 $("sretry").onclick = () => reprocess("errors", "실패 재시도");
 $("sreset").onclick = () => reprocess("reset", "초기화 재처리");
@@ -558,6 +608,7 @@ $("psresetall").onclick = async () => {
     $("psmsg").textContent = msg; return;
   }
   $("psmsg").textContent = `✓ 전체 초기화: ${fmtResetSummary(await r.json())}`;
+  loadDocStatus();
 };
 $("stable").onchange = () => loadCols($("stable").value);
 $("sclose").onclick = () => sdlg.close();
