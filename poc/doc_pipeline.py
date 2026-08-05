@@ -23,7 +23,7 @@ usage: .venv/bin/python -m poc.doc_pipeline [--limit N]
 """
 import argparse
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 
 import oracledb
@@ -141,14 +141,25 @@ def main():
         budget -= len(docs)
         print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
               f"(동시 {conc})", flush=True)
-        # LLM 판정은 동시(스레드 — DB 접근 없음), 그래프 병합은 아래에서 직렬
-        for i in range(0, len(docs), conc):
-            chunk = docs[i:i + conc]
-            with ThreadPoolExecutor(max_workers=conc) as ex:
-                judged = list(ex.map(
-                    lambda d: judge_doc(domain, hint, d[2], d[1], d[3],
-                                        model=model, body_chars=body_chars), chunk))
-            for (src_id, title, kind, body), j in zip(chunk, judged):
+        # 연속 파이프라인: 판정 요청을 항상 conc건 서버에 걸어둔다 — 하나 끝나면
+        # 즉시 다음 건 투입, 병합(직렬·메인 스레드)은 나머지가 도는 사이에 처리.
+        # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
+        ex = ThreadPoolExecutor(max_workers=conc)
+        it = iter(docs)
+        pending = {}
+        for d in docs[:conc]:
+            next(it)
+            pending[ex.submit(judge_doc, domain, hint, d[2], d[1], d[3],
+                              model, body_chars)] = d
+        while pending:
+            finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in finished:
+                src_id, title, kind, body = pending.pop(fut)
+                j = fut.result()
+                nd = next(it, None)  # 병합 전에 먼저 다음 건 투입 — 파이프 안 끊김
+                if nd is not None:
+                    pending[ex.submit(judge_doc, domain, hint, nd[2], nd[1], nd[3],
+                                      model, body_chars)] = nd
                 ref = f"doc:{source_name}:{src_id}"[:400]
                 if not j or j.get("_error"):
                     status, note = "error", (j.get("_error") if j else "LLM 응답 파싱 실패")
@@ -167,6 +178,7 @@ def main():
                 mark = {"done": "+", "excluded": "-", "error": "!"}[status]
                 print(f"  {mark} {src_id}: {status}"
                       f"{' — ' + note if status != 'done' and note else ''}", flush=True)
+        ex.shutdown()
 
     cur.execute("""SELECT NVL(graph_status, '미처리'), COUNT(*) FROM corpus_docs
                    GROUP BY graph_status""")
