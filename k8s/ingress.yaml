@@ -1,0 +1,31 @@
+# 외부 접근 인그레스 — 채팅 UI(/)와 Keycloak(/auth)을 같은 호스트에서 서빙.
+# 접속: http://gsc-dalgo.quantumcns.ai (nginx 인그레스, 115.71.7.200 경유)
+# SSE 스트리밍 때문에 proxy-buffering off + 타임아웃 1시간.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gsc-app
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: gsc-dalgo.quantumcns.ai
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gsc-app
+                port:
+                  number: 8500

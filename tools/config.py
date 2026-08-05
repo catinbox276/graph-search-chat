@@ -73,6 +73,24 @@ RERANK_MODEL = _get("RERANK_MODEL", "")
 DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
 ADMIN_TOKEN = _get("ADMIN_TOKEN", "poc-admin")
 
+# --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
+# none    = 인증 없음(로컬 개발 기본)
+# header  = 사내 기본 — 전단 SSO가 인증을 끝내고 헤더로 넘겨주는 userId·role 2개만 소비.
+#           전제: 앱에 전단 우회 직접 접근 불가(헤더 위조 방지는 네트워크가 보장).
+# keycloak= 전단 프록시가 없는 환경 — 앱이 직접 OIDC 코드 플로우 + 서명 세션 쿠키.
+AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
+SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명
+SSO_ROLE_HEADER = _get("SSO_ROLE_HEADER", "X-Auth-Request-Groups")  # role 헤더명(구분자 ,;공백)
+KEYCLOAK_PUBLIC_URL = _get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080").rstrip("/")
+KEYCLOAK_INTERNAL_URL = _get("KEYCLOAK_INTERNAL_URL", KEYCLOAK_PUBLIC_URL).rstrip("/")
+KEYCLOAK_REALM = _get("KEYCLOAK_REALM", "gsc")
+OIDC_CLIENT_ID = _get("OIDC_CLIENT_ID", "gsc-app")
+OIDC_CLIENT_SECRET = _get("OIDC_CLIENT_SECRET", "")
+OIDC_ADMIN_ROLE = _get("OIDC_ADMIN_ROLE", "gsc-admin")  # 이 역할 보유 시 관리자(header·keycloak 공통)
+APP_BASE_URL = _get("APP_BASE_URL", "http://localhost:8500").rstrip("/")  # redirect_uri 기준
+SESSION_SECRET = _get("SESSION_SECRET", "gsc-poc-session-secret")  # 사내 전환 시 Secret로
+SESSION_MAX_AGE = _geti("SESSION_MAX_AGE", 28800)  # 로그인 쿠키 수명(초) — 기본 8시간
+
 # --- LLM 호출 ---
 LLM_TEMPERATURE = _getf("LLM_TEMPERATURE", 0.0)
 

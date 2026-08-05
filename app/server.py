@@ -16,25 +16,29 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import oracledb
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from tools.oracle_checkpointer import OracleSaver
 from pydantic import BaseModel
 
 from agent.agent import build_agent
+from app import auth
 from tools import config, model_registry
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 from tools.session_ctx import current_session
 
 app = FastAPI()
+app.include_router(auth.router)  # SSO: /oidc/login·callback·logout, /me
 _agents = {}          # model_name -> agent (모델별 캐시)
 _saver = None         # 공유 checkpointer (같은 세션이 모델 바꿔도 기억 유지)
 ADMIN_TOKEN = config.ADMIN_TOKEN
 
 
-def check_admin(token):
-    if token != ADMIN_TOKEN:
-        raise HTTPException(403, "관리자 토큰이 필요합니다 (X-Admin-Token)")
+def check_admin(request: Request, token: str):
+    """관리자 = SSO 관리자 역할(gsc-admin) 또는 X-Admin-Token(스크립트·비상용)."""
+    if token != ADMIN_TOKEN and not auth.is_admin(request):
+        raise HTTPException(403, "관리자 권한이 필요합니다 "
+                                 "(SSO 관리자 역할 또는 X-Admin-Token)")
 
 
 async def get_agent(model_name: str | None):
@@ -74,9 +78,15 @@ async def startup():
               tool_calls CLOB,
               answer     CLOB,
               verdict    VARCHAR2(20),   -- 세션 게이트 판정 (success/fail/unknown)
+              user_id    VARCHAR2(64),   -- SSO 로그인 사용자 (재발 판정을 사용자 단위로)
               PRIMARY KEY (id, turn)
             )
         """)
+        con.commit()
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SESSIONS' AND column_name = 'USER_ID'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE sessions ADD (user_id VARCHAR2(64))")
         con.commit()
     con.close()
 
@@ -87,15 +97,16 @@ class ChatIn(BaseModel):
     model: str | None = None  # 사용자가 선택한 LLM (미지정 시 레지스트리 기본값)
 
 
-def log_turn(sid: str, question: str, calls: list, answer: str):
+def log_turn(sid: str, question: str, calls: list, answer: str,
+             user: str | None = None):
     con = db()
     cur = con.cursor()
     cur.execute("SELECT NVL(MAX(turn),0)+1 FROM sessions WHERE id = :1", [sid])
     turn = cur.fetchone()[0]
     cur.execute(
-        "INSERT INTO sessions (id, turn, question, tool_calls, answer) "
-        "VALUES (:1, :2, :3, :4, :5)",
-        [sid, turn, question, json.dumps(calls, ensure_ascii=False), answer])
+        "INSERT INTO sessions (id, turn, question, tool_calls, answer, user_id) "
+        "VALUES (:1, :2, :3, :4, :5, :6)",
+        [sid, turn, question, json.dumps(calls, ensure_ascii=False), answer, user])
     con.commit()
     con.close()
 
@@ -125,8 +136,10 @@ def prettify_result(result: str) -> str:
 
 
 @app.post("/chat/stream")
-async def chat_stream(inp: ChatIn):
+async def chat_stream(inp: ChatIn, request: Request):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""
+    u = auth.require_user(request)
+    uid = (u or {}).get("user")
     sid = inp.session_id or str(uuid.uuid4())
 
     async def gen():
@@ -174,7 +187,7 @@ async def chat_stream(inp: ChatIn):
         except Exception as e:
             answer = answer or f"[오류] {e}"
             yield sse({"type": "error", "message": str(e)})
-        log_turn(sid, inp.message, calls, answer)
+        log_turn(sid, inp.message, calls, answer, user=uid)
         yield sse({"type": "answer", "text": answer,
                    "elapsed_sec": round(time.time() - t0, 1)})
 
@@ -182,8 +195,9 @@ async def chat_stream(inp: ChatIn):
 
 
 @app.post("/chat")
-async def chat(inp: ChatIn):
+async def chat(inp: ChatIn, request: Request):
     """비스트리밍 API (스크립트용). 멀티턴 기억 동일 적용."""
+    u = auth.require_user(request)
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
     current_session.set(sid)
@@ -199,7 +213,7 @@ async def chat(inp: ChatIn):
              for m in result["messages"]
              for c in (getattr(m, "tool_calls", None) or [])]
     answer = result["messages"][-1].content
-    log_turn(sid, inp.message, calls, answer)
+    log_turn(sid, inp.message, calls, answer, user=(u or {}).get("user"))
     return {"session_id": sid, "answer": answer, "tool_calls": calls,
             "elapsed_sec": round(time.time() - t0, 1)}
 
@@ -211,7 +225,9 @@ def shell_css():
 
 
 @app.get("/")
-def index():
+def index(request: Request):
+    if (r := auth.page_guard(request)):
+        return r
     return FileResponse(ROOT / "app" / "index.html",
                         headers={"Cache-Control": "no-store"})
 
@@ -242,7 +258,9 @@ def graph_data():
 
 
 @app.get("/graph")
-def graph_page():
+def graph_page(request: Request):
+    if (r := auth.page_guard(request)):
+        return r
     return FileResponse(ROOT / "app" / "graph.html",
                         headers={"Cache-Control": "no-store"})
 
@@ -261,9 +279,9 @@ def models():
 
 
 @app.post("/admin/models/sync")
-def admin_sync(x_admin_token: str = Header(default="")):
+def admin_sync(request: Request, x_admin_token: str = Header(default="")):
     """관리자: 모델 서빙에서 목록 동기화(등록)."""
-    check_admin(x_admin_token)
+    check_admin(request, x_admin_token)
     return model_registry.sync_from_serving()
 
 
@@ -273,9 +291,10 @@ class SelectIn(BaseModel):
 
 
 @app.post("/admin/models/select")
-def admin_select(inp: SelectIn, x_admin_token: str = Header(default="")):
+def admin_select(inp: SelectIn, request: Request,
+                 x_admin_token: str = Header(default="")):
     """관리자: 종류별 기본 모델 지정. 임베딩 교체는 전체 재백필 필요."""
-    check_admin(x_admin_token)
+    check_admin(request, x_admin_token)
     model_registry.set_default(inp.kind, inp.name)
     warn = None
     if inp.kind == "embedding":
@@ -293,9 +312,9 @@ class DomainIn(BaseModel):
 
 
 @app.get("/admin/domains")
-def admin_domains(x_admin_token: str = Header(default="")):
+def admin_domains(request: Request, x_admin_token: str = Header(default="")):
     """관리자: 1층 도메인 닫힌 목록 조회 (시드 테이블 domain_registry)."""
-    check_admin(x_admin_token)
+    check_admin(request, x_admin_token)
     from poc.graph_pipeline import ensure_domain_registry
     con = db()
     cur = con.cursor()
@@ -310,14 +329,15 @@ def admin_domains(x_admin_token: str = Header(default="")):
 
 
 @app.post("/admin/domains")
-def admin_domain_add(inp: DomainIn, x_admin_token: str = Header(default="")):
+def admin_domain_add(inp: DomainIn, request: Request,
+                     x_admin_token: str = Header(default="")):
     """관리자: 도메인 추가/수정 — 닫힌 1층 목록의 유일한 확장 통로 (사람 전용).
 
     다음 파이프라인 실행(야간 03:00 또는 수동)부터 신규 세션 분류에 반영된다.
     기존 세션 소급 재분류는 하지 않는다(안전 기본값). 삭제 API는 일부러 없음 —
     도메인 삭제·병합은 기존 노드 재배치가 필요한 신중한 작업이라 SQL로만.
     """
-    check_admin(x_admin_token)
+    check_admin(request, x_admin_token)
     if not inp.name.strip() or not inp.tools.strip():
         raise HTTPException(400, "name과 tools(쉼표구분)는 필수입니다")
     from poc.graph_pipeline import ensure_domain_registry

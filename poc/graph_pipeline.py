@@ -109,6 +109,11 @@ def ddl(cur):
                    WHERE table_name = 'SESSIONS' AND column_name = 'TS'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE sessions ADD (ts TIMESTAMP DEFAULT SYSTIMESTAMP)")
+    # user_id(SSO 로그인)가 없으면 추가 — 재발 판정을 사용자 단위로 매칭하는 데 쓴다
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SESSIONS' AND column_name = 'USER_ID'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE sessions ADD (user_id VARCHAR2(64))")
     ensure_domain_registry(cur)
 
 
@@ -359,10 +364,13 @@ def retract_recurrences(cur, task_ids):
     노드·증거는 보존 (성공/실패는 불리언이 아니라 판정 카운트 — 'retracted'는
     path_suggest의 success 집계에서 자연히 빠진다).
     태스크 세션(selfplay)은 제외 — 반복 태스크는 의도된 재실행이지 재발이 아니다.
-    PoC 한계: 사용자 식별이 없어 전 세션을 같은 사용자로 근사한다.
+    재발 매칭은 같은 사용자(user_id — SSO 로그인) 안에서만 한다. user_id가 없는
+    구세션끼리는 종전처럼 한 사용자로 근사한다(다른 사람이 같은 문제를 만난 건
+    재발이 아니라 오히려 경로가 유효하다는 신호이므로 교차 매칭 금지).
     """
-    cur.execute("SELECT id, ts, question, verdict FROM sessions WHERE turn = 1 ORDER BY ts")
-    sess = [(sid, ts, _read(q), v) for sid, ts, q, v in cur.fetchall()
+    cur.execute("SELECT id, ts, question, verdict, user_id FROM sessions "
+                "WHERE turn = 1 ORDER BY ts")
+    sess = [(sid, ts, _read(q), v, uid) for sid, ts, q, v, uid in cur.fetchall()
             if sid.split("-")[0] not in task_ids and ts is not None]
     vec_cache = {}
 
@@ -372,12 +380,14 @@ def retract_recurrences(cur, task_ids):
         return vec_cache[sid]
 
     retracted = 0
-    for i, (sid, ts0, q, v) in enumerate(sess):
+    for i, (sid, ts0, q, v, uid) in enumerate(sess):
         if v != "success":
             continue
-        for sid2, ts2, q2, _v2 in sess[i + 1:]:
+        for sid2, ts2, q2, _v2, uid2 in sess[i + 1:]:
             if (ts2 - ts0).total_seconds() / 86400 > config.RECUR_DAYS:
                 break
+            if uid != uid2:  # 다른 사용자의 같은 질문은 재발이 아님
+                continue
             if cosine(qvec(sid, q), qvec(sid2, q2)) < config.SIG_REPEAT_SIM:
                 continue
             cur.execute("SELECT node_id FROM node_evidence WHERE session_id = :1", [sid])
