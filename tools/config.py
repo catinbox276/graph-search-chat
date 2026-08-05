@@ -125,7 +125,10 @@ SIG_HASTY_RATIO = _getf("SIG_HASTY_RATIO", 0.3)     # 턴 간격이 중앙값의
 RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) — design §7 미해결 값의 초기치
 
 # --- 문서 그래프 구조화 (poc/doc_pipeline.py) ---
+# 아래 3개는 기본값 — 운영 중 변경은 app_settings(관리 UI 📚 소스 > 전처리 설정)가 우선
 DOC_EXTRACT_LIMIT = _geti("DOC_EXTRACT_LIMIT", 200)  # 실행당 처리 문서 수 (야간 반복으로 소진)
+DOC_CONCURRENCY = _geti("DOC_CONCURRENCY", 6)        # LLM 판정 동시 요청 수
+DOC_BODY_CHARS = _geti("DOC_BODY_CHARS", 3000)       # 판정에 넣는 본문 길이(자)
 
 # --- 임베딩 백필 (scripts/embed_corpus.py) ---
 EMBED_BATCH = _geti("EMBED_BATCH", 64)

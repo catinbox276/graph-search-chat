@@ -10,13 +10,20 @@
 - 증거는 node_evidence에 "doc:소스명:원천id"로 남는다. sessions와 조인되지 않으므로
   성공/실패 판정 카운트에는 안 섞이고, 통행(raw_count)·출처 추적에만 기여한다.
 
-멱등·이어하기: graph_status IS NULL 인 문서만 처리. 실행당 DOC_EXTRACT_LIMIT건
-(기본 200) — 야간 반복(03:40 CronJob)으로 점진 소진한다.
+실행 구조: LLM 판정은 동시(스레드풀, 판정만 — DB 없음), 그래프 병합은 직렬
+(커서 공유 안전). 멱등·이어하기: graph_status IS NULL만 처리, 문서마다 커밋.
+
+운영 설정(app_settings — 관리 UI에서 재배포 없이 변경, 없으면 .env 기본값):
+  doc_extract_limit  실행당 처리 문서 수 (기본 DOC_EXTRACT_LIMIT=200)
+  doc_concurrency    LLM 판정 동시 요청 수 (기본 DOC_CONCURRENCY=6)
+  doc_body_chars     판정에 넣는 본문 길이 (기본 DOC_BODY_CHARS=3000)
+  doc_extract_model  전처리 전용 모델명 (빈값=대화 모델. CHAT_URL 호스트에서 서빙돼야 함)
 
 usage: .venv/bin/python -m poc.doc_pipeline [--limit N]
 """
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import oracledb
@@ -24,9 +31,12 @@ import oracledb
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools import config  # noqa: E402
+from tools import config, settings  # noqa: E402
 from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
-from poc.graph_pipeline import _llm_json, ddl, get_or_create  # noqa: E402
+from poc.graph_pipeline import CHAT_MODEL, ddl, get_or_create, llm  # noqa: E402
+
+import json  # noqa: E402
+import re  # noqa: E402
 
 DOC_PROMPT = """문서가 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
 
@@ -47,6 +57,23 @@ fits=false로 판정할 것:
 - 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
 
 
+def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
+              model: str = "", body_chars: int = 3000) -> dict:
+    """문서 1건 LLM 판정 — DB를 만지지 않아 스레드 병렬 안전. 서버 드라이런도 사용."""
+    prompt = DOC_PROMPT.format(
+        domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
+        kind=(kind or "").strip(), title=(title or "").strip()[:300],
+        body=(body or "")[:body_chars])
+    try:
+        resp = llm.chat.completions.create(
+            model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
+            messages=[{"role": "user", "content": prompt}])
+        m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
+        return json.loads(m.group()) if m else {}
+    except Exception as e:  # 판정 1건 실패가 배치를 죽이지 않게
+        return {"_error": str(e)[:300]}
+
+
 def doc_ddl(cur):
     """corpus_docs에 구조화 상태 컬럼 + node_evidence 참조 폭 확장 (멱등)."""
     for col, spec in (("GRAPH_STATUS", "graph_status VARCHAR2(20)"),
@@ -65,15 +92,22 @@ def doc_ddl(cur):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=config.DOC_EXTRACT_LIMIT,
-                    help="이번 실행에서 처리할 최대 문서 수")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="이번 실행 처리 문서 수 (0=설정값 doc_extract_limit)")
     args = ap.parse_args()
 
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
     ddl(cur)      # nodes/edges/node_evidence/domain_registry 보장
     doc_ddl(cur)
+    st = settings.get_all(cur)
     con.commit()
+    limit = args.limit or settings.get_int(st, "doc_extract_limit", config.DOC_EXTRACT_LIMIT)
+    conc = max(1, settings.get_int(st, "doc_concurrency", config.DOC_CONCURRENCY))
+    body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
+    model = (st.get("doc_extract_model") or "").strip()
+    print(f"설정: limit={limit} concurrency={conc} body_chars={body_chars} "
+          f"model={model or CHAT_MODEL}", flush=True)
 
     # 도메인이 지정된 소스만 대상 (미지정 = 검색 전용, 그래프화 안 함).
     # 대화 전용(scope=chat) 도메인은 제외 — 등록 API가 막지만 SQL 직접 수정 대비 2차 방어.
@@ -87,7 +121,7 @@ def main():
         print("그래프 구조화 대상 소스 없음 (소스 관리에서 도메인을 지정하면 대상이 됨)")
         return
 
-    budget = args.limit
+    budget = limit
     stats = {"done": 0, "excluded": 0, "error": 0}
     for source_name, domain, hint in sources:
         if budget <= 0:
@@ -104,30 +138,35 @@ def main():
                 for r in cur.fetchall()]
         if not docs:
             continue
-        print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작", flush=True)
-        for src_id, title, kind, body in docs:
-            budget -= 1
-            ref = f"doc:{source_name}:{src_id}"[:400]
-            j = _llm_json(DOC_PROMPT.format(
-                domain=domain, hint=hint.strip() or "(지침 없음 — 도메인명 기준으로 판정)",
-                kind=kind.strip(), title=title.strip()[:300], body=(body or "")[:3000]))
-            if not j:
-                status, note = "error", "LLM 응답 파싱 실패"
-            elif j.get("fits") and j.get("goal") and j.get("approach"):
-                d = get_or_create(cur, 1, domain, None, ref, use_embedding=False)
-                g = get_or_create(cur, 2, str(j["goal"])[:400], d, ref)
-                get_or_create(cur, 3, str(j["approach"])[:400], g, ref)
-                status, note = "done", str(j.get("reason") or "")[:1000]
-            else:
-                status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
-            cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
-                           WHERE source_name = :3 AND src_id = :4""",
-                        [status, note or None, source_name, src_id])
-            con.commit()
-            stats[status] += 1
-            mark = {"done": "+", "excluded": "-", "error": "!"}[status]
-            print(f"  {mark} {src_id}: {status}"
-                  f"{' — ' + note if status != 'done' and note else ''}", flush=True)
+        budget -= len(docs)
+        print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
+              f"(동시 {conc})", flush=True)
+        # LLM 판정은 동시(스레드 — DB 접근 없음), 그래프 병합은 아래에서 직렬
+        for i in range(0, len(docs), conc):
+            chunk = docs[i:i + conc]
+            with ThreadPoolExecutor(max_workers=conc) as ex:
+                judged = list(ex.map(
+                    lambda d: judge_doc(domain, hint, d[2], d[1], d[3],
+                                        model=model, body_chars=body_chars), chunk))
+            for (src_id, title, kind, body), j in zip(chunk, judged):
+                ref = f"doc:{source_name}:{src_id}"[:400]
+                if not j or j.get("_error"):
+                    status, note = "error", (j.get("_error") if j else "LLM 응답 파싱 실패")
+                elif j.get("fits") and j.get("goal") and j.get("approach"):
+                    d = get_or_create(cur, 1, domain, None, ref, use_embedding=False)
+                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, ref)
+                    get_or_create(cur, 3, str(j["approach"])[:400], g, ref)
+                    status, note = "done", str(j.get("reason") or "")[:1000]
+                else:
+                    status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
+                cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
+                               WHERE source_name = :3 AND src_id = :4""",
+                            [status, (note or "")[:1000] or None, source_name, src_id])
+                con.commit()
+                stats[status] += 1
+                mark = {"done": "+", "excluded": "-", "error": "!"}[status]
+                print(f"  {mark} {src_id}: {status}"
+                      f"{' — ' + note if status != 'done' and note else ''}", flush=True)
 
     cur.execute("""SELECT NVL(graph_status, '미처리'), COUNT(*) FROM corpus_docs
                    GROUP BY graph_status""")

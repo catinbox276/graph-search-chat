@@ -510,6 +510,168 @@ def admin_source_columns(tname: str, request: Request,
     return {"columns": [{"name": k, "type": v} for k, v in cols.items()]}
 
 
+@app.get("/admin/pipeline-settings")
+def admin_pipeline_settings(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 전처리(문서 구조화) 운영 설정 — 효과값 반환 (DB 없으면 .env 기본값)."""
+    check_admin(request, x_admin_token)
+    from tools import settings
+    con = db()
+    cur = con.cursor()
+    st = settings.get_all(cur)
+    con.commit()
+    con.close()
+    return {"doc_extract_limit": settings.get_int(st, "doc_extract_limit",
+                                                  config.DOC_EXTRACT_LIMIT),
+            "doc_concurrency": settings.get_int(st, "doc_concurrency",
+                                                config.DOC_CONCURRENCY),
+            "doc_body_chars": settings.get_int(st, "doc_body_chars",
+                                               config.DOC_BODY_CHARS),
+            "doc_extract_model": st.get("doc_extract_model") or "",
+            "overridden": sorted(st.keys())}
+
+
+class PipelineSettingsIn(BaseModel):
+    doc_extract_limit: str = ""   # 빈값 = 기본값 복귀 (문자열로 받아 검증)
+    doc_concurrency: str = ""
+    doc_body_chars: str = ""
+    doc_extract_model: str = ""   # 빈값 = 대화 모델 사용
+
+
+@app.post("/admin/pipeline-settings")
+def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
+                                x_admin_token: str = Header(default="")):
+    """관리자: 전처리 설정 저장 — 다음 배치 실행부터 반영 (재배포 불필요)."""
+    check_admin(request, x_admin_token)
+    from tools import settings
+    vals = {}
+    for key, raw, lo, hi in (("doc_extract_limit", inp.doc_extract_limit, 1, 100000),
+                             ("doc_concurrency", inp.doc_concurrency, 1, 32),
+                             ("doc_body_chars", inp.doc_body_chars, 200, 20000)):
+        raw = raw.strip()
+        if raw:
+            try:
+                v = int(raw)
+            except ValueError:
+                raise HTTPException(400, f"{key}는 정수여야 합니다")
+            if not lo <= v <= hi:
+                raise HTTPException(400, f"{key}는 {lo}~{hi} 범위여야 합니다")
+        vals[key] = raw
+    vals["doc_extract_model"] = inp.doc_extract_model.strip()
+    con = db()
+    cur = con.cursor()
+    settings.set_many(cur, vals)
+    con.commit()
+    con.close()
+    return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
+
+
+class ReprocessIn(BaseModel):
+    mode: str  # errors = 실패만 재시도 | reset = 소스 전체 초기화(그래프 증거 회수 포함)
+
+
+@app.post("/admin/sources/{sname}/reprocess")
+def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
+                           x_admin_token: str = Header(default="")):
+    """관리자: 소스 재처리 준비.
+
+    errors: error 상태만 미처리로 되돌림 (다음 배치가 재시도)
+    reset : 소스 전체 초기화 — 이 소스의 문서가 그래프에 올린 기여(엣지 +1, 증거)를
+            먼저 회수한 뒤 상태를 리셋한다. 그냥 리셋하면 재처리 때 이중 카운트되기
+            때문 (재발 소급 취소와 같은 원리). 지침·모델 변경 후 재구조화용.
+    """
+    check_admin(request, x_admin_token)
+    con = db()
+    cur = con.cursor()
+    if inp.mode == "errors":
+        cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
+                       WHERE source_name = :1 AND graph_status = 'error'""", [sname])
+        n = cur.rowcount
+        con.commit()
+        con.close()
+        return {"ok": True, "reset": n, "note": "error 문서를 미처리로 — 다음 배치가 재시도"}
+    if inp.mode != "reset":
+        con.close()
+        raise HTTPException(400, "mode는 errors 또는 reset")
+    # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1
+    cur.execute("""SELECT DISTINCT session_id FROM node_evidence
+                   WHERE session_id LIKE :1""", [f"doc:{sname}:%"])
+    refs = [r[0] for r in cur.fetchall()]
+    for ref in refs:
+        cur.execute("SELECT node_id FROM node_evidence WHERE session_id = :1", [ref])
+        nids = [r[0] for r in cur.fetchall()]
+        for j in range(0, len(nids), 100):
+            chunk = nids[j:j + 100]
+            src_marks = ",".join(f":s{k}" for k in range(len(chunk)))
+            dst_marks = ",".join(f":d{k}" for k in range(len(chunk)))
+            binds = {f"s{k}": v for k, v in enumerate(chunk)}
+            binds.update({f"d{k}": v for k, v in enumerate(chunk)})
+            cur.execute(
+                f"""UPDATE edges SET raw_count = GREATEST(raw_count - 1, 0),
+                                     weight = GREATEST(weight - 1, 0)
+                    WHERE src IN ({src_marks}) AND dst IN ({dst_marks})""", binds)
+        cur.execute("DELETE FROM node_evidence WHERE session_id = :1", [ref])
+    cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
+                   WHERE source_name = :1 AND graph_status IS NOT NULL""", [sname])
+    n = cur.rowcount
+    con.commit()
+    con.close()
+    return {"ok": True, "reset": n, "evidence_retracted": len(refs),
+            "note": "그래프 기여 회수 완료 — 다음 배치가 처음부터 재구조화 "
+                    "(고아 노드는 야간 유지보수가 정리)"}
+
+
+class DryrunIn(BaseModel):
+    n: int = 3  # 판정해볼 문서 수 (최대 5 — 그래프에 반영하지 않음)
+
+
+@app.post("/admin/sources/{sname}/dryrun")
+def admin_source_dryrun(sname: str, inp: DryrunIn, request: Request,
+                        x_admin_token: str = Header(default="")):
+    """관리자: 드라이런 — 미처리 문서 N건을 판정만 해보고 결과를 보여준다.
+
+    그래프·상태에 아무것도 쓰지 않는다. 새 소스·새 추출 지침을 튜닝할 때
+    'excluded가 얼마나 나오나'를 배치 전에 확인하는 용도.
+    """
+    check_admin(request, x_admin_token)
+    n = max(1, min(inp.n, 5))
+    con = db()
+    cur = con.cursor()
+    cur.execute("""SELECT s.domain, NVL(d.extract_hint, ' ')
+                   FROM source_registry s
+                   JOIN domain_registry d ON d.name = s.domain
+                   WHERE s.source_name = :1 AND s.domain IS NOT NULL""", [sname])
+    r = cur.fetchone()
+    if not r:
+        con.close()
+        raise HTTPException(400, "이 소스에 그래프 도메인이 지정되어 있지 않습니다")
+    domain, hint = r[0], r[1]
+    cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
+                   FROM corpus_docs
+                   WHERE source_name = :1 AND graph_status IS NULL
+                   FETCH FIRST :2 ROWS ONLY""", [sname, n])
+    docs = [(row[0], row[1], row[2],
+             row[3].read() if hasattr(row[3], "read") else (row[3] or ""))
+            for row in cur.fetchall()]
+    from tools import settings
+    st = settings.get_all(cur)
+    con.close()
+    if not docs:
+        return {"domain": domain, "results": [], "note": "미처리 문서가 없습니다"}
+    from poc.doc_pipeline import judge_doc
+    body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
+    model = (st.get("doc_extract_model") or "").strip()
+    out = []
+    for src_id, title, kind, body in docs:
+        j = judge_doc(domain, hint, kind, title, body,
+                      model=model, body_chars=body_chars)
+        out.append({"src_id": src_id, "title": title.strip()[:120],
+                    "fits": bool(j.get("fits")), "reason": j.get("reason") or
+                    j.get("_error") or "파싱 실패",
+                    "goal": j.get("goal") or "", "approach": j.get("approach") or ""})
+    return {"domain": domain, "results": out,
+            "note": "판정만 수행 — 그래프·상태에 반영 안 됨"}
+
+
 @app.get("/stats")
 def stats():
     """헤더 상태칩용 현황."""
