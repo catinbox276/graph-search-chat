@@ -15,7 +15,7 @@
 
 운영 설정(app_settings — 관리 UI에서 재배포 없이 변경, 없으면 .env 기본값):
   doc_extract_limit  실행당 처리 문서 수 (기본 DOC_EXTRACT_LIMIT=200)
-  doc_concurrency    LLM 판정 동시 요청 수 (기본 DOC_CONCURRENCY=6)
+  doc_concurrency    LLM 판정 동시 요청 수 (기본 DOC_CONCURRENCY=16, UI에서 최대 256)
   doc_body_chars     판정에 넣는 본문 길이 (기본 DOC_BODY_CHARS=3000)
   doc_extract_model  전처리 전용 모델명 (빈값=대화 모델. CHAT_URL 호스트에서 서빙돼야 함)
 

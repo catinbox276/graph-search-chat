@@ -550,7 +550,7 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
     from tools import settings
     vals = {}
     for key, raw, lo, hi in (("doc_extract_limit", inp.doc_extract_limit, 1, 100000),
-                             ("doc_concurrency", inp.doc_concurrency, 1, 32),
+                             ("doc_concurrency", inp.doc_concurrency, 1, 256),
                              ("doc_body_chars", inp.doc_body_chars, 200, 20000),
                              ("doc_pack_tokens", inp.doc_pack_tokens, 0, 30000),
                              ("doc_no_think", inp.doc_no_think, 0, 1)):
