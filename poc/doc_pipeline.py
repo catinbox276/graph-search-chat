@@ -139,9 +139,17 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 400))
         m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
-        return json.loads(m.group()) if m else {}
+        return _loads_lenient(m.group()) if m else {}
     except Exception as e:  # 판정 1건 실패가 배치를 죽이지 않게
         return {"_error": str(e)[:300]}
+
+
+def _loads_lenient(s: str) -> dict:
+    """모델이 본문 인용 시 만드는 잘못된 이스케이프(\\한글 등) 복구 폴백."""
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        return json.loads(re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', s))
 
 
 def doc_ddl(cur):
