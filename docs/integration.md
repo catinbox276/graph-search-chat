@@ -95,6 +95,7 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 | `ts_column` | 생성/수정 시간 필드 — 증분 적재 기준 | `CREATED_AT` |
 | `field_map` | 컬럼→역할 매핑 (JSON) — 어떤 필드를 구조화할지 | `{"title":"SUBJECT","question":"BODY_Q","answer":"BODY_A"}` |
 | `content_kind` | 내용 유형 — 추출·검색 프롬프트에 반영 | `문제해결` / `가이드` |
+| `domain` | 그래프 구조화 도메인 (NULL=검색 전용) — 지정 시 야간 03:40 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프 병합 | `사내 노하우` |
 | `enabled` | 적재 대상 여부 | `Y/N` |
 
 - **역할(role) 어휘는 닫아둔다**: `title / body / question / answer / meta / url`.
@@ -114,6 +115,10 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
    `content_kind`는 검색 결과 라벨과 (도메인 extract_hint처럼) 프롬프트 힌트에 쓴다.
 4. **읽기 도구** — `read_blog_post`가 문서 id `"소스명:원천id"`를 받도록 일반화
    (도구명은 기존 그래프 4층 행동·도메인 시드와의 호환을 위해 유지. 구형 blog id도 동작).
+5. **문서 그래프 구조화(선택)** — 소스에 도메인을 지정하면 야간 03:40 배치가 문서를 LLM 판정해
+   기준 통과분만 그래프에 병합(미달은 excluded + 사유). 운영 도구 완비: 드라이런(판정만),
+   실패 재시도, 초기화 재처리(소스/도메인/전역 — 그래프 기여 회수 후 재구조화, 대화 세션 기여 불변),
+   처리 현황 프로그래스 UI(5초 폴링), 전처리 설정(app_settings — 건수·동시성·모델, 재배포 불필요).
 
 ### 원칙 재확인
 
