@@ -153,6 +153,10 @@ def main():
     for src in source_registry.list_sources(cur):
         if not src["enabled"]:
             continue
+        if not source_registry.table_allowed(src["table_name"]):
+            # allowlist가 등록 후 좁아진 경우 — 등록돼 있어도 적재 차단
+            print(f"[{src['source_name']}] 건너뜀 — 허용되지 않은 테이블: {src['table_name']}")
+            continue
         if src["source_name"] == "blog_posts" and not src["last_ingest_ts"]:
             n = migrate_blog_posts(cur, src)
             if n:

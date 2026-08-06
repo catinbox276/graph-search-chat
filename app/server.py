@@ -148,14 +148,11 @@ def _source_items(refs: dict) -> list:
         cur = con.cursor()
         for pid in order:
             src, sep, sid_ = pid.partition(":")
-            row = None
-            if sep:
-                cur.execute("""SELECT title, url FROM corpus_docs
-                               WHERE source_name = :1 AND src_id = :2""", [src, sid_])
-                row = cur.fetchone()
-            if row is None:
-                cur.execute("SELECT title, url FROM blog_posts WHERE id = :1", [pid])
-                row = cur.fetchone()
+            if not sep:  # 접두 없는 구형 id — 기본 소스로 해석
+                src, sid_ = config.DOC_ID_DEFAULT_SOURCE, pid
+            cur.execute("""SELECT title, url FROM corpus_docs
+                           WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+            row = cur.fetchone()
             if row:
                 # 원천 테이블 값이라 신뢰 불가 — http(s) 외 스킴은 링크로 내보내지 않음 (XSS)
                 url = (row[1] or "").strip()
@@ -178,19 +175,14 @@ def doc_view(pid: str, request: Request):
     cur = con.cursor()
     try:
         src, sep, sid_ = pid.partition(":")
-        row, source, kind = None, src, ""
-        if sep:
-            cur.execute("""SELECT title, body, kind, url FROM corpus_docs
-                           WHERE source_name = :1 AND src_id = :2""", [src, sid_])
-            row = cur.fetchone()
-            kind = row[2] if row else ""
-        if row is None:
-            cur.execute("SELECT title, body, source, url FROM blog_posts WHERE id = :1",
-                        [pid])
-            row = cur.fetchone()
-            source = row[2] if row else ""
+        if not sep:  # 접두 없는 구형 id — 기본 소스로 해석
+            src, sid_ = config.DOC_ID_DEFAULT_SOURCE, pid
+        cur.execute("""SELECT title, body, kind, url FROM corpus_docs
+                       WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+        row = cur.fetchone()
         if row is None:
             raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
+        source, kind = src, row[2] or ""
         body = row[1].read() if hasattr(row[1], "read") else (row[1] or "")
         url = (row[3] or "").strip()
         if not url.lower().startswith(("http://", "https://")):  # XSS — http(s)만
@@ -426,7 +418,7 @@ def admin_select(inp: SelectIn, request: Request,
     warn = None
     if inp.kind == "embedding":
         warn = ("임베딩 모델 변경됨 — 기존 벡터와 호환되지 않습니다. "
-                "UPDATE blog_posts SET embedding=NULL 후 embed_corpus.py 재실행, "
+                "UPDATE corpus_docs SET embedding=NULL 후 embed_corpus.py 재실행, "
                 "그래프 dedup 임계값 재캘리브레이션 필요")
     return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
 
@@ -832,7 +824,6 @@ def stats():
     con = db()
     cur = con.cursor()
     out = {}
-    # posts = 통합 코퍼스 수 (전환 전이면 구 blog_posts로 폴백)
     for k, q in [("posts", "SELECT COUNT(*) FROM corpus_docs"),
                  ("nodes", "SELECT COUNT(*) FROM nodes"),
                  ("edges", "SELECT COUNT(*) FROM edges"),
@@ -842,11 +833,5 @@ def stats():
             out[k] = cur.fetchone()[0]
         except oracledb.DatabaseError:
             out[k] = 0
-    if not out["posts"]:
-        try:
-            cur.execute("SELECT COUNT(*) FROM blog_posts")
-            out["posts"] = cur.fetchone()[0]
-        except oracledb.DatabaseError:
-            pass
     con.close()
     return out

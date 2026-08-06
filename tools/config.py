@@ -94,6 +94,15 @@ SESSION_MAX_AGE = _geti("SESSION_MAX_AGE", 28800)  # 로그인 쿠키 수명(초
 # --- LLM 호출 ---
 LLM_TEMPERATURE = _getf("LLM_TEMPERATURE", 0.0)
 
+# --- 원천 테이블 접근 제어 (tools/source_registry.py) ---
+# 소스로 등록·조회·적재할 수 있는 원천 테이블 화이트리스트 (쉼표구분, 대소문자 무관).
+# 빈값 = 제한 없음(PoC 기본). 사내 전환 시 허용 테이블만 나열 — 목록 밖은 브라우저
+# 조회·등록·야간 적재 전부 차단된다.
+SOURCE_TABLE_ALLOWLIST = frozenset(
+    t.strip().upper() for t in _get("SOURCE_TABLE_ALLOWLIST", "").split(",") if t.strip())
+# 소스 접두가 없는 구형 문서 id("kin-481")를 해석할 기본 소스명 (코드 하드코딩 대신 설정)
+DOC_ID_DEFAULT_SOURCE = _get("DOC_ID_DEFAULT_SOURCE", "blog_posts")
+
 # --- 하이브리드 검색 (tools/blog_search.py) ---
 RRF_K = _geti("RRF_K", 60)                        # RRF 융합 상수
 SEARCH_TOP_LEXICAL = _geti("SEARCH_TOP_LEXICAL", 30)   # Oracle Text 후보 수

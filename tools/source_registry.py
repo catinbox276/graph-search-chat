@@ -11,6 +11,8 @@
 """
 import json
 
+from tools import config
+
 # 역할 어휘 (닫힌 목록) — title은 목록 표시·검색용, meta는 태그류 부가 텍스트,
 # url은 원문 참조 링크(검색 결과에 노출)
 ROLES = ("title", "body", "question", "answer", "meta", "url")
@@ -67,12 +69,20 @@ def table_columns(cur, table_name: str) -> dict:
     return {r[0]: r[1] for r in cur.fetchall()}
 
 
+def table_allowed(table_name: str) -> bool:
+    """원천 테이블 접근 화이트리스트 (.env SOURCE_TABLE_ALLOWLIST) — 빈값이면 제한 없음.
+    브라우저 조회·등록 검증·야간 적재가 전부 이 함수 하나를 거친다."""
+    return (not config.SOURCE_TABLE_ALLOWLIST
+            or table_name.upper() in config.SOURCE_TABLE_ALLOWLIST)
+
+
 def browse_tables(cur) -> list:
-    """등록 후보 테이블 목록 — Oracle 내부·우리 소유 테이블은 제외."""
+    """등록 후보 테이블 목록 — Oracle 내부·우리 소유 테이블 제외, 화이트리스트 적용."""
     cur.execute("SELECT table_name FROM user_tables ORDER BY table_name")
     return [r[0] for r in cur.fetchall()
             if r[0] not in OUR_TABLES
-            and not any(r[0].startswith(p) for p in _NOISE_PREFIX)]
+            and not any(r[0].startswith(p) for p in _NOISE_PREFIX)
+            and table_allowed(r[0])]
 
 
 def validate(cur, table_name: str, id_column: str, ts_column: str,
@@ -81,6 +91,9 @@ def validate(cur, table_name: str, id_column: str, ts_column: str,
 
     테이블·컬럼 실존과 역할 어휘를 확인한다. 원천 훼손 위험이 없는 SELECT 검증뿐.
     """
+    if not table_allowed(table_name):
+        return (f"허용되지 않은 테이블입니다: {table_name} "
+                "(.env SOURCE_TABLE_ALLOWLIST에 등록 필요)")
     cols = table_columns(cur, table_name)
     if not cols:
         return f"테이블이 없습니다: {table_name}"
