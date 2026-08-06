@@ -77,7 +77,14 @@ DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
 # header  = 사내 기본 — 전단 SSO가 인증을 끝내고 헤더로 넘겨주는 userId·role 2개만 소비.
 #           전제: 앱에 전단 우회 직접 접근 불가(헤더 위조 방지는 네트워크가 보장).
 # keycloak= 전단 프록시가 없는 환경 — 앱이 직접 OIDC 코드 플로우 + 서명 세션 쿠키.
+# gateway = 게이트웨이 SSO 미들웨어 — 요청의 JWT를 게이트웨이 검증 API로 보내
+#           JSON({userId, roles})을 받는다. 앱이 아는 주소는 GATEWAY_AUTH_URL 하나.
 AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
+GATEWAY_AUTH_URL = _get("GATEWAY_AUTH_URL", "")           # 검증 API (gateway 모드 필수)
+GATEWAY_TOKEN_HEADER = _get("GATEWAY_TOKEN_HEADER", "Authorization")  # JWT가 실려오는 헤더
+GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "userId")  # 응답 JSON의 사용자 필드명
+GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "roles")   # 응답 JSON의 역할 필드명
+GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
 SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명
 SSO_ROLE_HEADER = _get("SSO_ROLE_HEADER", "X-Auth-Request-Groups")  # role 헤더명(구분자 ,;공백)
 KEYCLOAK_PUBLIC_URL = _get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080").rstrip("/")

@@ -39,6 +39,33 @@
 
 ### 앱의 인증 모드 (`AUTH_MODE`, tools/config.py)
 
+**`gateway` 모드 (2026-08-06 추가)** — 사내 실구조(Keycloak이 JWT 발급 → 게이트웨이 SSO
+미들웨어가 검증 API 제공 → 앱은 게이트웨이만 호출) 대응. 앱은 요청의 JWT를
+`GATEWAY_AUTH_URL`로 보내 `{userId, roles}` JSON을 받는다 — 필요한 주소는 이것 하나,
+Keycloak은 앱이 전혀 모름. 응답 필드명은 `GATEWAY_USER_FIELD/ROLE_FIELD`로 매핑(스펙 무관 수용),
+검증 결과는 `GATEWAY_CACHE_TTL`(기본 60초) 캐시, 게이트웨이 장애 시 fail-closed(미인증).
+PoC 리허설: `k8s/gateway-sim.yaml`(Keycloak introspection 프록시, ~50줄)이 미들웨어를 흉내 —
+사내 전환 시 이 파드는 버리고 GATEWAY_AUTH_URL만 실제 미들웨어로 교체.
+
+**로컬 PC 리허설 (python + .env + Oracle)**:
+```bash
+# 1) 클러스터 자원 포트포워딩 (로컬에 Oracle·Keycloak 없이)
+kubectl port-forward svc/oracle 1521:1521 &
+kubectl port-forward svc/keycloak 8080:8080 &
+# 2) .env — ORACLE_DSN=localhost:1521/FREEPDB1, AUTH_MODE=gateway,
+#    GATEWAY_AUTH_URL=http://localhost:8600/verify,
+#    KEYCLOAK_INTERNAL_URL=http://localhost:8080/auth (+ OIDC_CLIENT_SECRET)
+# 3) 실행 (터미널 2개)
+uvicorn app.gateway_sim:app --port 8600   # 게이트웨이 미들웨어 흉내
+uvicorn app.server:app --port 8500        # 앱
+# 4) 토큰 발급 후 Bearer로 호출
+JWT=$(curl -s -X POST http://localhost:8080/auth/realms/gsc/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=gsc-app -d client_secret=<시크릿> \
+  -d username=dalgo -d password=<pw> | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+curl http://localhost:8500/me -H "Authorization: Bearer $JWT"   # → {"user":"dalgo","admin":true}
+```
+
+
 | 모드 | 용도 | userId 출처 |
 |---|---|---|
 | `none` | 로컬 개발 | 없음 (user_id NULL) |

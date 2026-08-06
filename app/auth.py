@@ -36,8 +36,8 @@ router = APIRouter()
 
 
 def active() -> bool:
-    """인증이 켜져 있는가 (header 또는 keycloak)."""
-    return config.AUTH_MODE in ("header", "keycloak")
+    """인증이 켜져 있는가 (header / gateway / keycloak)."""
+    return config.AUTH_MODE in ("header", "gateway", "keycloak")
 
 
 def enabled() -> bool:
@@ -61,6 +61,10 @@ def current_user(request: Request) -> dict | None:
             return None
         raw = request.headers.get(config.SSO_ROLE_HEADER) or ""
         return {"user": uid, "roles": [r for r in re.split(r"[,;\s]+", raw) if r]}
+    if config.AUTH_MODE == "gateway":
+        raw = (request.headers.get(config.GATEWAY_TOKEN_HEADER) or "").strip()
+        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+        return _gateway_verify(token) if token else None
     if config.AUTH_MODE == "keycloak":
         raw = request.cookies.get(COOKIE)
         if not raw:
@@ -72,9 +76,44 @@ def current_user(request: Request) -> dict | None:
     return None
 
 
+_gw_cache = {}  # token -> (만료 epoch, user) — 매 요청 게이트웨이 왕복 방지
+
+
+def _gateway_verify(token: str) -> dict | None:
+    """게이트웨이 검증 API 호출 — JWT를 넘기고 {userId, roles} JSON을 받는다.
+    응답 필드명은 GATEWAY_USER_FIELD/ROLE_FIELD로 매핑 (사내 스펙이 뭐든 수용)."""
+    import time
+    now = time.time()
+    hit = _gw_cache.get(token)
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        r = httpx.get(config.GATEWAY_AUTH_URL,
+                      headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        uid = str(j.get(config.GATEWAY_USER_FIELD) or "").strip()
+        if not uid:
+            return None
+        roles = j.get(config.GATEWAY_ROLE_FIELD) or []
+        if isinstance(roles, str):
+            roles = [x for x in re.split(r"[,;\s]+", roles) if x]
+        user = {"user": uid, "roles": [str(x) for x in roles]}
+    except Exception:
+        return None  # 게이트웨이 장애 = 미인증 (fail-closed)
+    if len(_gw_cache) > 1000:  # 무한 성장 가드
+        _gw_cache.clear()
+    _gw_cache[token] = (now + config.GATEWAY_CACHE_TTL, user)
+    return user
+
+
 def _unauthorized() -> HTTPException:
     if enabled():
         return HTTPException(401, "로그인이 필요합니다 — /oidc/login")
+    if config.AUTH_MODE == "gateway":
+        return HTTPException(401, f"유효한 토큰({config.GATEWAY_TOKEN_HEADER})이 없습니다 "
+                                  "— 게이트웨이 SSO를 경유해 접속하세요")
     return HTTPException(401, f"SSO 식별 헤더({config.SSO_USER_HEADER})가 없습니다 "
                               "— 전단 SSO를 경유해 접속하세요")
 
