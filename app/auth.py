@@ -89,7 +89,8 @@ def _gateway_verify(token: str) -> dict | None:
         return hit[1]
     try:
         r = httpx.get(config.GATEWAY_AUTH_URL,
-                      headers={"Authorization": f"Bearer {token}"}, timeout=5)
+                      headers={"Authorization": f"Bearer {token}"},
+                      timeout=config.GATEWAY_TIMEOUT)
         if r.status_code != 200:
             return None
         j = r.json()

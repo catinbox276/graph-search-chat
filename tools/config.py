@@ -85,6 +85,7 @@ GATEWAY_TOKEN_HEADER = _get("GATEWAY_TOKEN_HEADER", "Authorization")  # JWT가 �
 GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "userId")  # 응답 JSON의 사용자 필드명
 GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "roles")   # 응답 JSON의 역할 필드명
 GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
+GATEWAY_TIMEOUT = _getf("GATEWAY_TIMEOUT", 5.0)            # 검증 API 호출 타임아웃(초) — 초과 시 미인증(fail-closed)
 SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명
 SSO_ROLE_HEADER = _get("SSO_ROLE_HEADER", "X-Auth-Request-Groups")  # role 헤더명(구분자 ,;공백)
 KEYCLOAK_PUBLIC_URL = _get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080").rstrip("/")
