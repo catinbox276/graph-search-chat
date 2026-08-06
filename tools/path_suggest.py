@@ -10,16 +10,12 @@ import re
 
 import numpy as np
 import oracledb
-from openai import OpenAI
-
-from tools import config
+from tools import config, model_registry
 from tools.blog_search import DSN, PASSWORD, USER
 from tools.session_ctx import current_session
 
-EMB_MODEL = config.EMBED_MODEL  # .env로 제어
 SIM_ENTRY = config.PATH_SIM_ENTRY  # 진입점 매칭 임계값 (dedup보다 완화 — 원질문 vs 정규화 문구)
 
-_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
                              min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                              increment=config.ORACLE_POOL_INCREMENT)
@@ -46,8 +42,9 @@ def suggest_paths(problem: str) -> str:
     Args:
         problem: 사용자의 문제/목표를 한 문장으로
     """
+    cli, emb_name = model_registry.embedding_client()
     q = np.asarray(
-        _llm.embeddings.create(model=EMB_MODEL, input=problem).data[0].embedding,
+        cli.embeddings.create(model=emb_name, input=problem).data[0].embedding,
         dtype=np.float32)
     q /= np.linalg.norm(q)
     with _pool.acquire() as con:

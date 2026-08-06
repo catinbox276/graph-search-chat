@@ -15,20 +15,16 @@ import threading
 
 import numpy as np
 import oracledb
-from openai import OpenAI
-
-from tools import config
+from tools import config, model_registry
 
 DSN = config.ORACLE_DSN            # 접속 상수는 관례상 이 모듈에서 import
 USER = config.ORACLE_USER
 PASSWORD = config.ORACLE_PASSWORD
-EMB_MODEL = config.EMBED_MODEL     # .env로 제어 (임베딩 호스트가 단일 모델 서빙)
 RRF_K = config.RRF_K
 
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
                              min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                              increment=config.ORACLE_POOL_INCREMENT)
-_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 _matrix, _ids, _chunk_nos, _lock = None, None, None, threading.Lock()
 
 
@@ -46,13 +42,14 @@ def load_matrix():
         with _pool.acquire() as con:
             cur = con.cursor()
             ids, nos, vecs = [], [], []
+            _, emb_name = model_registry.embedding_endpoint()
             cur.execute("""SELECT COUNT(*) FROM user_tables
                            WHERE table_name = 'CORPUS_CHUNKS'""")
             if cur.fetchone()[0]:
                 cur.execute("""SELECT source_name || ':' || src_id, chunk_no, embedding
                                FROM corpus_chunks
                                WHERE embedding IS NOT NULL AND embed_model = :m""",
-                            m=EMB_MODEL)
+                            m=emb_name)
                 for pid, no, blob in cur:
                     ids.append(pid)
                     nos.append(no)
@@ -61,37 +58,43 @@ def load_matrix():
             m = np.stack(vecs)
             m /= np.linalg.norm(m, axis=1, keepdims=True)
             _matrix, _ids, _chunk_nos = m, ids, nos
-        print(f"[blog_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {EMB_MODEL})")
+        print(f"[blog_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {emb_name})")
     return len(ids)
 
 
-def _lexical(cur, query: str, n: int):
+def _lexical(cur, query: str, n: int, source: str = ""):
     terms = [t for t in re.findall(r"[\w가-힣]+", query) if len(t) >= 2]
     if not terms:
         return []
     if not _corpus_ready(cur):
         return []
     cur.execute(
-        """SELECT source_name || ':' || src_id FROM corpus_docs
+        f"""SELECT source_name || ':' || src_id FROM corpus_docs
            WHERE CONTAINS(body, :q, 1) > 0
+           {"AND source_name = :src" if source else ""}
            ORDER BY SCORE(1) DESC FETCH FIRST :n ROWS ONLY""",
-        # {} 이스케이프 — 예약어(AND/OR 등)가 검색어에 섞여도 구문 오류 없게
+        # {{}} 이스케이프 — 예약어(AND/OR 등)가 검색어에 섞여도 구문 오류 없게
+        **({"src": source} if source else {}),
         q=" ACCUM ".join("{" + t + "}" for t in terms), n=n)
     return [r[0] for r in cur.fetchall()]
 
 
-def _semantic(query: str, n: int):
+def _semantic(query: str, n: int, source: str = ""):
     """청크 코사인 → 문서 단위 집계(best-chunk). 반환: (문서 pid 목록, {pid: 최고 청크 no})."""
     if _matrix is None:
         return [], {}
+    cli, emb_name = model_registry.embedding_client()
     q = np.asarray(
-        _llm.embeddings.create(model=EMB_MODEL, input=query).data[0].embedding,
+        cli.embeddings.create(model=emb_name, input=query).data[0].embedding,
         dtype=np.float32)
     q /= np.linalg.norm(q)
     scores = _matrix @ q
+    prefix = f"{source}:" if source else ""
     best = {}  # pid -> (score, chunk_no)
     for i in np.argsort(scores)[::-1]:
         pid = _ids[i]
+        if prefix and not pid.startswith(prefix):
+            continue
         if pid not in best:
             best[pid] = (float(scores[i]), _chunk_nos[i])
             if len(best) >= n:
@@ -101,16 +104,20 @@ def _semantic(query: str, n: int):
 
 
 def search_blog(query: str, limit: int = 5) -> str:
-    """사내 지식 코퍼스(블로그·QA·가이드 등 등록된 원천)를 키워드+시맨틱 하이브리드로 검색한다.
+    """사내 지식 코퍼스(등록된 모든 원천 통합)를 키워드+시맨틱 하이브리드로 검색한다.
 
     Args:
         query: 검색어 (한국어/영어, 자연어 가능)
         limit: 최대 결과 수 (기본 5)
     """
+    return _search(query, limit)
+
+
+def _search(query: str, limit: int = 5, source: str = "") -> str:
     with _pool.acquire() as con:
         cur = con.cursor()
-        lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL)
-        sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC)
+        lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL, source)
+        sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC, source)
         scores = {}
         for rank_list in (lex, sem):
             for r, pid in enumerate(rank_list):
@@ -142,6 +149,29 @@ def search_blog(query: str, limit: int = 5) -> str:
             out.append(f"[{pid}] {t} (유형: {kind or src}, 매칭: {tag})\n{snip}"
                        + (f"\n링크: {url}" if url else ""))
     return "\n\n".join(out)
+
+
+def source_search_tools() -> list:
+    """등록 소스마다 소스 한정 검색 함수 생성 — 에이전트 도구로 자동 등록.
+    소스 등록(관리 페이지) = 검색 도구 등록. 이름: search_{소스명}."""
+    from tools import source_registry
+    with _pool.acquire() as con:
+        cur = con.cursor()
+        rows = source_registry.list_sources(cur)
+        con.commit()
+
+    def make(src: str, kind: str):
+        def f(query: str, limit: int = 5) -> str:
+            return _search(query, limit, source=src)
+        f.__name__ = f"search_{src}"
+        f.__doc__ = (f"'{src}' 소스({kind or '문서'})만 하이브리드 검색한다. "
+                     f"전체 통합 검색은 search_blog.\n\n"
+                     "    Args:\n"
+                     "        query: 검색어 (한국어/영어, 자연어 가능)\n"
+                     "        limit: 최대 결과 수 (기본 5)\n")
+        return f
+    return [make(r["source_name"], r["content_kind"])
+            for r in rows if r["enabled"]]
 
 
 def read_blog_post(post_id: str) -> str:

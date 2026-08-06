@@ -75,41 +75,73 @@ def _tool_name(t) -> str:
     return getattr(t, "name", None) or getattr(t, "__name__", "")
 
 
+def _mcp_config(row: dict) -> dict:
+    """레지스트리 행 → langchain-mcp-adapters 커넥션 설정."""
+    if row["transport"] == "stdio":
+        cmd = row["command"] or "mcp-server-datahub"
+        return {"command": shutil.which(cmd) or str(ROOT / f".venv/bin/{cmd}"),
+                "args": [], "transport": "stdio",
+                "env": {"DATAHUB_GMS_URL": DATAHUB_GMS}}
+    return {"transport": row["transport"], "url": row["url"]}
+
+
+def _mcp_servers() -> list:
+    """등록된 MCP 서버 목록 (mcp_registry) — DB 미기동 시 시드(datahub)만."""
+    try:
+        from tools import mcp_registry
+        return mcp_registry.list_servers(enabled_only=True)
+    except Exception as e:
+        print(f"[경고] MCP 레지스트리 조회 실패 — 기본(datahub)만: {e}", file=sys.stderr)
+        return [{"name": "datahub", "transport": "stdio", "url": "",
+                 "command": "mcp-server-datahub", "enabled": True}]
+
+
 async def _mcp_tools():
-    client = MultiServerMCPClient({
-        "datahub": {
-            "command": shutil.which("mcp-server-datahub")
-                       or str(ROOT / ".venv/bin/mcp-server-datahub"),
-            "args": [],
-            "transport": "stdio",
-            "env": {"DATAHUB_GMS_URL": DATAHUB_GMS},
-        }
-    })
+    servers = _mcp_servers()
+    if not servers:
+        return []
+    client = MultiServerMCPClient({s["name"]: _mcp_config(s) for s in servers})
     return await client.get_tools()
 
 
+def _source_tools() -> list:
+    """등록 소스마다 소스 한정 검색 도구 자동 생성 (search_{소스명})."""
+    try:
+        from tools.blog_search import source_search_tools
+        return source_search_tools()
+    except Exception as e:
+        print(f"[경고] 소스 검색 도구 생성 실패: {e}", file=sys.stderr)
+        return []
+
+
 async def discover_tools() -> list:
-    """관리 페이지용 — 사용 가능한 도구 전체 (비활성 포함). {name, description, source}."""
+    """관리 페이지용 — 사용 가능한 도구 전체 (비활성 포함).
+    {name, description, source} — source: builtin / source / mcp:서버명."""
     out = [{"name": _tool_name(t), "description": (t.__doc__ or "").strip().split("\n")[0],
             "source": "builtin"} for t in BUILTIN_TOOLS]
-    try:
-        for t in await _mcp_tools():
-            out.append({"name": _tool_name(t),
-                        "description": (getattr(t, "description", "") or "").split("\n")[0],
-                        "source": "mcp"})
-    except Exception as e:
-        print(f"[경고] MCP 도구 목록 조회 실패: {e}", file=sys.stderr)
+    out += [{"name": _tool_name(t),
+             "description": (t.__doc__ or "").strip().split("\n")[0],
+             "source": "source"} for t in _source_tools()]
+    for s in _mcp_servers():
+        try:
+            client = MultiServerMCPClient({s["name"]: _mcp_config(s)})
+            for t in await client.get_tools():
+                out.append({"name": _tool_name(t),
+                            "description": (getattr(t, "description", "") or "").split("\n")[0],
+                            "source": f"mcp:{s['name']}"})
+        except Exception as e:
+            print(f"[경고] MCP '{s['name']}' 도구 목록 조회 실패: {e}", file=sys.stderr)
     return out
 
 
 async def build_agent(checkpointer=None, model_name=None):
     ag = load_agent_settings()
-    tools = list(BUILTIN_TOOLS)
+    tools = list(BUILTIN_TOOLS) + _source_tools()
     if ag["mcp_enabled"]:
         try:
             tools += await _mcp_tools()
-        except Exception as e:  # DataHub 미기동 시 블로그 검색만으로 동작
-            print(f"[경고] DataHub MCP 연결 실패, 블로그 검색만 사용: {e}", file=sys.stderr)
+        except Exception as e:  # MCP 미기동 시 검색 도구만으로 동작
+            print(f"[경고] MCP 연결 실패, 검색 도구만 사용: {e}", file=sys.stderr)
     if ag["disabled_tools"]:
         tools = [t for t in tools if _tool_name(t) not in ag["disabled_tools"]]
     model = ChatOpenAI(

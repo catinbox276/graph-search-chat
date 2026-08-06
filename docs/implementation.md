@@ -91,6 +91,8 @@ flowchart LR
 - `GET/POST /admin/pipeline-settings` — 전처리 운영 설정(건수·동시성 기본 16 최대 256·본문 길이·전용 모델·생각 끄기) — app_settings, 재배포 불필요
 - `GET /admin/doc-status` — 소스별 done/excluded/error/pending 카운트 (UI 처리 현황 프로그래스가 5초 폴링)
 - `GET/POST /admin/agent-settings` — 에이전트 전역 제어: 시스템 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 에이전트 캐시 무효화 — 다음 질문부터)
+- `GET /admin/models/all` · `POST /admin/models/add` — 모델 레지스트리 (kind·이름·모델별 base_url) — 임베딩 기본값이 검색·백필·dedup 전역을 결정
+- `GET/POST /admin/mcp` — MCP 서버 등록 (transport: streamable_http/sse/stdio) — 등록 즉시 도구 자동 조립
 - `GET /sessions` · `GET /sessions/{id}` — 내 대화 목록·복원 (본인 것만 — SSO user_id 기준, 이어하기는 같은 session_id로 /chat)
 - `GET /oidc/login·callback·logout` · `GET /me` — SSO (AUTH_MODE에 따라 활성, app/auth.py)
 - `GET /graph/data` — 노드(사용 카운트를 문서/대화로 분리 + 성공·실패)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)

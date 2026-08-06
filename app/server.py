@@ -420,7 +420,39 @@ def reload_embeddings():
 def models():
     """사용자용: 선택 가능한 LLM 목록 + 현재 임베딩(정보만)."""
     llms = [m for m in model_registry.list_models("llm") if m["enabled"]]
-    return {"llm": llms, "embedding_in_use": config.EMBED_MODEL}  # 검색 경로 실사용값(.env)
+    return {"llm": llms,
+            "embedding_in_use": model_registry.embedding_endpoint()[1]}
+
+
+@app.get("/admin/models/all")
+def admin_models_all(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 전체 모델 목록 (종류·주소·기본값·활성)."""
+    check_admin(request, x_admin_token)
+    return {"models": model_registry.list_models(),
+            "embedding_in_use": model_registry.embedding_endpoint()[1]}
+
+
+class ModelAddIn(BaseModel):
+    kind: str            # llm | embedding | reranker
+    name: str            # served-model-name (호스트 /v1/models 값 그대로)
+    base_url: str = ""   # 이 모델의 서빙 주소 — 빈값이면 역할별 .env(CHAT/EMBED/RERANK_URL)
+    enabled: bool = True
+
+
+@app.post("/admin/models/add")
+def admin_model_add(inp: ModelAddIn, request: Request,
+                    x_admin_token: str = Header(default="")):
+    """관리자: 모델 수동 등록/수정 (사내 vLLM처럼 sync가 못 닿는 호스트용)."""
+    check_admin(request, x_admin_token)
+    if inp.base_url and not inp.base_url.lower().startswith(("http://", "https://")):
+        raise HTTPException(400, "base_url은 http(s):// 주소여야 합니다")
+    try:
+        model_registry.add_model(inp.kind, inp.name.strip(), inp.base_url.strip(),
+                                 inp.enabled)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _agents.clear()  # LLM 목록이 바뀌었을 수 있음
+    return {"ok": True}
 
 
 @app.post("/admin/models/sync")
@@ -440,13 +472,17 @@ def admin_select(inp: SelectIn, request: Request,
                  x_admin_token: str = Header(default="")):
     """관리자: 종류별 기본 모델 지정. 임베딩 교체는 전체 재백필 필요."""
     check_admin(request, x_admin_token)
-    model_registry.set_default(inp.kind, inp.name)
+    try:
+        model_registry.set_default(inp.kind, inp.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     warn = None
     if inp.kind == "embedding":
-        warn = ("임베딩 모델 변경됨 — .env EMBED_MODEL도 함께 바꾸면 백필 배치가 "
-                "embed_model 불일치 청크를 자동 재임베딩합니다 (재백필 중 시맨틱 "
-                "커버리지 점증, lexical이 받침). nodes.embedding 재백필과 "
-                "그래프 dedup 임계값 재캘리브레이션도 필요")
+        n = load_matrix()  # 새 모델 벡터만 로드 — 백필 전이면 0건 (lexical이 받침)
+        warn = (f"임베딩 기본값 변경됨 — 검색·dedup·경로 진입점이 즉시 이 모델을 씁니다. "
+                f"현재 이 모델의 청크 벡터 {n}건 로드 (백필 배치가 불일치분을 자동 재임베딩, "
+                "재백필 중엔 lexical이 받침). nodes.embedding 재백필과 dedup 임계값 "
+                "재캘리브레이션은 별도 필요")
     return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
 
 
@@ -701,6 +737,38 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
     con.commit()
     con.close()
     return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
+
+
+@app.get("/admin/mcp")
+def admin_mcp_list(request: Request, x_admin_token: str = Header(default="")):
+    """관리자: 등록된 MCP 서버 목록."""
+    check_admin(request, x_admin_token)
+    from tools import mcp_registry
+    return {"servers": mcp_registry.list_servers()}
+
+
+class McpIn(BaseModel):
+    name: str
+    transport: str = "streamable_http"  # streamable_http | sse | stdio
+    url: str = ""       # http 계열: MCP 엔드포인트 주소
+    command: str = ""   # stdio: 실행 파일
+    enabled: bool = True
+
+
+@app.post("/admin/mcp")
+def admin_mcp_upsert(inp: McpIn, request: Request,
+                     x_admin_token: str = Header(default="")):
+    """관리자: MCP 서버 등록/수정 — 저장 즉시 다음 질문부터 도구가 조립된다."""
+    check_admin(request, x_admin_token)
+    if not inp.name.strip():
+        raise HTTPException(400, "name은 필수입니다")
+    from tools import mcp_registry
+    try:
+        mcp_registry.upsert(inp.name, inp.transport, inp.url, inp.command, inp.enabled)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _agents.clear()  # 다음 질문부터 새 MCP 구성으로 조립
+    return {"ok": True, "note": "다음 질문부터 반영 (에이전트 재조립)"}
 
 
 @app.get("/admin/agent-settings")

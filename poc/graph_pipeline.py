@@ -36,11 +36,9 @@ from openai import OpenAI
 from tools import config
 from tools.blog_search import DSN, PASSWORD, USER
 
-# LLM과 임베딩이 별도 호스트라 클라이언트를 2개로 분리 (.env로 제어)
 llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY)
-emb_llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
+# 임베딩 클라이언트는 model_registry.embedding_client()가 해석 (레지스트리 우선)
 CHAT_MODEL = config.CHAT_MODEL
-EMB_MODEL = config.EMBED_MODEL
 SIM_HIGH = config.DEDUP_SIM_HIGH       # 이 이상은 명백히 동일 — LLM 확인 생략하고 병합
 SIM_THRESHOLD = config.DEDUP_SIM_THRESHOLD  # 후보 하한 — 이 구간은 LLM이 동일 의도 여부 확인
 # 캘리브레이션: 같은 의도 0.81~0.98, 다른 의도 0.34~0.46. 인접 주제 과병합(도커 사례)이 0.7대에서 발생
@@ -201,7 +199,9 @@ def classify_domain(cur, tool_names):
 
 
 def embed(text: str) -> list:
-    return emb_llm.embeddings.create(model=EMB_MODEL, input=text).data[0].embedding
+    from tools import model_registry
+    cli, emb_name = model_registry.embedding_client()
+    return cli.embeddings.create(model=emb_name, input=text).data[0].embedding
 
 
 def cosine(a, b):

@@ -19,12 +19,14 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import config  # noqa: E402
 from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
+from tools import model_registry  # noqa: E402
 
-EMB_MODEL = config.EMBED_MODEL  # .env로 제어 — 청크의 embed_model에 기록됨
+EMBED_URL_RESOLVED, EMB_MODEL = model_registry.embedding_endpoint()  # 레지스트리 우선
+
 BATCH = config.EMBED_BATCH
 CONCURRENCY = config.EMBED_CONCURRENCY  # 임베딩 서빙 동시 요청 수
 
-llm = AsyncOpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
+llm = AsyncOpenAI(base_url=EMBED_URL_RESOLVED, api_key=config.MODEL_API_KEY)
 
 
 async def main():

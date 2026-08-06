@@ -160,6 +160,43 @@
 </section>
 
 <section class="card">
+  <h3>모델 레지스트리 <small>LLM·임베딩·리랭커 등록과 역할별 선택</small></h3>
+  <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th>기본</th><th>활성</th><th></th></tr></thead>
+    <tbody></tbody></table>
+  <form id="mform">
+    <select id="mkind"><option value="llm">llm</option><option value="embedding">embedding</option><option value="reranker">reranker</option></select>
+    <input id="mname" placeholder="served-model-name (호스트 /v1/models 값 그대로)" required style="flex:1;min-width:220px">
+    <input id="murl" placeholder="base_url (예: http://vllm-embed:8000/v1 — 빈값=역할별 .env)" style="flex:1;min-width:260px">
+    <button id="madd">등록/수정</button>
+    <button type="button" class="ghost" id="msync" title="채팅 호스트 /v1/models에서 목록 동기화 (LM Studio 단일 서빙용)">서빙 동기화</button>
+    <span class="hint" id="mmsg" style="margin:0"></span>
+  </form>
+  <p class="hint">역할별 사용처 — <b>채팅 LLM</b>: llm 기본값(사용자가 채팅에서 바꿀 수 있음) ·
+     <b>전처리 LLM</b>: 아래 전처리 설정의 '전처리 모델' · <b>임베딩</b>: embedding 기본값
+     (검색·청크 백필·dedup·경로 진입점 전역 — 바꾸면 백필 배치가 자동 재임베딩, 재백필 중 lexical이 받침) ·
+     <b>리랭커</b>: 슬롯만 (리랭크 단계 미구현). 삭제 대신 활성 해제.</p>
+</section>
+
+<section class="card">
+  <h3>MCP 서버 <small>주소를 등록하면 그 서버의 도구들이 에이전트에 자동 조립됩니다</small></h3>
+  <table id="mcplist"><thead><tr><th>이름</th><th>transport</th><th>주소/command</th><th>활성</th><th></th></tr></thead>
+    <tbody></tbody></table>
+  <form id="mcpform">
+    <input id="mcpname" placeholder="이름 (예: datahub)" required style="width:130px">
+    <select id="mcptr">
+      <option value="streamable_http">streamable_http (HTTP)</option>
+      <option value="sse">sse</option>
+      <option value="stdio">stdio (로컬 실행 파일)</option>
+    </select>
+    <input id="mcpurl" placeholder="http(s)://주소 — HTTP 계열 / 실행 파일명 — stdio" style="flex:1;min-width:280px">
+    <button id="mcpadd">등록/수정</button>
+    <span class="hint" id="mcpmsg" style="margin:0"></span>
+  </form>
+  <p class="hint">저장 즉시 다음 질문부터 반영. 등록된 서버의 <b>도구별 활성/비활성은 아래 에이전트 설정</b>에서.
+     같은 이름으로 저장하면 수정(upsert), 삭제 대신 활성 해제.</p>
+</section>
+
+<section class="card">
   <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
   <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
   <textarea id="agPrompt" spellcheck="false"></textarea>
@@ -498,6 +535,114 @@ $("psresetall").onclick = async () => {
   loadDocStatus();
 };
 
+// ── 모델 레지스트리 ──────────────────────────────────────────
+const mmsg = (t) => { $("mmsg").textContent = t; };
+async function loadModels() {
+  const r = await fetch("/admin/models/all", {headers: adminHdr()}).catch(() => null);
+  if (!r?.ok) return;
+  const tb = $("mlist").querySelector("tbody");
+  tb.innerHTML = "";
+  (await r.json()).models.forEach(m => {
+    const tr = document.createElement("tr");
+    [m.kind, m.name, m.base_url].forEach((v, i) => {
+      const td = document.createElement("td");
+      td.textContent = v ?? "";
+      if (i >= 1) td.className = "mono";
+      tr.appendChild(td);
+    });
+    const tdD = document.createElement("td");
+    tdD.textContent = m.default ? "★ 기본" : "";
+    const tdE = document.createElement("td");
+    tdE.textContent = m.enabled ? "Y" : "N";
+    const tdA = document.createElement("td");
+    if (!m.default) {
+      const btn = document.createElement("button");
+      btn.textContent = "기본 지정"; btn.style.cssText = "padding:2px 8px;font-size:.72rem";
+      btn.onclick = async () => {
+        const rr = await fetch("/admin/models/select", {
+          method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+          body: JSON.stringify({kind: m.kind, name: m.name})});
+        const j = await rr.json().catch(() => ({}));
+        mmsg(rr.ok ? (j.warning || "✓ 기본값 변경") : `실패 — ${j.detail || rr.status}`);
+        loadModels();
+      };
+      tdA.appendChild(btn);
+    }
+    tr.append(tdD, tdE, tdA);
+    tr.onclick = (e) => {  // 행 클릭 = 폼에 채워 수정 (버튼 클릭은 제외)
+      if (e.target.tagName === "BUTTON") return;
+      $("mkind").value = m.kind; $("mname").value = m.name; $("murl").value = m.base_url;
+    };
+    tb.appendChild(tr);
+  });
+}
+$("mform").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch("/admin/models/add", {
+    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    body: JSON.stringify({kind: $("mkind").value, name: $("mname").value.trim(),
+                          base_url: $("murl").value.trim()})});
+  const j = await r.json().catch(() => ({}));
+  mmsg(r.ok ? "✓ 등록됨" : `실패 — ${j.detail || r.status}`);
+  loadModels(); loadAgentSettings();
+};
+$("msync").onclick = async () => {
+  mmsg("⏳ 동기화 중…");
+  const r = await fetch("/admin/models/sync", {method: "POST", headers: adminHdr()});
+  const j = await r.json().catch(() => ({}));
+  mmsg(r.ok ? `✓ 동기화 — 신규 ${j.registered?.length ?? 0}건` : `실패 (${r.status})`);
+  loadModels();
+};
+
+// ── MCP 서버 레지스트리 ──────────────────────────────────────
+const mcpmsg = (t) => { $("mcpmsg").textContent = t; };
+async function loadMcp() {
+  const r = await fetch("/admin/mcp", {headers: adminHdr()}).catch(() => null);
+  if (!r?.ok) return;
+  const tb = $("mcplist").querySelector("tbody");
+  tb.innerHTML = "";
+  (await r.json()).servers.forEach(s => {
+    const tr = document.createElement("tr");
+    [s.name, s.transport, s.url || s.command, s.enabled ? "Y" : "N"].forEach((v, i) => {
+      const td = document.createElement("td");
+      td.textContent = v ?? "";
+      if (i === 2) td.className = "mono";
+      tr.appendChild(td);
+    });
+    const tdA = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.textContent = s.enabled ? "끄기" : "켜기";
+    btn.style.cssText = "padding:2px 8px;font-size:.72rem";
+    btn.onclick = async () => {
+      await fetch("/admin/mcp", {
+        method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+        body: JSON.stringify({name: s.name, transport: s.transport, url: s.url,
+                              command: s.command, enabled: !s.enabled})});
+      loadMcp(); loadAgentSettings();
+    };
+    tdA.appendChild(btn);
+    tr.appendChild(tdA);
+    tr.onclick = (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      $("mcpname").value = s.name; $("mcptr").value = s.transport;
+      $("mcpurl").value = s.url || s.command;
+    };
+    tb.appendChild(tr);
+  });
+}
+$("mcpform").onsubmit = async (e) => {
+  e.preventDefault();
+  const tr_ = $("mcptr").value, val = $("mcpurl").value.trim();
+  const r = await fetch("/admin/mcp", {
+    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    body: JSON.stringify({name: $("mcpname").value.trim(), transport: tr_,
+                          url: tr_ === "stdio" ? "" : val,
+                          command: tr_ === "stdio" ? val : ""})});
+  const j = await r.json().catch(() => ({}));
+  mcpmsg(r.ok ? "✓ 등록됨 — 다음 질문부터 도구 조립" : `실패 — ${j.detail || r.status}`);
+  loadMcp(); loadAgentSettings();
+};
+
 // ── 에이전트 설정 (전역 — 시스템 프롬프트·MCP·도구별 on/off) ──
 async function loadAgentSettings() {
   const r = await fetch("/admin/agent-settings", {headers: adminHdr()}).catch(() => null);
@@ -515,7 +660,9 @@ async function loadAgentSettings() {
     cb.checked = !s.disabled_tools.includes(t.name);
     const nm = document.createElement("b"); nm.textContent = t.name;
     const src = document.createElement("span"); src.className = "src";
-    src.textContent = t.source === "mcp" ? "MCP" : "내장";
+    src.textContent = t.source === "builtin" ? "내장"
+                    : t.source === "source" ? "소스 검색"
+                    : t.source.replace("mcp:", "MCP: ");
     const desc = document.createElement("span"); desc.className = "desc";
     desc.textContent = t.description || ""; desc.title = t.description || "";
     lab.append(cb, nm, src, desc);
@@ -543,7 +690,7 @@ $("agForm").onsubmit = async (e) => {
 
 // 페이지 초기 로드 + 현황 폴링
 loadDomains(); loadSources(); loadTables(); loadDomainOptions();
-loadPipelineSettings(); loadDocStatus(); loadAgentSettings();
+loadPipelineSettings(); loadDocStatus(); loadModels(); loadMcp(); loadAgentSettings();
 setInterval(loadDocStatus, 5000);
 </script>
 </body>
