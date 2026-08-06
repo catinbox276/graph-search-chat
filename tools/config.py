@@ -94,6 +94,9 @@ GATEWAY_TOKEN_FIELD = _get("GATEWAY_TOKEN_FIELD", "accessToken")  # 요청 바�
 GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "result.userId")
 GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "result.role")
 GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
+
+# --- REST 도구 서버 어댑터 (tools/rest_tools.py — mcp_registry transport='rest') ---
+REST_TOOL_TIMEOUT = _getf("REST_TOOL_TIMEOUT", 30.0)  # /tools·/call 호출 타임아웃(초)
 GATEWAY_TIMEOUT = _getf("GATEWAY_TIMEOUT", 5.0)            # 검증 API 호출 타임아웃(초) — 초과 시 미인증(fail-closed)
 SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명
 SSO_ROLE_HEADER = _get("SSO_ROLE_HEADER", "X-Auth-Request-Groups")  # role 헤더명(구분자 ,;공백)

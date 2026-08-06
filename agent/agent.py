@@ -98,10 +98,17 @@ def _mcp_servers() -> list:
 
 async def _mcp_tools():
     servers = _mcp_servers()
-    if not servers:
-        return []
-    client = MultiServerMCPClient({s["name"]: _mcp_config(s) for s in servers})
-    return await client.get_tools()
+    tools = []
+    for s in [x for x in servers if x["transport"] == "rest"]:
+        try:  # 사내 REST 도구 서버 (GET /tools + POST /call — 전용 어댑터)
+            from tools.rest_tools import load_rest_tools
+            tools += load_rest_tools(s["name"], s["url"])
+        except Exception as e:
+            print(f"[경고] REST 도구 서버 '{s['name']}' 연결 실패: {e}", file=sys.stderr)
+    std = {s["name"]: _mcp_config(s) for s in servers if s["transport"] != "rest"}
+    if std:
+        tools += await MultiServerMCPClient(std).get_tools()
+    return tools
 
 
 def _source_tools() -> list:
@@ -124,13 +131,19 @@ async def discover_tools() -> list:
              "source": "source"} for t in _source_tools()]
     for s in _mcp_servers():
         try:
-            client = MultiServerMCPClient({s["name"]: _mcp_config(s)})
-            for t in await client.get_tools():
+            if s["transport"] == "rest":
+                from tools.rest_tools import load_rest_tools
+                found = load_rest_tools(s["name"], s["url"])
+                tag = f"rest:{s['name']}"
+            else:
+                found = await MultiServerMCPClient({s["name"]: _mcp_config(s)}).get_tools()
+                tag = f"mcp:{s['name']}"
+            for t in found:
                 out.append({"name": _tool_name(t),
                             "description": (getattr(t, "description", "") or "").split("\n")[0],
-                            "source": f"mcp:{s['name']}"})
+                            "source": tag})
         except Exception as e:
-            print(f"[경고] MCP '{s['name']}' 도구 목록 조회 실패: {e}", file=sys.stderr)
+            print(f"[경고] 도구 서버 '{s['name']}' 목록 조회 실패: {e}", file=sys.stderr)
     return out
 
 

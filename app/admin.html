@@ -180,7 +180,8 @@
   <form id="mcpform">
     <input id="mcpname" placeholder="이름 (예: datahub)" required style="width:130px">
     <select id="mcptr">
-      <option value="streamable_http">streamable_http (HTTP)</option>
+      <option value="streamable_http">streamable_http (표준 MCP)</option>
+      <option value="rest">rest (사내 — GET /tools + POST /call)</option>
       <option value="sse">sse</option>
       <option value="stdio">stdio (로컬 실행 파일)</option>
     </select>
