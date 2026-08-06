@@ -83,7 +83,7 @@ flowchart LR
 
 - `POST /chat/stream` — SSE: token(생각·답변 실시간) / tool / tool_end(정리된 응답) / answer
 - `POST /chat` — 비스트리밍 (스크립트용). 둘 다 `model` 필드로 LLM 선택, 멀티턴 기억
-- `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(X-Admin-Token)
+- `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(SSO 역할)
 - `GET/POST /admin/domains` — 1층 도메인 닫힌 목록 조회/추가 (`domain_registry` 시드 테이블, 관리자 전용. 삭제 API는 의도적으로 없음)
 - `GET/POST /admin/sources` · `GET /admin/sources/tables[/{t}]` — 구조화 원천 테이블 등록 + 접속 DB 테이블·컬럼 브라우저 (관리자 전용, docs/integration.md 접점 2)
 - `POST /admin/sources/{s}/dryrun` — 미처리 문서 판정만(그래프 반영 없음, 지침 튜닝용) · `POST /admin/sources/{s}/reprocess` — mode=errors(실패 재시도)/reset(기여 회수 후 재구조화)
@@ -118,7 +118,7 @@ kubectl apply -k k8s/base          # 앱 Deployment + 야간 CronJob 5종 (env�
 
 1. 로컬은 대형 LLM 1개만 동시 로드(LM Studio, 유일한 비파드 구성요소) — GPU 서빙(vLLM 파드)에서 드롭다운 선택 그대로 동작
 2. ~~멀티턴 기억은 서버 메모리~~ → **Oracle 체크포인터로 외부화 완료** (lg_checkpoints/lg_writes) — 복제본 공유·재시작 생존
-3. ~~관리자 인증은 단일 토큰~~ → **SSO 구현 완료** (AUTH_MODE: header=전단 SSO 헤더 소비/keycloak=직접 OIDC — docs/integration.md 접점 1. X-Admin-Token은 스크립트용 병행)
+3. ~~관리자 인증은 단일 토큰~~ → **SSO 구현 완료** (AUTH_MODE: header=전단 SSO 헤더 소비/keycloak=직접 OIDC — docs/integration.md 접점 1. X-Admin-Token은 폐기 — SSO 역할만 (AUTH_MODE=none 로컬은 전부 허용))
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
 5. 야간 CronJob 5종이 미판정 세션·신규 문서를 자동 처리 (03:00 파이프라인 / 03:10 원천 증분 / 03:20 유지보수 / 03:30 임베딩 / 03:40 문서 구조화). 로컬은 야간에 모델 서빙이 켜져 있어야 동작
 6. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정, supersession 자동화 등)

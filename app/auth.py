@@ -90,6 +90,8 @@ def require_user(request: Request) -> dict | None:
 
 
 def is_admin(request: Request) -> bool:
+    if not active():  # AUTH_MODE=none — 로컬 개발, 인증 없음 = 관리자 허용
+        return True
     u = current_user(request)
     return bool(u and config.OIDC_ADMIN_ROLE in u.get("roles", []))
 

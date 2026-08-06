@@ -71,7 +71,6 @@ RERANK_MODEL = _get("RERANK_MODEL", "")
 
 # --- DataHub / 관리 ---
 DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
-ADMIN_TOKEN = _get("ADMIN_TOKEN", "poc-admin")
 
 # --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
 # none    = 인증 없음(로컬 개발 기본)

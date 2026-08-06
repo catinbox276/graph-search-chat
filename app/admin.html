@@ -69,10 +69,6 @@
 </header>
 
 <main>
-<p class="tok" style="margin-top:14px">관리자 토큰
-  <input id="atk" type="password" placeholder="X-Admin-Token — SSO 관리자로 로그인했다면 비워두세요" autocomplete="off" style="flex:1;max-width:420px">
-</p>
-
 <section class="card">
   <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
   <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
@@ -217,9 +213,8 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const atk = $("atk"), derr = $("derr"), serr = $("serr");
-atk.value = localStorage.getItem("admin_token") || "";
-const adminHdr = () => ({"X-Admin-Token": atk.value});
+const derr = $("derr"), serr = $("serr");
+localStorage.removeItem("admin_token");  // 토큰 방식 폐기 — SSO 관리자 역할만
 const dmsg = (t, ok) => { derr.textContent = t; derr.classList.toggle("ok", !!ok); };
 const smsg = (t, ok) => { serr.textContent = t; serr.classList.toggle("ok", !!ok); };
 const ROLE_IDS = ["r_title", "r_body", "r_question", "r_answer", "r_meta", "r_url"];
@@ -244,9 +239,8 @@ fetch("/me").then(r => r.json()).then(m => {
 // ── 도메인 시드 관리 ──────────────────────────────────────────
 async function loadDomains(selName) {
   dmsg("");
-  if (atk.value) localStorage.setItem("admin_token", atk.value);
-  const r = await fetch("/admin/domains", {headers: adminHdr()});
-  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — SSO 관리자로 로그인했거나 토큰이 맞는지 확인하세요`); return; }
+  const r = await fetch("/admin/domains");
+  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — SSO 관리자 역할이 필요합니다`); return; }
   const tb = $("dlist").querySelector("tbody");
   tb.innerHTML = "";
   const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
@@ -271,14 +265,13 @@ async function loadDomains(selName) {
     tb.appendChild(tr);
   });
 }
-atk.onchange = () => { loadDomains(); loadSources(); loadPipelineSettings(); loadDocStatus(); };
 $("dform").onsubmit = async (e) => {
   e.preventDefault();
   dmsg("");
   const name = $("dname").value.trim();
   const r = await fetch("/admin/domains", {
     method: "POST",
-    headers: {"Content-Type": "application/json", ...adminHdr()},
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name, tools: $("dtools").value.trim(),
                           priority: parseInt($("dprio").value) || 100,
                           extract_hint: $("dhint").value.trim(),
@@ -300,7 +293,7 @@ $("dreset").onclick = async () => {
                "처음부터 재구조화합니다. 대화 세션 기여는 유지됩니다. 계속할까요?")) return;
   dmsg("⏳ 도메인 문서 초기화 중…");
   const r = await fetch(`/admin/domains/${encodeURIComponent(name)}/reset`,
-                        {method: "POST", headers: adminHdr()});
+                        {method: "POST"});
   if (!r.ok) {
     let msg = `초기화 실패 (${r.status})`;
     try { msg += " — " + (await r.json()).detail; } catch {}
@@ -313,8 +306,8 @@ $("dreset").onclick = async () => {
 // ── 구조화 원천 테이블 ────────────────────────────────────────
 async function loadSources(selName) {
   smsg("");
-  const r = await fetch("/admin/sources", {headers: adminHdr()});
-  if (!r.ok) { smsg(`조회 실패 (${r.status}) — SSO 관리자 로그인 또는 토큰이 필요합니다`); return; }
+  const r = await fetch("/admin/sources");
+  if (!r.ok) { smsg(`조회 실패 (${r.status}) — SSO 관리자 역할이 필요합니다`); return; }
   const tb = $("slist").querySelector("tbody");
   tb.innerHTML = "";
   (await r.json()).sources.forEach(s => {
@@ -348,7 +341,7 @@ async function loadSources(selName) {
 }
 async function loadTables() {
   if ($("stable").options.length > 1) return;
-  const r = await fetch("/admin/sources/tables", {headers: adminHdr()});
+  const r = await fetch("/admin/sources/tables");
   if (!r.ok) return;
   const sel = $("stable"), cur = sel.value;
   sel.length = 1;
@@ -357,7 +350,7 @@ async function loadTables() {
 }
 async function loadDomainOptions() {
   if ($("sdomain").options.length > 1) return;
-  const r = await fetch("/admin/domains", {headers: adminHdr()});
+  const r = await fetch("/admin/domains");
   if (!r.ok) return;
   const sel = $("sdomain"), cur = sel.value;
   sel.length = 1;
@@ -369,7 +362,7 @@ async function loadCols(t) {
   const selects = ["sidc", "stsc", ...ROLE_IDS];
   if (!t) { selects.forEach(id => { $(id).length = 1; }); return; }
   if (!_colCache[t]) {
-    const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t), {headers: adminHdr()});
+    const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t));
     if (!r.ok) return;
     _colCache[t] = (await r.json()).columns;
   }
@@ -387,7 +380,7 @@ $("sform").onsubmit = async (e) => {
   const name = $("sname").value.trim();
   const r = await fetch("/admin/sources", {
     method: "POST",
-    headers: {"Content-Type": "application/json", ...adminHdr()},
+    headers: {"Content-Type": "application/json"},
     body: JSON.stringify({source_name: name, table_name: $("stable").value,
                           id_column: $("sidc").value, ts_column: $("stsc").value,
                           field_map: fmap, content_kind: $("skind").value.trim(),
@@ -409,7 +402,7 @@ $("sdry").onclick = async () => {
   const out = $("dryout");
   out.textContent = "⏳ 드라이런 중… (문서 3건 판정 — 그래프 반영 없음, 수십 초 걸릴 수 있음)";
   const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/dryrun`, {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({n: 3})});
   if (!r.ok) {
     let msg = `드라이런 실패 (${r.status})`;
@@ -437,7 +430,7 @@ async function reprocess(mode, label) {
       "지침·모델을 바꾼 뒤 쓰는 기능입니다. 계속할까요?")) return;
   smsg(`⏳ ${label} 처리 중…`);
   const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/reprocess`, {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({mode})});
   if (!r.ok) {
     let msg = `${label} 실패 (${r.status})`;
@@ -468,7 +461,7 @@ function pRow(label, s, agg) {
 }
 async function loadDocStatus() {
   const box = $("docstat");
-  const r = await fetch("/admin/doc-status", {headers: adminHdr()}).catch(() => null);
+  const r = await fetch("/admin/doc-status").catch(() => null);
   if (!r?.ok) { box.innerHTML = `<span class="hint">현황 조회 실패 — 관리자 인증을 확인하세요</span>`; return; }
   const rows = (await r.json()).sources;
   if (!rows.length) { box.innerHTML = `<span class="hint">그래프 도메인이 지정된 소스가 없습니다</span>`; return; }
@@ -489,7 +482,7 @@ async function loadDocStatus() {
 
 // ── 전처리 설정 ──────────────────────────────────────────────
 async function loadPipelineSettings() {
-  const r = await fetch("/admin/pipeline-settings", {headers: adminHdr()});
+  const r = await fetch("/admin/pipeline-settings");
   if (!r.ok) return;
   const s = await r.json();
   $("psLimit").value = s.doc_extract_limit; $("psConc").value = s.doc_concurrency;
@@ -507,7 +500,7 @@ $("psform").onsubmit = async (e) => {
   e.preventDefault();
   $("psmsg").textContent = "";
   const r = await fetch("/admin/pipeline-settings", {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({doc_extract_limit: $("psLimit").value, doc_concurrency: $("psConc").value,
                           doc_body_chars: $("psChars").value, doc_pack_tokens: $("psPack").value,
                           doc_no_think: $("psThink").checked ? "1" : "0",
@@ -525,7 +518,7 @@ $("psresetall").onclick = async () => {
   if (!confirm("도메인 지정된 모든 소스의 문서 구조화 기여를 회수하고\n" +
                "전부 처음부터 재구조화합니다. 대화 세션 기여는 유지됩니다. 계속할까요?")) return;
   $("psmsg").textContent = "⏳ 전체 문서 초기화 중…";
-  const r = await fetch("/admin/reset-all-docs", {method: "POST", headers: adminHdr()});
+  const r = await fetch("/admin/reset-all-docs", {method: "POST"});
   if (!r.ok) {
     let msg = `초기화 실패 (${r.status})`;
     try { msg += " — " + (await r.json()).detail; } catch {}
@@ -538,7 +531,7 @@ $("psresetall").onclick = async () => {
 // ── 모델 레지스트리 ──────────────────────────────────────────
 const mmsg = (t) => { $("mmsg").textContent = t; };
 async function loadModels() {
-  const r = await fetch("/admin/models/all", {headers: adminHdr()}).catch(() => null);
+  const r = await fetch("/admin/models/all").catch(() => null);
   if (!r?.ok) return;
   const tb = $("mlist").querySelector("tbody");
   tb.innerHTML = "";
@@ -560,7 +553,7 @@ async function loadModels() {
       btn.textContent = "기본 지정"; btn.style.cssText = "padding:2px 8px;font-size:.72rem";
       btn.onclick = async () => {
         const rr = await fetch("/admin/models/select", {
-          method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+          method: "POST", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({kind: m.kind, name: m.name})});
         const j = await rr.json().catch(() => ({}));
         mmsg(rr.ok ? (j.warning || "✓ 기본값 변경") : `실패 — ${j.detail || rr.status}`);
@@ -579,7 +572,7 @@ async function loadModels() {
 $("mform").onsubmit = async (e) => {
   e.preventDefault();
   const r = await fetch("/admin/models/add", {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({kind: $("mkind").value, name: $("mname").value.trim(),
                           base_url: $("murl").value.trim()})});
   const j = await r.json().catch(() => ({}));
@@ -588,7 +581,7 @@ $("mform").onsubmit = async (e) => {
 };
 $("msync").onclick = async () => {
   mmsg("⏳ 동기화 중…");
-  const r = await fetch("/admin/models/sync", {method: "POST", headers: adminHdr()});
+  const r = await fetch("/admin/models/sync", {method: "POST"});
   const j = await r.json().catch(() => ({}));
   mmsg(r.ok ? `✓ 동기화 — 신규 ${j.registered?.length ?? 0}건` : `실패 (${r.status})`);
   loadModels();
@@ -597,7 +590,7 @@ $("msync").onclick = async () => {
 // ── MCP 서버 레지스트리 ──────────────────────────────────────
 const mcpmsg = (t) => { $("mcpmsg").textContent = t; };
 async function loadMcp() {
-  const r = await fetch("/admin/mcp", {headers: adminHdr()}).catch(() => null);
+  const r = await fetch("/admin/mcp").catch(() => null);
   if (!r?.ok) return;
   const tb = $("mcplist").querySelector("tbody");
   tb.innerHTML = "";
@@ -615,7 +608,7 @@ async function loadMcp() {
     btn.style.cssText = "padding:2px 8px;font-size:.72rem";
     btn.onclick = async () => {
       await fetch("/admin/mcp", {
-        method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+        method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({name: s.name, transport: s.transport, url: s.url,
                               command: s.command, enabled: !s.enabled})});
       loadMcp(); loadAgentSettings();
@@ -634,7 +627,7 @@ $("mcpform").onsubmit = async (e) => {
   e.preventDefault();
   const tr_ = $("mcptr").value, val = $("mcpurl").value.trim();
   const r = await fetch("/admin/mcp", {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name: $("mcpname").value.trim(), transport: tr_,
                           url: tr_ === "stdio" ? "" : val,
                           command: tr_ === "stdio" ? val : ""})});
@@ -645,7 +638,7 @@ $("mcpform").onsubmit = async (e) => {
 
 // ── 에이전트 설정 (전역 — 시스템 프롬프트·MCP·도구별 on/off) ──
 async function loadAgentSettings() {
-  const r = await fetch("/admin/agent-settings", {headers: adminHdr()}).catch(() => null);
+  const r = await fetch("/admin/agent-settings").catch(() => null);
   if (!r?.ok) { $("agTools").innerHTML = `<span class="hint">조회 실패 — 관리자 인증을 확인하세요</span>`; return; }
   const s = await r.json();
   $("agPrompt").value = s.system_prompt;
@@ -675,7 +668,7 @@ $("agForm").onsubmit = async (e) => {
   const disabled = [...document.querySelectorAll("#agTools .agtool")]
     .filter(cb => !cb.checked).map(cb => cb.value);
   const r = await fetch("/admin/agent-settings", {
-    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({system_prompt: $("agPrompt").value,
                           mcp_enabled: $("agMcp").checked,
                           disabled_tools: disabled}),

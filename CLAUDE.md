@@ -59,7 +59,6 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `MODEL_URL` | `http://127.0.0.1:1234/v1` | 단일 서빙 폴백. CHAT/EMBED/RERANK_URL이 비면 여기로(LM Studio 단일 서빙 호환) |
 | `MODEL_API_KEY` | `lm-studio` | OpenAI 호환 키. vLLM에 `--api-key` 미설정 시 더미값이면 됨 |
 | `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
-| `ADMIN_TOKEN` | `poc-admin` | 모델 관리 API (`X-Admin-Token` 헤더) — SSO 관리자 역할로도 통과 |
 | `SOURCE_TABLE_ALLOWLIST` | (빈값=제한 없음) | 원천 테이블 화이트리스트 (쉼표구분) — 목록 밖 테이블은 브라우저 조회·소스 등록·야간 적재 전부 차단 (`source_registry.table_allowed` 한 곳으로 강제). 사내 전환 시 허용 테이블만 나열 |
 | `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). `header`=사내 기본 — 전단 SSO가 준 `SSO_USER_HEADER`(userId)·`SSO_ROLE_HEADER`(role) 2개만 소비, 로그인 UI 없음. `keycloak`=전단 없는 환경용 직접 OIDC(`KEYCLOAK_*`/`OIDC_*` 필요, PoC 파드는 `k8s/keycloak.yaml`). 관리자 = `OIDC_ADMIN_ROLE`(기본 `gsc-admin`) 역할 보유 |
 

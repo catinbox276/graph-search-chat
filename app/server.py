@@ -17,7 +17,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import oracledb
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from tools.oracle_checkpointer import OracleSaver
 from pydantic import BaseModel
@@ -32,14 +32,10 @@ app = FastAPI()
 app.include_router(auth.router)  # SSO: /oidc/login·callback·logout, /me
 _agents = {}          # model_name -> agent (모델별 캐시)
 _saver = None         # 공유 checkpointer (같은 세션이 모델 바꿔도 기억 유지)
-ADMIN_TOKEN = config.ADMIN_TOKEN
-
-
-def check_admin(request: Request, token: str):
-    """관리자 = SSO 관리자 역할(gsc-admin) 또는 X-Admin-Token(스크립트·비상용)."""
-    if token != ADMIN_TOKEN and not auth.is_admin(request):
-        raise HTTPException(403, "관리자 권한이 필요합니다 "
-                                 "(SSO 관리자 역할 또는 X-Admin-Token)")
+def check_admin(request: Request):
+    """관리자 = SSO 관리자 역할(gsc-admin). AUTH_MODE=none(로컬)은 전부 허용."""
+    if not auth.is_admin(request):
+        raise HTTPException(403, "관리자 권한이 필요합니다 (SSO 관리자 역할)")
 
 
 async def get_agent(model_name: str | None):
@@ -425,9 +421,9 @@ def models():
 
 
 @app.get("/admin/models/all")
-def admin_models_all(request: Request, x_admin_token: str = Header(default="")):
+def admin_models_all(request: Request):
     """관리자: 전체 모델 목록 (종류·주소·기본값·활성)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     return {"models": model_registry.list_models(),
             "embedding_in_use": model_registry.embedding_endpoint()[1]}
 
@@ -440,10 +436,9 @@ class ModelAddIn(BaseModel):
 
 
 @app.post("/admin/models/add")
-def admin_model_add(inp: ModelAddIn, request: Request,
-                    x_admin_token: str = Header(default="")):
+def admin_model_add(inp: ModelAddIn, request: Request):
     """관리자: 모델 수동 등록/수정 (사내 vLLM처럼 sync가 못 닿는 호스트용)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     if inp.base_url and not inp.base_url.lower().startswith(("http://", "https://")):
         raise HTTPException(400, "base_url은 http(s):// 주소여야 합니다")
     try:
@@ -456,9 +451,9 @@ def admin_model_add(inp: ModelAddIn, request: Request,
 
 
 @app.post("/admin/models/sync")
-def admin_sync(request: Request, x_admin_token: str = Header(default="")):
+def admin_sync(request: Request):
     """관리자: 모델 서빙에서 목록 동기화(등록)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     return model_registry.sync_from_serving()
 
 
@@ -468,10 +463,9 @@ class SelectIn(BaseModel):
 
 
 @app.post("/admin/models/select")
-def admin_select(inp: SelectIn, request: Request,
-                 x_admin_token: str = Header(default="")):
+def admin_select(inp: SelectIn, request: Request):
     """관리자: 종류별 기본 모델 지정. 임베딩 교체는 전체 재백필 필요."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     try:
         model_registry.set_default(inp.kind, inp.name)
     except ValueError as e:
@@ -495,9 +489,9 @@ class DomainIn(BaseModel):
 
 
 @app.get("/admin/domains")
-def admin_domains(request: Request, x_admin_token: str = Header(default="")):
+def admin_domains(request: Request):
     """관리자: 1층 도메인 닫힌 목록 조회 (시드 테이블 domain_registry)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from poc.graph_pipeline import ensure_domain_registry
     con = db()
     cur = con.cursor()
@@ -513,8 +507,7 @@ def admin_domains(request: Request, x_admin_token: str = Header(default="")):
 
 
 @app.post("/admin/domains")
-def admin_domain_add(inp: DomainIn, request: Request,
-                     x_admin_token: str = Header(default="")):
+def admin_domain_add(inp: DomainIn, request: Request):
     """관리자: 도메인 추가/수정 — 닫힌 1층 목록의 유일한 확장 통로 (사람 전용).
 
     등록 때 사용 목적(scope)을 명시 선택한다: both(대화+문서)/chat(대화 전용)/
@@ -523,7 +516,7 @@ def admin_domain_add(inp: DomainIn, request: Request,
     (안전 기본값). 삭제 API는 일부러 없음 — 도메인 삭제·병합은 기존 노드 재배치가
     필요한 신중한 작업이라 SQL로만.
     """
-    check_admin(request, x_admin_token)
+    check_admin(request)
     if not inp.name.strip():
         raise HTTPException(400, "name은 필수입니다")
     scope = inp.scope.strip().lower() or "both"
@@ -563,9 +556,9 @@ class SourceIn(BaseModel):
 
 
 @app.get("/admin/sources")
-def admin_sources(request: Request, x_admin_token: str = Header(default="")):
+def admin_sources(request: Request):
     """관리자: 구조화 원천 테이블 목록 (source_registry)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import source_registry
     con = db()
     cur = con.cursor()
@@ -576,9 +569,9 @@ def admin_sources(request: Request, x_admin_token: str = Header(default="")):
 
 
 @app.get("/admin/doc-status")
-def admin_doc_status(request: Request, x_admin_token: str = Header(default="")):
+def admin_doc_status(request: Request):
     """관리자: 문서 구조화 진행 현황 — 도메인 지정 소스별 상태 카운트 (UI 프로그래스용)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     con = db()
     cur = con.cursor()
     cur.execute("""
@@ -601,14 +594,13 @@ def admin_doc_status(request: Request, x_admin_token: str = Header(default="")):
 
 
 @app.post("/admin/sources")
-def admin_source_add(inp: SourceIn, request: Request,
-                     x_admin_token: str = Header(default="")):
+def admin_source_add(inp: SourceIn, request: Request):
     """관리자: 원천 테이블 등록/수정 — 테이블·컬럼 실존을 검증하고 저장.
 
     다음 적재 배치부터 반영. 원천 테이블은 읽기 전용(우리는 SELECT만)이고,
     삭제 API는 domain_registry와 같은 이유로 없음(enabled='N'으로 끄는 것까지만).
     """
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import source_registry
     if not inp.source_name.strip() or not inp.table_name.strip() or not inp.id_column.strip():
         raise HTTPException(400, "source_name·table_name·id_column은 필수입니다")
@@ -645,9 +637,9 @@ def admin_source_add(inp: SourceIn, request: Request,
 
 
 @app.get("/admin/sources/tables")
-def admin_source_tables(request: Request, x_admin_token: str = Header(default="")):
+def admin_source_tables(request: Request):
     """관리자: 접속 DB의 등록 후보 테이블 목록 (Oracle 내부·우리 테이블 제외)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import source_registry
     con = db()
     cur = con.cursor()
@@ -657,10 +649,9 @@ def admin_source_tables(request: Request, x_admin_token: str = Header(default=""
 
 
 @app.get("/admin/sources/tables/{tname}")
-def admin_source_columns(tname: str, request: Request,
-                         x_admin_token: str = Header(default="")):
+def admin_source_columns(tname: str, request: Request):
     """관리자: 테이블의 컬럼 목록 — 등록 폼의 컬럼 선택용."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import source_registry
     con = db()
     cur = con.cursor()
@@ -672,9 +663,9 @@ def admin_source_columns(tname: str, request: Request,
 
 
 @app.get("/admin/pipeline-settings")
-def admin_pipeline_settings(request: Request, x_admin_token: str = Header(default="")):
+def admin_pipeline_settings(request: Request):
     """관리자: 전처리(문서 구조화) 운영 설정 — 효과값 반환 (DB 없으면 .env 기본값)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import settings
     con = db()
     cur = con.cursor()
@@ -708,10 +699,9 @@ class PipelineSettingsIn(BaseModel):
 
 
 @app.post("/admin/pipeline-settings")
-def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
-                                x_admin_token: str = Header(default="")):
+def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request):
     """관리자: 전처리 설정 저장 — 다음 배치 실행부터 반영 (재배포 불필요)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import settings
     vals = {}
     for key, raw, lo, hi in (("doc_extract_limit", inp.doc_extract_limit, 1, 100000),
@@ -740,9 +730,9 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
 
 
 @app.get("/admin/mcp")
-def admin_mcp_list(request: Request, x_admin_token: str = Header(default="")):
+def admin_mcp_list(request: Request):
     """관리자: 등록된 MCP 서버 목록."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import mcp_registry
     return {"servers": mcp_registry.list_servers()}
 
@@ -756,10 +746,9 @@ class McpIn(BaseModel):
 
 
 @app.post("/admin/mcp")
-def admin_mcp_upsert(inp: McpIn, request: Request,
-                     x_admin_token: str = Header(default="")):
+def admin_mcp_upsert(inp: McpIn, request: Request):
     """관리자: MCP 서버 등록/수정 — 저장 즉시 다음 질문부터 도구가 조립된다."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     if not inp.name.strip():
         raise HTTPException(400, "name은 필수입니다")
     from tools import mcp_registry
@@ -772,10 +761,9 @@ def admin_mcp_upsert(inp: McpIn, request: Request,
 
 
 @app.get("/admin/agent-settings")
-async def admin_agent_settings_get(request: Request,
-                                   x_admin_token: str = Header(default="")):
+async def admin_agent_settings_get(request: Request):
     """관리자: 에이전트 전역 설정 조회 — 시스템 프롬프트·MCP 사용·도구별 활성."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from agent.agent import SYSTEM_PROMPT, discover_tools
     from tools import settings
     con = db()
@@ -798,10 +786,9 @@ class AgentSettingsIn(BaseModel):
 
 
 @app.post("/admin/agent-settings")
-def admin_agent_settings_set(inp: AgentSettingsIn, request: Request,
-                             x_admin_token: str = Header(default="")):
+def admin_agent_settings_set(inp: AgentSettingsIn, request: Request):
     """관리자: 에이전트 전역 설정 저장 — 캐시를 비워 다음 질문부터 재조립."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     from tools import settings
     if len(inp.system_prompt) > 8000:
         raise HTTPException(400, "시스템 프롬프트는 8000자 이내여야 합니다")
@@ -824,8 +811,7 @@ class ReprocessIn(BaseModel):
 
 
 @app.post("/admin/sources/{sname}/reprocess")
-def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
-                           x_admin_token: str = Header(default="")):
+def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request):
     """관리자: 소스 재처리 준비.
 
     errors: error 상태만 미처리로 되돌림 (다음 배치가 재시도)
@@ -833,7 +819,7 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
             먼저 회수한 뒤 상태를 리셋한다. 그냥 리셋하면 재처리 때 이중 카운트되기
             때문 (재발 소급 취소와 같은 원리). 지침·모델 변경 후 재구조화용.
     """
-    check_admin(request, x_admin_token)
+    check_admin(request)
     con = db()
     cur = con.cursor()
     if inp.mode == "errors":
@@ -881,11 +867,10 @@ def _reset_source(cur, sname: str):
 
 
 @app.post("/admin/domains/{dname}/reset")
-def admin_domain_reset(dname: str, request: Request,
-                       x_admin_token: str = Header(default="")):
+def admin_domain_reset(dname: str, request: Request):
     """관리자: 도메인 초기화 — 이 도메인에 물린 모든 소스의 문서 구조화를 회수·리셋.
     대화 세션 기여는 건드리지 않는다 (문서 쪽만)."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     con = db()
     cur = con.cursor()
     cur.execute("SELECT source_name FROM source_registry WHERE domain = :1", [dname])
@@ -902,9 +887,9 @@ def admin_domain_reset(dname: str, request: Request,
 
 
 @app.post("/admin/reset-all-docs")
-def admin_reset_all_docs(request: Request, x_admin_token: str = Header(default="")):
+def admin_reset_all_docs(request: Request):
     """관리자: 전체 초기화 — 도메인 지정된 모든 소스의 문서 구조화를 회수·리셋."""
-    check_admin(request, x_admin_token)
+    check_admin(request)
     con = db()
     cur = con.cursor()
     cur.execute("SELECT source_name FROM source_registry WHERE domain IS NOT NULL")
@@ -922,14 +907,13 @@ class DryrunIn(BaseModel):
 
 
 @app.post("/admin/sources/{sname}/dryrun")
-def admin_source_dryrun(sname: str, inp: DryrunIn, request: Request,
-                        x_admin_token: str = Header(default="")):
+def admin_source_dryrun(sname: str, inp: DryrunIn, request: Request):
     """관리자: 드라이런 — 미처리 문서 N건을 판정만 해보고 결과를 보여준다.
 
     그래프·상태에 아무것도 쓰지 않는다. 새 소스·새 추출 지침을 튜닝할 때
     'excluded가 얼마나 나오나'를 배치 전에 확인하는 용도.
     """
-    check_admin(request, x_admin_token)
+    check_admin(request)
     n = max(1, min(inp.n, 5))
     con = db()
     cur = con.cursor()
