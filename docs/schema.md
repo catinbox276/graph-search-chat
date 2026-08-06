@@ -1,0 +1,151 @@
+# 테이블 스키마 설계 — Oracle 단일 DB
+
+> 실스키마 기준(클러스터 덤프, 2026-08-06) + 확장 설계(청크 임베딩·모델 버저닝).
+> 저장소 원칙은 design.md §5 (Oracle 19c 단독, 별도 검색 엔진 금지).
+
+## 0. 설계 경계 (전제)
+
+- **적재는 별도 로직** — 원본 테이블은 같은 DB에 있지만 우리 소관이 아니다. 우리는 **SELECT만** 한다.
+- 전처리(검색 준비·구조화) 대상은 **등록된 테이블만** — `.env SOURCE_TABLE_ALLOWLIST`가 접근 가능 테이블을 제한하고, `source_registry` 등록이 대상·필드 매핑을 정의한다.
+- 구분 키는 원본 테이블 이름이 아니라 **소스명(source_name, 등록 시 짓는 별칭)** — 같은 테이블을 다른 매핑으로 중복 등록 가능. 문서 id = `소스명:원천id` 단일 형식.
+- 원본과 독립 동작: 등록분을 야간에 우리 테이블(corpus_docs)로 조립한 뒤에는 원본을 다시 보지 않는다 (다음 증분 적재 전까지).
+
+## 1. 전체 지도 (ERD)
+
+```mermaid
+erDiagram
+    SOURCE_REGISTRY ||--o{ CORPUS_DOCS : "야간 적재 (소스명 기준)"
+    DOMAIN_REGISTRY ||--o{ SOURCE_REGISTRY : "domain 이름 참조"
+    CORPUS_DOCS ||--o{ CORPUS_CHUNKS : "청킹 (신규 설계)"
+    CORPUS_DOCS ||--o{ NODE_EVIDENCE : "doc:소스:id 증거"
+    SESSIONS ||--o{ NODE_EVIDENCE : "세션 증거"
+    NODES ||--o{ NODE_EVIDENCE : ""
+    NODES ||--o{ EDGES : "src/dst"
+    NODES ||--o{ SUGGESTIONS : "노출 기록"
+    SESSIONS ||--o{ SUGGESTIONS : ""
+```
+
+원본 테이블들(BLOG_POSTS, 사내 테이블 …)은 이 다이어그램 밖 — SELECT로만 만나는 외부 존재.
+
+## 2. 설정·제어 테이블
+
+### source_registry — 전처리 대상 등록 ("테이블 A")
+
+| 컬럼 | 타입 | 필수 | 의미 |
+|---|---|---|---|
+| `source_name` | VARCHAR2(100) | **PK** | 소스명(별칭) — 시스템 전체의 구분 키 |
+| `table_name` | VARCHAR2(128) | ✔ | 데이터 원본 테이블 이름 (allowlist 검증) |
+| `id_column` | VARCHAR2(128) | ✔ | 원천 고유 id 필드 |
+| `ts_column` | VARCHAR2(128) | | 시간 필드 — 있으면 증분 적재, 없으면 전량 1회 |
+| `field_map` | VARCHAR2(4000) | ✔ | JSON `{역할: 컬럼}` — 역할 어휘 닫힘: title/body/question/answer/meta/url. **본문 역할(body/question/answer) 최소 1개 필수** |
+| `content_kind` | VARCHAR2(100) | | 유형 (문제해결/가이드 …) — 프롬프트·표시 힌트 |
+| `domain` | VARCHAR2(100) | | 전처리(구조화) 도메인 — domain_registry 이름 참조. NULL=검색 전용 |
+| `enabled` | CHAR(1) | | Y/N |
+| `last_ingest_ts` | TIMESTAMP | | 증분 적재 워터마크 (배치가 갱신) |
+| `created_at` | TIMESTAMP | | |
+
+### domain_registry — 1층 도메인 닫힌 목록 (사람 전용)
+
+| 컬럼 | 의미 |
+|---|---|
+| `name` PK | 도메인 이름 |
+| `tools` | 대화 분류용 도구 목록 (쉼표구분) |
+| `priority` | 분류 우선순위 (낮을수록 먼저, 최하순위=폴백) |
+| `extract_hint` | 추출 지침 — 세션/문서 구조화 프롬프트에 주입 |
+| `scope` | both/chat/doc — doc은 대화 분류·폴백에서 제외 |
+
+### app_settings — 운영 설정 KV (재배포 없이 변경)
+
+`key`(PK) / `value` / `updated`. 전처리 건수·동시성·본문 길이·전용 모델 등. 신규 설계의 청킹 파라미터도 여기에 (아래 §5).
+
+### model_registry — 모델 등록·기본값
+
+`kind`(llm/embedding/reranker) + `name` 복합 PK, `enabled`, `is_default`. 임베딩 기본 모델이 여기서 결정 — 청크 임베딩의 `embed_model` 값과 연결 (아래 §5).
+
+## 3. 코퍼스 테이블 (우리 소유)
+
+### corpus_docs — 조립본 (검색·구조화의 원본, "테이블 B")
+
+| 컬럼 | 타입 | 의미 |
+|---|---|---|
+| `source_name` + `src_id` | VARCHAR2(100/200) | **복합 PK** — 문서 id `소스명:원천id`의 실체 |
+| `title` | VARCHAR2(1000) | 역할 매핑 title (없으면 본문 첫 줄) |
+| `body` | CLOB | 역할 조립 본문 (질문:/답변:/태그: 라벨 포함) |
+| `kind` | VARCHAR2(100) | content_kind 복사 |
+| `url` | VARCHAR2(1000) | 원문 링크 (출처 표기·문서 뷰에서 노출, http/https만 유효) |
+| `embedding` | BLOB | 문서 대표 벡터 (float32[]) — **청크 전환 후 폐기 예정 (§5)** |
+| `src_ts` / `created_at` | TIMESTAMP | 원천 시간 / 적재 시간 |
+| `graph_status` | VARCHAR2(20) | 구조화 상태: NULL(미처리)/done/excluded/error |
+| `graph_note` | VARCHAR2(1000) | 판정 사유·오류 메시지 |
+
+### corpus_chunks — 청크 임베딩 (신규 설계, 미구현)
+
+긴 문서의 뒷부분이 임베딩 검색에 잡히지 않는 현 구조(문서 1건=벡터 1개, 제목+본문 앞 300자)의 해소. 문서 1:N.
+
+```sql
+CREATE TABLE corpus_chunks (
+  source_name VARCHAR2(100) NOT NULL,   -- corpus_docs 참조 (FK 개념 — 물리 FK는 안 건다*)
+  src_id      VARCHAR2(200) NOT NULL,
+  chunk_no    NUMBER        NOT NULL,   -- 0부터, 문서 내 순서
+  text        CLOB          NOT NULL,   -- 청크 원문 (오버랩 포함)
+  char_start  NUMBER,                   -- 원문 내 시작 위치 (문서 뷰 하이라이트용)
+  char_end    NUMBER,
+  embedding   BLOB,                     -- float32[] (백필 배치가 채움 — NULL=미임베딩)
+  embed_model VARCHAR2(200),            -- 이 벡터를 만든 모델명 (모델 버저닝 — §5)
+  created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+  PRIMARY KEY (source_name, src_id, chunk_no)
+);
+-- * 물리 FK를 안 거는 이유: 재적재·초기화 때 부모 MERGE와 청크 재생성이 별 배치로
+--   돌아 순서 제약이 배치를 깨기 쉬움. 정합성은 재청킹 배치가 멱등하게 보장.
+```
+
+- 청크 텍스트에 **title을 접두**로 넣는다(청크만 봐도 무슨 문서인지 임베딩에 반영).
+- 청킹 파라미터는 app_settings: `chunk_chars`(기본 1200자), `chunk_overlap`(기본 150자). 본문이 chunk_chars 이하면 청크 1개(=현행과 동일 비용).
+- lexical(Oracle Text)은 **문서(corpus_docs.body) 인덱스 유지** — 청크는 시맨틱 전용. 이유: CONTAINS는 문서 전체에서 이미 잘 동작하고, 청크에 중복 인덱스를 만들면 저장·동기화만 는다.
+
+## 4. 그래프·세션 테이블 (현행 유지)
+
+| 테이블 | PK/키 | 핵심 컬럼 |
+|---|---|---|
+| `nodes` | id (uuid32) | layer(1~4), name, embedding(dedup·진입점용), fail_flag/fail_reason, valid_from/valid_to (bi-temporal) |
+| `edges` | (src, dst) | weight(보정 가중치), raw_count(원시 통행) |
+| `node_evidence` | (node_id, session_id) | session_id에 세션 id 또는 `doc:소스:id` — **출처 구분은 이 접두어** (성공/실패 카운트는 세션 조인만) |
+| `sessions` | (id, turn) | question/tool_calls/answer(CLOB), verdict(게이트 판정), user_id(SSO) |
+| `suggestions` | — | 경로 제안 노출 기록: problem, node_id, weight, session_id, adopted (채택률 보정) |
+| `lg_checkpoints` / `lg_writes` | (thread_id, ckpt_ns, ckpt_id …) | LangGraph 체크포인터 외부화 (멀티턴 기억) |
+
+## 5. 신규 설계 결정 — 청크 검색 + 임베딩 모델 버저닝
+
+### 검색 흐름 변경 (semantic만)
+
+```
+현행: 질의 임베딩 → corpus_docs.embedding 행렬 코사인 → 문서 top-30 → RRF
+설계: 질의 임베딩 → corpus_chunks 행렬 코사인 → 청크 top-N
+      → 문서 단위로 집계(문서별 최고 청크 점수, best-chunk) → 문서 top-30 → RRF
+```
+
+- RRF 융합·결과 포맷·문서 id는 그대로 — **검색의 대외 인터페이스 불변** (에이전트·출처 표기 코드 수정 없음).
+- 메모리 행렬은 청크 단위로 로드(`(source:id:chunk_no)` 키). 2,192문서×평균 2~3청크 규모에선 현행과 같은 브루트포스로 충분. 수십만 청크가 되면 design.md §5의 23ai VECTOR 이관 검토 지점.
+- 검색 결과 스니펫은 **매칭된 청크 텍스트**로 교체(현행: 본문 앞 200자) — 긴 문서 중간이 맞았을 때 근거가 보이게.
+
+### 임베딩 모델 버저닝 (embed_model 컬럼)
+
+- 백필 배치는 `embedding IS NULL OR embed_model != 활성모델` 인 청크를 처리하고, 벡터와 함께 `embed_model=활성모델`을 기록.
+- 검색 행렬은 **활성 모델 벡터만** 로드 — 모델 교체 시 재백필이 진행되는 동안 커버리지가 점증하고, lexical이 나머지를 받친다(현행 "임베딩 없으면 lexical 단독" 동작의 자연 확장).
+- 교체 절차: model_registry에서 임베딩 기본값 변경 → 배치가 점진 재백필 → 완료 후 dedup 임계값 재캘리브레이션(CLAUDE.md 명시 사항). 구모델 벡터는 덮어써서 이중 저장 없음.
+- 무중단 이중 모델 공존(두 벡터 동시 보관)이 필요해지면 embedding/embed_model을 별도 테이블 `chunk_embeddings(…, embed_model, PK에 모델 포함)`로 분리하는 게 업그레이드 경로 — 지금은 과설계라 보류.
+
+### 그래프 dedup과의 관계
+
+nodes.embedding(노드 이름 벡터)은 청킹과 무관 — 그대로. 단 **임베딩 모델 교체 시 nodes.embedding도 재백필 대상**이라는 점을 교체 절차에 포함해야 한다 (dedup·경로 진입점이 이 벡터를 씀).
+
+## 6. 마이그레이션 계획 (무중단, 단계별 되돌림 가능)
+
+| 단계 | 작업 | 되돌림 |
+|---|---|---|
+| 1 | `corpus_chunks` DDL + 청킹 배치(문서→청크, 멱등) 추가. 검색은 아직 문서 임베딩 | 테이블 drop |
+| 2 | 임베딩 백필을 청크 대상으로 전환 (`embed_model` 기록 시작) | 백필 대상만 원복 |
+| 3 | `load_matrix`·semantic 검색을 청크→문서 집계로 전환 (설정 스위치로 켬) | 스위치 끔 |
+| 4 | 안정 확인 후 `corpus_docs.embedding` 백필 중단 (컬럼은 두고 값만 방치 → 추후 정리) | — |
+
+야간 배치 순서는 현행 유지: 03:10 적재 → (신규) 03:15 청킹 → 03:30 임베딩 백필 → 03:40 구조화. 소스 초기화(reset)는 구조화 상태만 건드리므로 청크와 무관 — 재적재(MERGE)로 본문이 바뀐 문서만 재청킹 대상(`created_at` 비교, 멱등).

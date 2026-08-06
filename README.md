@@ -30,6 +30,7 @@ flowchart LR
 | [docs/plan.md](docs/plan.md) | **기획 보고** — 무엇을 왜 만드는지, 비전공자용 (배경·도구 3종·대화 자산화 근거·관리 방안, 출처 포함) |
 | [docs/design.md](docs/design.md) | 확정된 설계 결정 — 전체 흐름, 그래프 4계층 스키마, 세션 판정 3갈래 분기, 실패 경로 노출 정책 (Mermaid 다이어그램 포함) |
 | [docs/implementation.md](docs/implementation.md) | **구현 아키텍처** — 컴포넌트 지도, 테이블·API, 실행 방법, 알려진 한계 |
+| [docs/schema.md](docs/schema.md) | **테이블 스키마 설계** — 전 테이블 실스키마 + 청크 임베딩·임베딩 모델 버저닝 확장 설계, 마이그레이션 계획 |
 | [docs/integration.md](docs/integration.md) | **사내 전환 통합 설계** — 외부 의존 2개(SSO 사용자 식별, 구조화 원천 테이블)와 접점 정의 |
 | [docs/poc-results.md](docs/poc-results.md) | PoC 실증 결과 — 병합·가중치 검증, 캘리브레이션 수치, 방향 제안 E2E |
 | [docs/research.md](docs/research.md) | 조사 보고 — 기존 오픈소스(Graphiti·cognee·GraphRAG 등) 커버리지, 관련 논문 20여 편, 알려진 문제점 6가지 (전부 출처 링크 포함) |

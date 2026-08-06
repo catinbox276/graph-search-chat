@@ -88,6 +88,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - `docs/poc-datasets.md` — PoC용 공개 데이터셋 카탈로그 (다운로드 링크·라이선스)
 - `docs/poc-results.md` — PoC 실증 결과 (병합·가중치 검증, 캘리브레이션 수치, 남은 이슈)
 - `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
+- `docs/schema.md` — 테이블 스키마 설계 (실스키마 전체 + 청크 임베딩·모델 버저닝 확장 설계, 마이그레이션 계획)
 - `docs/integration.md` — 사내 전환 통합 설계 (외부 의존 2개: SSO 사용자 식별 소비 + 원천 테이블 source_registry)
 - `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
 - `docs/component-architecture.drawio` — 컴포넌트별 아키텍처 8페이지 (에이전트 / 앱 서버 / 검색 / 경로 제안 / 파이프라인 / 유지보수 / 저장소 / 배포)
