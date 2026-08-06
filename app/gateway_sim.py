@@ -7,7 +7,8 @@
 사내 전환 시 이 파드는 사라지고, 앱의 GATEWAY_AUTH_URL만 실제 미들웨어로 바뀐다.
 
 usage: uvicorn app.gateway_sim:app --port 8600   (k8s/gateway-sim.yaml)
-검증:  GET /verify  (Authorization: Bearer <JWT>)  → {"userId": ..., "roles": [...]}
+검증:  POST /verify  {"accessToken": "<JWT>"}  → {"result": {"userId": ..., "role": [...]}}
+       (사내 미들웨어 스펙 그대로 — 2026-08-06 확정)
 """
 import sys
 from pathlib import Path
@@ -25,10 +26,10 @@ INTROSPECT = (f"{config.KEYCLOAK_INTERNAL_URL}/realms/{config.KEYCLOAK_REALM}"
               "/protocol/openid-connect/token/introspect")
 
 
-@app.get("/verify")
+@app.post("/verify")
 async def verify(request: Request):
-    raw = (request.headers.get("Authorization") or "").strip()
-    token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+    body = await request.json()
+    token = (body.get("accessToken") or "").strip()
     if not token:
         raise HTTPException(401, "no token")
     async with httpx.AsyncClient(timeout=5) as cli:
@@ -40,8 +41,8 @@ async def verify(request: Request):
     j = r.json() if r.status_code == 200 else {}
     if not j.get("active"):
         raise HTTPException(401, "invalid or expired token")
-    return {"userId": j.get("preferred_username") or j.get("sub"),
-            "roles": (j.get("realm_access") or {}).get("roles", [])}
+    return {"result": {"userId": j.get("preferred_username") or j.get("sub"),
+                       "role": (j.get("realm_access") or {}).get("roles", [])}}
 
 
 @app.get("/healthz")

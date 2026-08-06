@@ -82,8 +82,11 @@ DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
 AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
 GATEWAY_AUTH_URL = _get("GATEWAY_AUTH_URL", "")           # 검증 API (gateway 모드 필수)
 GATEWAY_TOKEN_HEADER = _get("GATEWAY_TOKEN_HEADER", "Authorization")  # JWT가 실려오는 헤더
-GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "userId")  # 응답 JSON의 사용자 필드명
-GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "roles")   # 응답 JSON의 역할 필드명
+# 검증 API 호출: POST {GATEWAY_TOKEN_FIELD: <JWT>} — 사내 스펙 (2026-08-06 확정)
+GATEWAY_TOKEN_FIELD = _get("GATEWAY_TOKEN_FIELD", "accessToken")  # 요청 바디의 토큰 필드명
+# 응답 필드는 점 표기 중첩 경로 지원 — 사내 응답: {"result": {"userId":…, "role":…}}
+GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "result.userId")
+GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "result.role")
 GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
 GATEWAY_TIMEOUT = _getf("GATEWAY_TIMEOUT", 5.0)            # 검증 API 호출 타임아웃(초) — 초과 시 미인증(fail-closed)
 SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명

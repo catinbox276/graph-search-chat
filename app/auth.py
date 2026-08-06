@@ -79,29 +79,44 @@ def current_user(request: Request) -> dict | None:
 _gw_cache = {}  # token -> (만료 epoch, user) — 매 요청 게이트웨이 왕복 방지
 
 
+def _dig(obj, path: str):
+    """점 표기 중첩 경로 조회 — 'result.userId' 같은 응답 스펙 대응."""
+    for k in path.split("."):
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(k)
+    return obj
+
+
 def _gateway_verify(token: str) -> dict | None:
-    """게이트웨이 검증 API 호출 — JWT를 넘기고 {userId, roles} JSON을 받는다.
-    응답 필드명은 GATEWAY_USER_FIELD/ROLE_FIELD로 매핑 (사내 스펙이 뭐든 수용)."""
+    """게이트웨이 검증 API 호출 — 사내 스펙: POST {accessToken} → {result:{userId, role}}.
+    필드명은 GATEWAY_TOKEN/USER/ROLE_FIELD로 매핑. 실패 이유는 stderr에 남긴다(토큰 미기록)."""
+    import sys
     import time
     now = time.time()
     hit = _gw_cache.get(token)
     if hit and hit[0] > now:
         return hit[1]
     try:
-        r = httpx.get(config.GATEWAY_AUTH_URL,
-                      headers={"Authorization": f"Bearer {token}"},
-                      timeout=config.GATEWAY_TIMEOUT)
+        r = httpx.post(config.GATEWAY_AUTH_URL,
+                       json={config.GATEWAY_TOKEN_FIELD: token},
+                       timeout=config.GATEWAY_TIMEOUT)
         if r.status_code != 200:
+            print(f"[auth] 게이트웨이 검증 거부: HTTP {r.status_code}", file=sys.stderr)
             return None
         j = r.json()
-        uid = str(j.get(config.GATEWAY_USER_FIELD) or "").strip()
+        uid = str(_dig(j, config.GATEWAY_USER_FIELD) or "").strip()
         if not uid:
+            print(f"[auth] 게이트웨이 응답에 사용자 필드({config.GATEWAY_USER_FIELD}) 없음"
+                  f" — 최상위 키: {list(j)[:5]}", file=sys.stderr)
             return None
-        roles = j.get(config.GATEWAY_ROLE_FIELD) or []
+        roles = _dig(j, config.GATEWAY_ROLE_FIELD) or []
         if isinstance(roles, str):
             roles = [x for x in re.split(r"[,;\s]+", roles) if x]
         user = {"user": uid, "roles": [str(x) for x in roles]}
-    except Exception:
+    except Exception as e:
+        print(f"[auth] 게이트웨이 검증 호출 실패({config.GATEWAY_AUTH_URL}): "
+              f"{type(e).__name__}", file=sys.stderr)
         return None  # 게이트웨이 장애 = 미인증 (fail-closed)
     if len(_gw_cache) > 1000:  # 무한 성장 가드
         _gw_cache.clear()
