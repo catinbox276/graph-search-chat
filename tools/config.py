@@ -72,6 +72,12 @@ RERANK_MODEL = _get("RERANK_MODEL", "")
 # --- DataHub / 관리 ---
 DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
 
+# --- MCP 기본 서버 (tools/mcp_registry.py) ---
+# 주소를 넣으면 mcp_registry에 자동 시드(최초 1회 — 이후 관리 페이지에서 수정/비활성 가능).
+# 사내 HTTP MCP를 배포 env만으로 등록할 때 사용. 빈값=시드 없음.
+MCP_DEFAULT_NAME = _get("MCP_DEFAULT_NAME", "mcp")
+MCP_DEFAULT_URL = _get("MCP_DEFAULT_URL", "")
+
 # --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
 # none    = 인증 없음(로컬 개발 기본)
 # header  = 사내 기본 — 전단 SSO가 인증을 끝내고 헤더로 넘겨주는 userId·role 2개만 소비.

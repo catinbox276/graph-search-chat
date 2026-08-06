@@ -40,6 +40,12 @@ def ensure(cur):
             created   TIMESTAMP DEFAULT SYSTIMESTAMP)""")
         cur.execute("""INSERT INTO mcp_registry (name, transport, url, command)
                        VALUES (:1, :2, :3, :4)""", list(SEED))
+    # .env 기본 MCP 시드 — 없을 때만 삽입 (관리 페이지에서의 수정·비활성은 보존)
+    if config.MCP_DEFAULT_URL:
+        cur.execute("""MERGE INTO mcp_registry m USING dual ON (m.name = :n)
+                       WHEN NOT MATCHED THEN INSERT (name, transport, url)
+                       VALUES (:n, 'streamable_http', :u)""",
+                    {"n": config.MCP_DEFAULT_NAME, "u": config.MCP_DEFAULT_URL})
 
 
 def list_servers(enabled_only: bool = False) -> list:
