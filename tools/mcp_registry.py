@@ -24,9 +24,6 @@ def _con():
     return _pool.acquire()
 
 
-SEED = ("datahub", "stdio", "", "mcp-server-datahub")  # command는 PATH에서 해석
-
-
 def ensure(cur):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'MCP_REGISTRY'")
     if not cur.fetchone()[0]:
@@ -39,8 +36,8 @@ def ensure(cur):
             created   TIMESTAMP DEFAULT SYSTIMESTAMP,
             CONSTRAINT mcp_transport_ck CHECK
               (transport IN ('streamable_http', 'sse', 'stdio', 'rest')))""")
-        cur.execute("""INSERT INTO mcp_registry (name, transport, url, command)
-                       VALUES (:1, :2, :3, :4)""", list(SEED))
+        # 시드 없음 — 도구 서버는 관리 페이지 또는 MCP_DEFAULT_URL로 등록
+        # (구 DataHub stdio 시드는 폐기 — 사내는 REST 어댑터로 연동)
     else:
         _migrate_rest_transport(cur)
     # .env 기본 MCP 시드 — 없을 때만 삽입 (관리 페이지에서의 수정·비활성은 보존)

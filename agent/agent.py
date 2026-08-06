@@ -86,28 +86,37 @@ def _mcp_config(row: dict) -> dict:
 
 
 def _mcp_servers() -> list:
-    """등록된 MCP 서버 목록 (mcp_registry) — DB 미기동 시 시드(datahub)만."""
+    """등록된 도구 서버 목록 (mcp_registry) — DB 미기동 시 없음."""
     try:
         from tools import mcp_registry
         return mcp_registry.list_servers(enabled_only=True)
     except Exception as e:
-        print(f"[경고] MCP 레지스트리 조회 실패 — 기본(datahub)만: {e}", file=sys.stderr)
-        return [{"name": "datahub", "transport": "stdio", "url": "",
-                 "command": "mcp-server-datahub", "enabled": True}]
+        print(f"[경고] MCP 레지스트리 조회 실패 — 도구 서버 없이 동작: {e}",
+              file=sys.stderr)
+        return []
+
+
+def _exc_detail(e, depth=0) -> str:
+    """ExceptionGroup('unhandled errors in a TaskGroup') 언랩 — 진짜 원인 노출."""
+    subs = getattr(e, "exceptions", None)
+    if subs and depth < 3:
+        return "; ".join(_exc_detail(x, depth + 1) for x in subs[:3])
+    return f"{type(e).__name__}: {str(e)[:200]}"
 
 
 async def _mcp_tools():
-    servers = _mcp_servers()
     tools = []
-    for s in [x for x in servers if x["transport"] == "rest"]:
-        try:  # 사내 REST 도구 서버 (GET /tools + POST /call — 전용 어댑터)
-            from tools.rest_tools import load_rest_tools
-            tools += load_rest_tools(s["name"], s["url"])
+    for s in _mcp_servers():  # 서버별 격리 — 하나가 실패해도 나머지는 산다
+        try:
+            if s["transport"] == "rest":  # 사내 REST 도구 서버 (전용 어댑터)
+                from tools.rest_tools import load_rest_tools
+                tools += load_rest_tools(s["name"], s["url"])
+            else:
+                tools += await MultiServerMCPClient(
+                    {s["name"]: _mcp_config(s)}).get_tools()
         except Exception as e:
-            print(f"[경고] REST 도구 서버 '{s['name']}' 연결 실패: {e}", file=sys.stderr)
-    std = {s["name"]: _mcp_config(s) for s in servers if s["transport"] != "rest"}
-    if std:
-        tools += await MultiServerMCPClient(std).get_tools()
+            print(f"[경고] 도구 서버 '{s['name']}' 연결 실패 — 제외하고 계속: "
+                  f"{_exc_detail(e)}", file=sys.stderr)
     return tools
 
 
@@ -143,7 +152,8 @@ async def discover_tools() -> list:
                             "description": (getattr(t, "description", "") or "").split("\n")[0],
                             "source": tag})
         except Exception as e:
-            print(f"[경고] 도구 서버 '{s['name']}' 목록 조회 실패: {e}", file=sys.stderr)
+            print(f"[경고] 도구 서버 '{s['name']}' 목록 조회 실패: {_exc_detail(e)}",
+                  file=sys.stderr)
     return out
 
 
