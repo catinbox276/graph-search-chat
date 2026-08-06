@@ -50,20 +50,27 @@ PoC 리허설: `k8s/gateway-sim.yaml`(Keycloak introspection 프록시, ~50줄)�
 **로컬 PC 리허설 (python + .env + Oracle)**:
 ```bash
 # 1) 클러스터 자원 포트포워딩 (로컬에 Oracle·Keycloak 없이)
+#    ⚠ 주소는 localhost가 아니라 127.0.0.1로 고정할 것 — 파이썬은 localhost를 IPv6(::1)로
+#      해석할 수 있는데 port-forward는 IPv4에만 바인딩된다. 8080은 다른 프로세스(IDE 프록시
+#      등)와 충돌하기 쉬우니 8180 권장.
 kubectl port-forward svc/oracle 1521:1521 &
-kubectl port-forward svc/keycloak 8080:8080 &
-# 2) .env — ORACLE_DSN=localhost:1521/FREEPDB1, AUTH_MODE=gateway,
-#    GATEWAY_AUTH_URL=http://localhost:8600/verify,
-#    KEYCLOAK_INTERNAL_URL=http://localhost:8080/auth (+ OIDC_CLIENT_SECRET)
+kubectl port-forward svc/keycloak 8180:8080 &
+# 2) .env — ORACLE_DSN=127.0.0.1:1521/FREEPDB1, ORACLE_MODE=thin(로컬에 Instant Client 없으면),
+#    AUTH_MODE=gateway, GATEWAY_AUTH_URL=http://127.0.0.1:8600/verify,
+#    KEYCLOAK_INTERNAL_URL=http://127.0.0.1:8180/auth (+ OIDC_CLIENT_SECRET)
 # 3) 실행 (터미널 2개)
 uvicorn app.gateway_sim:app --port 8600   # 게이트웨이 미들웨어 흉내
 uvicorn app.server:app --port 8500        # 앱
 # 4) 토큰 발급 후 Bearer로 호출
-JWT=$(curl -s -X POST http://localhost:8080/auth/realms/gsc/protocol/openid-connect/token \
+JWT=$(curl -s -X POST http://127.0.0.1:8180/auth/realms/gsc/protocol/openid-connect/token \
   -d grant_type=password -d client_id=gsc-app -d client_secret=<시크릿> \
   -d username=dalgo -d password=<pw> | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-curl http://localhost:8500/me -H "Authorization: Bearer $JWT"   # → {"user":"dalgo","admin":true}
+curl http://127.0.0.1:8500/me -H "Authorization: Bearer $JWT"   # → {"user":"dalgo","admin":true}
 ```
+
+2026-08-06 로컬 리허설 실측: 무토큰/위조 401 · dalgo(관리자) /me·관리 API·Oracle 문서 뷰 정상 ·
+analyst1(일반) /me 정상·관리 API 403. 신규 계정이 "Account is not fully set up"이면 Keycloak
+admin API로 프로필(firstName/email)·requiredActions를 채우면 된다.
 
 
 | 모드 | 용도 | userId 출처 |
