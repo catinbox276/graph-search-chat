@@ -45,8 +45,13 @@ def ensure_corpus(cur):
         embedding   BLOB,
         src_ts      TIMESTAMP,                -- 원천 ts_column 값 (있으면)
         created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
-        PRIMARY KEY (source_name, src_id)
+        graph_status VARCHAR2(20),            -- 구조화 상태 (doc_pipeline)
+        graph_note   VARCHAR2(1000),
+        PRIMARY KEY (source_name, src_id),
+        CONSTRAINT corpus_docs_src_fk FOREIGN KEY (source_name)
+          REFERENCES source_registry(source_name)
     )""")
+    cur.execute("CREATE INDEX corpus_docs_status_ix ON corpus_docs (graph_status)")
     # 렉서 프리퍼런스: load_oracle.py가 만든 blog_lexer 재사용, 없으면 생성
     lexer = config.ORACLE_TEXT_LEXER
     if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):

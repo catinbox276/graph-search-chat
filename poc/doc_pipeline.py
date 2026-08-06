@@ -7,7 +7,7 @@
   (graph_pipeline.get_or_create 재사용 — 2단계 임베딩→LLM dedup 동일 적용)
 - 기준 미달이면(fits=false): graph_status='excluded' — 그래프에 안 들어간다
   (도메인 무관 / 결말 없는 글 / 내용 빈약 — plan.md §3의 '미달 제외' 정책)
-- 증거는 node_evidence에 "doc:소스명:원천id"로 남는다. sessions와 조인되지 않으므로
+- 증거는 node_evidence(kind='doc', ref='소스명:원천id')로 남는다. 세션 증거와 분리되므로
   성공/실패 판정 카운트에는 안 섞이고, 통행(raw_count)·출처 추적에만 기여한다.
 
 실행 구조: LLM 판정은 동시(스레드풀, 판정만 — DB 없음), 그래프 병합은 직렬
@@ -153,19 +153,13 @@ def _loads_lenient(s: str) -> dict:
 
 
 def doc_ddl(cur):
-    """corpus_docs에 구조화 상태 컬럼 + node_evidence 참조 폭 확장 (멱등)."""
+    """corpus_docs에 구조화 상태 컬럼 추가 (멱등)."""
     for col, spec in (("GRAPH_STATUS", "graph_status VARCHAR2(20)"),
                       ("GRAPH_NOTE", "graph_note VARCHAR2(1000)")):
         cur.execute("""SELECT COUNT(*) FROM user_tab_columns
                        WHERE table_name = 'CORPUS_DOCS' AND column_name = :1""", [col])
         if not cur.fetchone()[0]:
             cur.execute(f"ALTER TABLE corpus_docs ADD ({spec})")
-    # 문서 증거 참조("doc:소스:id")가 세션 uuid(36자)보다 길다 → 폭 확장
-    cur.execute("""SELECT data_length FROM user_tab_columns
-                   WHERE table_name = 'NODE_EVIDENCE' AND column_name = 'SESSION_ID'""")
-    r = cur.fetchone()
-    if r and r[0] < 400:
-        cur.execute("ALTER TABLE node_evidence MODIFY (session_id VARCHAR2(400))")
 
 
 def main():
@@ -256,14 +250,15 @@ def main():
                     pending.add(ex.submit(judge_pack, domain, hint, np_,
                                           model, body_chars, no_think))
                 for (src_id, title, kind, body), j in fut.result():
-                    ref = f"doc:{source_name}:{src_id}"[:400]
+                    ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
                     if not j or j.get("_error"):
                         status, note = "error", (j.get("_error") if j
                                                  else "LLM 응답 파싱 실패")
                     elif j.get("fits") and j.get("goal") and j.get("approach"):
-                        d = get_or_create(cur, 1, domain, None, ref, use_embedding=False)
-                        g = get_or_create(cur, 2, str(j["goal"])[:400], d, ref)
-                        get_or_create(cur, 3, str(j["approach"])[:400], g, ref)
+                        d = get_or_create(cur, 1, domain, None, "doc", ref,
+                                          use_embedding=False)
+                        g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref)
+                        get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref)
                         status, note = "done", str(j.get("reason") or "")[:1000]
                     else:
                         status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]

@@ -355,16 +355,18 @@ def graph_data():
     cur = con.cursor()
     cur.execute("""
         SELECT n.id, n.layer, n.name, n.fail_reason,
-               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
+               (SELECT COUNT(*) FROM node_evidence ev
                 WHERE ev.node_id = n.id) AS ev_cnt,
-               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                WHERE ev.node_id = n.id AND s.verdict = 'success') AS sc,
-               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc,
-               (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                WHERE ev.node_id = n.id AND ev.session_id LIKE 'doc:%') AS dc
+               (SELECT COUNT(*) FROM node_evidence ev
+                JOIN sessions s ON s.id = ev.ref AND s.turn = 1
+                WHERE ev.node_id = n.id AND ev.kind = 'session'
+                  AND s.verdict = 'success') AS sc,
+               (SELECT COUNT(*) FROM node_evidence ev
+                JOIN sessions s ON s.id = ev.ref AND s.turn = 1
+                WHERE ev.node_id = n.id AND ev.kind = 'session'
+                  AND s.verdict = 'fail') AS fc,
+               (SELECT COUNT(*) FROM node_evidence ev
+                WHERE ev.node_id = n.id AND ev.kind = 'doc') AS dc
         FROM nodes n""")
     nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail_reason": r[3],
               "uses": r[4], "success": r[5], "fail_cnt": r[6], "docs": r[7],
@@ -707,11 +709,12 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request,
 def _reset_source(cur, sname: str):
     """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1
-    cur.execute("""SELECT DISTINCT session_id FROM node_evidence
-                   WHERE session_id LIKE :1""", [f"doc:{sname}:%"])
+    cur.execute("""SELECT DISTINCT ref FROM node_evidence
+                   WHERE kind = 'doc' AND ref LIKE :1""", [f"{sname}:%"])
     refs = [r[0] for r in cur.fetchall()]
     for ref in refs:
-        cur.execute("SELECT node_id FROM node_evidence WHERE session_id = :1", [ref])
+        cur.execute("""SELECT node_id FROM node_evidence
+                       WHERE kind = 'doc' AND ref = :1""", [ref])
         nids = [r[0] for r in cur.fetchall()]
         for j in range(0, len(nids), 100):
             chunk = nids[j:j + 100]
@@ -723,7 +726,7 @@ def _reset_source(cur, sname: str):
                 f"""UPDATE edges SET raw_count = GREATEST(raw_count - 1, 0),
                                      weight = GREATEST(weight - 1, 0)
                     WHERE src IN ({src_marks}) AND dst IN ({dst_marks})""", binds)
-        cur.execute("DELETE FROM node_evidence WHERE session_id = :1", [ref])
+        cur.execute("DELETE FROM node_evidence WHERE kind = 'doc' AND ref = :1", [ref])
     cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
                    WHERE source_name = :1 AND graph_status IS NOT NULL""", [sname])
     return cur.rowcount, len(refs)

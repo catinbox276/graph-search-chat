@@ -60,6 +60,21 @@ def ensure(cur):
                    WHERE table_name = 'SOURCE_REGISTRY' AND column_name = 'DOMAIN'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE source_registry ADD (domain VARCHAR2(100))")
+    _ensure_domain_fk(cur)
+
+
+def _ensure_domain_fk(cur):
+    """source_registry.domain -> domain_registry(name) FK (멱등).
+    domain_registry가 아직 없으면(기동 순서) 다음 ensure 때 다시 시도."""
+    cur.execute("""SELECT COUNT(*) FROM user_constraints
+                   WHERE constraint_name = 'SOURCE_REGISTRY_DOMAIN_FK'""")
+    if cur.fetchone()[0]:
+        return
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOMAIN_REGISTRY'")
+    if cur.fetchone()[0]:
+        cur.execute("""ALTER TABLE source_registry ADD CONSTRAINT
+                       source_registry_domain_fk FOREIGN KEY (domain)
+                       REFERENCES domain_registry(name)""")
 
 
 def table_columns(cur, table_name: str) -> dict:

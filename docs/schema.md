@@ -111,16 +111,23 @@ CREATE TABLE corpus_chunks (
 - 청킹 파라미터는 app_settings: `chunk_chars`(기본 1200자), `chunk_overlap`(기본 150자). 본문이 chunk_chars 이하면 청크 1개(=현행과 동일 비용).
 - lexical(Oracle Text)은 **문서(corpus_docs.body) 인덱스 유지** — 청크는 시맨틱 전용. 이유: CONTAINS는 문서 전체에서 이미 잘 동작하고, 청크에 중복 인덱스를 만들면 저장·동기화만 는다.
 
-## 4. 그래프·세션 테이블 (현행 유지)
+## 4. 그래프·세션 테이블
 
 | 테이블 | PK/키 | 핵심 컬럼 |
 |---|---|---|
 | `nodes` | id (uuid32) | layer(1~4), name, embedding(dedup·진입점용), fail_flag/fail_reason, valid_from/valid_to (bi-temporal) |
-| `edges` | (src, dst) | weight(보정 가중치), raw_count(원시 통행) |
-| `node_evidence` | (node_id, session_id) | session_id에 세션 id 또는 `doc:소스:id` — **출처 구분은 이 접두어** (성공/실패 카운트는 세션 조인만) |
-| `sessions` | (id, turn) | question/tool_calls/answer(CLOB), verdict(게이트 판정), user_id(SSO) |
-| `suggestions` | — | 경로 제안 노출 기록: problem, node_id, weight, session_id, adopted (채택률 보정) |
+| `edges` | (src, dst) + **FK→nodes 캐스케이드** | weight(보정 가중치), raw_count(원시 통행). dst 인덱스 |
+| `node_evidence` | **(node_id, kind, ref) PK + FK→nodes 캐스케이드** | kind='session'(ref=세션 id) / 'doc'(ref=`소스명:원천id`) — v2에서 다형 참조 제거 (성공/실패 카운트는 kind='session' 조인만) |
+| `sessions` | (id, turn) | question/tool_calls/answer(CLOB), verdict(게이트 판정), user_id(SSO — (user_id,ts) 인덱스) |
+| `suggestions` | **id (identity)** + FK→nodes 캐스케이드 | 경로 제안 노출 기록: problem, node_id, weight, session_id(36), adopted (채택률 보정). session/node 인덱스 |
 | `lg_checkpoints` / `lg_writes` | (thread_id, ckpt_ns, ckpt_id …) | LangGraph 체크포인터 외부화 (멀티턴 기억) |
+
+### 무결성 모델 (v2 — 2026-08-06 정리)
+
+- **노드 참조는 물리 FK로 강제** — edges·node_evidence·suggestions → nodes, 전부 ON DELETE CASCADE (유지보수의 노드 삭제가 자동으로 파생 행 정리). 설정 체인도 FK: corpus_docs→source_registry, source_registry.domain→domain_registry.
+- **테이블 경계를 넘는 참조(세션·문서·도메인 이름)는 FK 불가/부적합** — 대신 야간 유지보수 **패스4 무결성 점검**이 고아를 리포트한다 (자동 삭제 없음 — 위반은 버그 신호).
+- 다형 참조였던 node_evidence.session_id(세션 id와 `doc:` 접두 문자열 혼용)는 **kind/ref 컬럼으로 정규화** — 접두어 파싱 제거, PK로 중복 증거 차단.
+- 실증: FK 도입 직후 형제 통합 배치의 스냅샷 버그(삭제된 형제로의 증거 이관 = 이전엔 조용한 고아 삽입)를 ORA-2291이 즉시 적발 — 무결성을 침묵에서 오류로 바꾼 효과.
 
 ## 5. 신규 설계 결정 — 청크 검색 + 임베딩 모델 버저닝
 

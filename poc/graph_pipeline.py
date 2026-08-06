@@ -14,7 +14,7 @@ design.md §2~§5 구현:
   (쌍별 이지선다보다 정확 — ComEM COLING'25. 가드 근거: Graphiti/Neo4j는 임베딩
   단독 자동 병합을 안 함)
 - 실패 세션: 접근법 노드에 fail_flag + 이유
-- 출처: node_evidence(node_id, session_id)
+- 출처: node_evidence(node_id, kind, ref) — kind=session/doc, PK+FK(캐스케이드)로 무결성 강제
 
 usage: .venv/bin/python poc/graph_pipeline.py
 """
@@ -97,17 +97,30 @@ def ddl(cur):
              fail_flag CHAR(1) DEFAULT 'N', fail_reason VARCHAR2(1000),
              valid_from TIMESTAMP DEFAULT SYSTIMESTAMP, valid_to TIMESTAMP)""",
         """CREATE TABLE edges (
-             src VARCHAR2(36), dst VARCHAR2(36),
+             src VARCHAR2(36) NOT NULL, dst VARCHAR2(36) NOT NULL,
              weight NUMBER DEFAULT 0, raw_count NUMBER DEFAULT 0,
-             PRIMARY KEY (src, dst))""",
+             PRIMARY KEY (src, dst),
+             CONSTRAINT edges_src_fk FOREIGN KEY (src)
+               REFERENCES nodes(id) ON DELETE CASCADE,
+             CONSTRAINT edges_dst_fk FOREIGN KEY (dst)
+               REFERENCES nodes(id) ON DELETE CASCADE)""",
         """CREATE TABLE node_evidence (
-             node_id VARCHAR2(36), session_id VARCHAR2(36))""",
+             node_id VARCHAR2(36) NOT NULL,
+             kind VARCHAR2(10) NOT NULL CHECK (kind IN ('session','doc')),
+             ref VARCHAR2(400) NOT NULL,
+             CONSTRAINT node_evidence_pk PRIMARY KEY (node_id, kind, ref),
+             CONSTRAINT node_evidence_node_fk FOREIGN KEY (node_id)
+               REFERENCES nodes(id) ON DELETE CASCADE)""",
     ):
         table = stmt.split()[2]
         cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = :1",
                     [table.upper()])
         if not cur.fetchone()[0]:
             cur.execute(stmt)
+    # FK 캐스케이드 삭제 성능용 (dst는 PK 선두가 아님)
+    cur.execute("SELECT COUNT(*) FROM user_indexes WHERE index_name = 'EDGES_DST_IX'")
+    if not cur.fetchone()[0]:
+        cur.execute("CREATE INDEX edges_dst_ix ON edges (dst)")
     # 구버전 sessions 테이블에 ts가 없으면 추가 (신호 계산·재발 판정에 필요)
     cur.execute("""SELECT COUNT(*) FROM user_tab_columns
                    WHERE table_name = 'SESSIONS' AND column_name = 'TS'""")
@@ -263,8 +276,10 @@ def _llm_json(prompt: str) -> dict:
         return {}
 
 
-def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
-    """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가."""
+def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True):
+    """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
+
+    ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'."""
     vec = embed(name) if use_embedding else None
     node_id = None
     if parent_id:
@@ -304,7 +319,12 @@ def get_or_create(cur, layer, name, parent_id, sid, use_embedding=True):
                        VALUES (:src, :dst, 1, 1)""",
                     {"src": parent_id, "dst": node_id})
         # ponytail: weight=raw_count. 노출 대비 채택률 보정은 제안 기능이 생긴 뒤에
-    cur.execute("INSERT INTO node_evidence VALUES (:1, :2)", [node_id, sid])
+    # 같은 출처가 같은 노드에 두 번 기여해도 안전 (PK 중복 방지)
+    cur.execute("""MERGE INTO node_evidence e USING dual
+                   ON (e.node_id = :n AND e.kind = :k AND e.ref = :r)
+                   WHEN NOT MATCHED THEN INSERT (node_id, kind, ref)
+                   VALUES (:n, :k, :r)""",
+                {"n": node_id, "k": ev_kind, "r": ev_ref})
     return node_id
 
 
@@ -443,7 +463,8 @@ def retract_recurrences(cur, task_ids):
                 continue
             if cosine(qvec(sid, q), qvec(sid2, q2)) < config.SIG_REPEAT_SIM:
                 continue
-            cur.execute("SELECT node_id FROM node_evidence WHERE session_id = :1", [sid])
+            cur.execute("""SELECT node_id FROM node_evidence
+                           WHERE kind = 'session' AND ref = :1""", [sid])
             nids = [r[0] for r in cur.fetchall()]
             for j in range(0, len(nids), 100):
                 chunk = nids[j:j + 100]
@@ -512,18 +533,20 @@ def main():
         cur.execute("UPDATE sessions SET verdict = :1 WHERE id = :2 AND turn = 1",
                     [verdict, sid])
         if verdict != "unknown" and j.get("goal") and j.get("approach"):
-            d = get_or_create(cur, 1, domain, None, sid, use_embedding=False)
-            g = get_or_create(cur, 2, j["goal"], d, sid)
-            a = get_or_create(cur, 3, j["approach"], g, sid)
+            d = get_or_create(cur, 1, domain, None, "session", sid, use_embedding=False)
+            g = get_or_create(cur, 2, j["goal"], d, "session", sid)
+            a = get_or_create(cur, 3, j["approach"], g, "session", sid)
             if verdict == "fail":
                 cur.execute("""UPDATE nodes SET fail_flag='Y', fail_reason=:1
                                WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], a])
             for tool in sorted(tool_names):
-                get_or_create(cur, 4, f"tool:{tool}", a, sid, use_embedding=False)
+                get_or_create(cur, 4, f"tool:{tool}", a, "session", sid,
+                              use_embedding=False)
         # 채택 판정: 이 세션에 노출된 제안 노드를 실제로 사용했는가 (유도 vs 자발 구분의 기초)
         cur.execute("""UPDATE suggestions s SET adopted =
             CASE WHEN EXISTS (SELECT 1 FROM node_evidence ev
-                              WHERE ev.session_id = :sid AND ev.node_id = s.node_id)
+                              WHERE ev.kind = 'session' AND ev.ref = :sid
+                                AND ev.node_id = s.node_id)
                  THEN 'Y' ELSE 'N' END
             WHERE s.session_id = :sid AND s.adopted IS NULL""", {"sid": sid})
         con.commit()

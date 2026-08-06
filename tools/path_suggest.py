@@ -29,14 +29,14 @@ def _ensure_table(cur):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name='SUGGESTIONS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE suggestions (
+            id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             ts TIMESTAMP DEFAULT SYSTIMESTAMP, problem VARCHAR2(2000),
-            node_id VARCHAR2(36), weight NUMBER,
-            session_id VARCHAR2(64), adopted CHAR(1))""")
-    else:
-        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
-                       WHERE table_name='SUGGESTIONS' AND column_name='SESSION_ID'""")
-        if not cur.fetchone()[0]:
-            cur.execute("ALTER TABLE suggestions ADD (session_id VARCHAR2(64), adopted CHAR(1))")
+            node_id VARCHAR2(36) NOT NULL, weight NUMBER,
+            session_id VARCHAR2(36), adopted CHAR(1),
+            CONSTRAINT suggestions_node_fk FOREIGN KEY (node_id)
+              REFERENCES nodes(id) ON DELETE CASCADE)""")
+        cur.execute("CREATE INDEX suggestions_session_ix ON suggestions (session_id)")
+        cur.execute("CREATE INDEX suggestions_node_ix ON suggestions (node_id)")
 
 
 def suggest_paths(problem: str) -> str:
@@ -72,14 +72,16 @@ def suggest_paths(problem: str) -> str:
             # 성공/실패는 불리언 플래그가 아니라 세션 판정 카운트로 (poc-results 이슈2 해법)
             cur.execute("""
                 SELECT n.id, n.name, e.raw_count, n.fail_reason,
-                       (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                        JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                        WHERE ev.node_id = n.id AND s.verdict = 'success') AS sc,
-                       (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                        JOIN sessions s ON s.id = ev.session_id AND s.turn = 1
-                        WHERE ev.node_id = n.id AND s.verdict = 'fail') AS fc,
-                       (SELECT COUNT(DISTINCT ev.session_id) FROM node_evidence ev
-                        WHERE ev.node_id = n.id AND ev.session_id LIKE 'doc:%') AS dc,
+                       (SELECT COUNT(*) FROM node_evidence ev
+                        JOIN sessions s ON s.id = ev.ref AND s.turn = 1
+                        WHERE ev.node_id = n.id AND ev.kind = 'session'
+                          AND s.verdict = 'success') AS sc,
+                       (SELECT COUNT(*) FROM node_evidence ev
+                        JOIN sessions s ON s.id = ev.ref AND s.turn = 1
+                        WHERE ev.node_id = n.id AND ev.kind = 'session'
+                          AND s.verdict = 'fail') AS fc,
+                       (SELECT COUNT(*) FROM node_evidence ev
+                        WHERE ev.node_id = n.id AND ev.kind = 'doc') AS dc,
                        e.weight
                 FROM edges e JOIN nodes n ON n.id = e.dst
                 WHERE e.src = :1 AND n.layer = 3""", [gid])
@@ -96,10 +98,10 @@ def suggest_paths(problem: str) -> str:
                 # 근거 문서 id 노출 — 답변 인용·footer 수집·read_blog_post 열람이 가능해진다
                 ev_line = ""
                 if dc:
-                    cur.execute("""SELECT session_id FROM node_evidence
-                                   WHERE node_id = :1 AND session_id LIKE 'doc:%'
+                    cur.execute("""SELECT ref FROM node_evidence
+                                   WHERE node_id = :1 AND kind = 'doc'
                                    FETCH FIRST 3 ROWS ONLY""", [aid])
-                    pids = " ".join(f"[{r[0][4:]}]" for r in cur.fetchall())
+                    pids = " ".join(f"[{r[0]}]" for r in cur.fetchall())
                     if pids:
                         ev_line = f"\n     근거 문서 (read_blog_post로 열람 가능): {pids}"
                 if fc > sc:  # 실패 우세일 때만 경고 (성공이 우세하면 검증 경로)
