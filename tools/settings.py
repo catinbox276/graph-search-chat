@@ -12,14 +12,27 @@ def ensure(cur):
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE app_settings (
             key   VARCHAR2(100) PRIMARY KEY,
-            value VARCHAR2(400),
+            value CLOB,
             updated TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+        return
+    # 구버전 VARCHAR2(400) → CLOB 재구축 (시스템 프롬프트 등 긴 값 저장용, 멱등)
+    cur.execute("""SELECT data_type FROM user_tab_columns
+                   WHERE table_name = 'APP_SETTINGS' AND column_name = 'VALUE'""")
+    if cur.fetchone()[0] != "CLOB":
+        cur.execute("""CREATE TABLE app_settings_v2 (
+            key   VARCHAR2(100) PRIMARY KEY,
+            value CLOB,
+            updated TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+        cur.execute("""INSERT INTO app_settings_v2 (key, value, updated)
+                       SELECT key, value, updated FROM app_settings""")
+        cur.execute("DROP TABLE app_settings PURGE")
+        cur.execute("ALTER TABLE app_settings_v2 RENAME TO app_settings")
 
 
 def get_all(cur) -> dict:
     ensure(cur)
     cur.execute("SELECT key, value FROM app_settings")
-    return {k: v for k, v in cur.fetchall()}
+    return {k: (v.read() if hasattr(v, "read") else v) for k, v in cur.fetchall()}
 
 
 def set_many(cur, values: dict):
@@ -32,7 +45,7 @@ def set_many(cur, values: dict):
             cur.execute("""MERGE INTO app_settings s USING dual ON (s.key = :k)
                            WHEN MATCHED THEN UPDATE SET value = :v, updated = SYSTIMESTAMP
                            WHEN NOT MATCHED THEN INSERT (key, value) VALUES (:k, :v)""",
-                        {"k": k, "v": str(v).strip()[:400]})
+                        {"k": k, "v": str(v).strip()[:8000]})
 
 
 def get_int(settings: dict, key: str, default: int) -> int:

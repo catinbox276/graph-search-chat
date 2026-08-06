@@ -703,6 +703,54 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
     return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
 
 
+@app.get("/admin/agent-settings")
+async def admin_agent_settings_get(request: Request,
+                                   x_admin_token: str = Header(default="")):
+    """관리자: 에이전트 전역 설정 조회 — 시스템 프롬프트·MCP 사용·도구별 활성."""
+    check_admin(request, x_admin_token)
+    from agent.agent import SYSTEM_PROMPT, discover_tools
+    from tools import settings
+    con = db()
+    st = settings.get_all(con.cursor())
+    con.commit()
+    con.close()
+    return {"system_prompt": (st.get("agent_system_prompt") or ""),
+            "default_prompt": SYSTEM_PROMPT,
+            "mcp_enabled": st.get("agent_mcp_enabled", "1") != "0",
+            "disabled_tools": [t.strip() for t in
+                               (st.get("agent_disabled_tools") or "").split(",")
+                               if t.strip()],
+            "tools": await discover_tools()}
+
+
+class AgentSettingsIn(BaseModel):
+    system_prompt: str = ""      # 빈값 = 코드 기본 프롬프트 사용
+    mcp_enabled: bool = True     # DataHub MCP 전역 on/off
+    disabled_tools: list[str] = []  # 비활성 도구 이름 목록 (builtin·MCP 공통)
+
+
+@app.post("/admin/agent-settings")
+def admin_agent_settings_set(inp: AgentSettingsIn, request: Request,
+                             x_admin_token: str = Header(default="")):
+    """관리자: 에이전트 전역 설정 저장 — 캐시를 비워 다음 질문부터 재조립."""
+    check_admin(request, x_admin_token)
+    from tools import settings
+    if len(inp.system_prompt) > 8000:
+        raise HTTPException(400, "시스템 프롬프트는 8000자 이내여야 합니다")
+    con = db()
+    cur = con.cursor()
+    settings.set_many(cur, {
+        "agent_system_prompt": inp.system_prompt.strip(),
+        "agent_mcp_enabled": "" if inp.mcp_enabled else "0",
+        "agent_disabled_tools": ",".join(
+            t.strip() for t in inp.disabled_tools if t.strip()),
+    })
+    con.commit()
+    con.close()
+    _agents.clear()  # 모델별 에이전트 캐시 무효화 — 다음 요청이 새 설정으로 조립
+    return {"ok": True, "note": "다음 질문부터 반영 (에이전트 재조립)"}
+
+
 class ReprocessIn(BaseModel):
     mode: str  # errors = 실패만 재시도 | reset = 소스 전체 초기화(그래프 증거 회수 포함)
 

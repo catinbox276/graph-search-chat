@@ -45,6 +45,15 @@
                    overflow: hidden; background: #e5e7eb; }
   #docstat .pbar i { display: block; height: 100%; }
   #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
+  #agPrompt { width: 100%; min-height: 220px; font-family: ui-monospace, monospace;
+              font-size: .8rem; line-height: 1.55; resize: vertical; box-sizing: border-box; }
+  #agTools { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  #agTools label { font-size: .8rem; color: var(--ink); display: flex; gap: 6px;
+                   align-items: baseline; }
+  #agTools .src { font-size: .68rem; color: var(--mut); border: 1px solid var(--line);
+                  border-radius: 4px; padding: 0 4px; }
+  #agTools .desc { color: var(--mut); font-size: .74rem; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -148,6 +157,24 @@
             title="도메인 지정된 모든 소스의 문서 구조화 기여를 회수하고 전부 재구조화 — 대화 세션 기여는 유지">⚠ 전체 문서 초기화</button>
     <span class="hint" id="psmsg" style="margin:0"></span>
   </form>
+</section>
+
+<section class="card">
+  <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
+  <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
+  <textarea id="agPrompt" spellcheck="false"></textarea>
+  <h4>도구 사용 여부 <small>끄면 에이전트가 그 도구를 아예 받지 않습니다 (builtin·MCP 공통)</small></h4>
+  <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
+    <input type="checkbox" id="agMcp" checked><b>DataHub MCP 사용</b>
+    <span class="hint" style="margin:0">— 끄면 MCP 연결 자체를 건너뜀 (아래 MCP 도구 전체 비활성)</span>
+  </label>
+  <div id="agTools"><span class="hint">불러오는 중… (MCP 도구 목록 조회 — 수 초 걸릴 수 있음)</span></div>
+  <form id="agForm">
+    <button id="agSave">저장</button>
+    <span class="hint" id="agmsg" style="margin:0"></span>
+  </form>
+  <p class="hint">suggest_paths를 끄면 경로 제안(그래프 순환)이 멈춥니다 — 시연·비교 실험용으로만.
+     MCP 서버 주소(DATAHUB_GMS_URL)는 인프라 값이라 .env/ConfigMap에서 관리합니다.</p>
 </section>
 </main>
 
@@ -471,9 +498,52 @@ $("psresetall").onclick = async () => {
   loadDocStatus();
 };
 
+// ── 에이전트 설정 (전역 — 시스템 프롬프트·MCP·도구별 on/off) ──
+async function loadAgentSettings() {
+  const r = await fetch("/admin/agent-settings", {headers: adminHdr()}).catch(() => null);
+  if (!r?.ok) { $("agTools").innerHTML = `<span class="hint">조회 실패 — 관리자 인증을 확인하세요</span>`; return; }
+  const s = await r.json();
+  $("agPrompt").value = s.system_prompt;
+  $("agPrompt").placeholder = s.default_prompt;
+  $("agMcp").checked = s.mcp_enabled;
+  const box = $("agTools");
+  box.innerHTML = "";
+  s.tools.forEach(t => {
+    const lab = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = t.name; cb.className = "agtool";
+    cb.checked = !s.disabled_tools.includes(t.name);
+    const nm = document.createElement("b"); nm.textContent = t.name;
+    const src = document.createElement("span"); src.className = "src";
+    src.textContent = t.source === "mcp" ? "MCP" : "내장";
+    const desc = document.createElement("span"); desc.className = "desc";
+    desc.textContent = t.description || ""; desc.title = t.description || "";
+    lab.append(cb, nm, src, desc);
+    box.appendChild(lab);
+  });
+}
+$("agForm").onsubmit = async (e) => {
+  e.preventDefault();
+  $("agmsg").textContent = "";
+  const disabled = [...document.querySelectorAll("#agTools .agtool")]
+    .filter(cb => !cb.checked).map(cb => cb.value);
+  const r = await fetch("/admin/agent-settings", {
+    method: "POST", headers: {"Content-Type": "application/json", ...adminHdr()},
+    body: JSON.stringify({system_prompt: $("agPrompt").value,
+                          mcp_enabled: $("agMcp").checked,
+                          disabled_tools: disabled}),
+  });
+  if (!r.ok) {
+    let msg = `저장 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    $("agmsg").textContent = msg; return;
+  }
+  $("agmsg").textContent = "✓ 저장됨 — 다음 질문부터 반영 (에이전트 재조립)";
+};
+
 // 페이지 초기 로드 + 현황 폴링
 loadDomains(); loadSources(); loadTables(); loadDomainOptions();
-loadPipelineSettings(); loadDocStatus();
+loadPipelineSettings(); loadDocStatus(); loadAgentSettings();
 setInterval(loadDocStatus, 5000);
 </script>
 </body>

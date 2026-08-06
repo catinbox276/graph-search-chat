@@ -90,6 +90,7 @@ flowchart LR
 - `POST /admin/domains/{d}/reset` · `POST /admin/reset-all-docs` — 도메인 단위/전역 문서 초기화 (문서 유래 기여만 회수, 대화 세션 기여 불변)
 - `GET/POST /admin/pipeline-settings` — 전처리 운영 설정(건수·동시성 기본 16 최대 256·본문 길이·전용 모델·생각 끄기) — app_settings, 재배포 불필요
 - `GET /admin/doc-status` — 소스별 done/excluded/error/pending 카운트 (UI 처리 현황 프로그래스가 5초 폴링)
+- `GET/POST /admin/agent-settings` — 에이전트 전역 제어: 시스템 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 에이전트 캐시 무효화 — 다음 질문부터)
 - `GET /sessions` · `GET /sessions/{id}` — 내 대화 목록·복원 (본인 것만 — SSO user_id 기준, 이어하기는 같은 session_id로 /chat)
 - `GET /oidc/login·callback·logout` · `GET /me` — SSO (AUTH_MODE에 따라 활성, app/auth.py)
 - `GET /graph/data` — 노드(사용 카운트를 문서/대화로 분리 + 성공·실패)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)

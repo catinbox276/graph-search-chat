@@ -46,29 +46,80 @@ SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴�
 - 근거를 못 찾으면 그 사실을 밝히고 일반 지식으로 답한다.
 - 한국어로 답한다."""
 
+BUILTIN_TOOLS = (suggest_paths, search_blog, read_blog_post)
+
+
+def load_agent_settings() -> dict:
+    """전역 에이전트 설정 (app_settings — 관리 페이지 /admin에서 변경).
+    DB를 못 읽으면 코드 기본값으로 동작 (CLI 단독 실행 등)."""
+    out = {"system_prompt": "", "disabled_tools": set(), "mcp_enabled": True}
+    try:
+        import oracledb
+
+        from tools import settings
+        con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD,
+                               dsn=config.ORACLE_DSN)
+        st = settings.get_all(con.cursor())
+        con.close()
+        out["system_prompt"] = (st.get("agent_system_prompt") or "").strip()
+        out["disabled_tools"] = {t.strip() for t in
+                                 (st.get("agent_disabled_tools") or "").split(",")
+                                 if t.strip()}
+        out["mcp_enabled"] = st.get("agent_mcp_enabled", "1") != "0"
+    except Exception as e:
+        print(f"[경고] 에이전트 설정 조회 실패 — 기본값 사용: {e}", file=sys.stderr)
+    return out
+
+
+def _tool_name(t) -> str:
+    return getattr(t, "name", None) or getattr(t, "__name__", "")
+
+
+async def _mcp_tools():
+    client = MultiServerMCPClient({
+        "datahub": {
+            "command": shutil.which("mcp-server-datahub")
+                       or str(ROOT / ".venv/bin/mcp-server-datahub"),
+            "args": [],
+            "transport": "stdio",
+            "env": {"DATAHUB_GMS_URL": DATAHUB_GMS},
+        }
+    })
+    return await client.get_tools()
+
+
+async def discover_tools() -> list:
+    """관리 페이지용 — 사용 가능한 도구 전체 (비활성 포함). {name, description, source}."""
+    out = [{"name": _tool_name(t), "description": (t.__doc__ or "").strip().split("\n")[0],
+            "source": "builtin"} for t in BUILTIN_TOOLS]
+    try:
+        for t in await _mcp_tools():
+            out.append({"name": _tool_name(t),
+                        "description": (getattr(t, "description", "") or "").split("\n")[0],
+                        "source": "mcp"})
+    except Exception as e:
+        print(f"[경고] MCP 도구 목록 조회 실패: {e}", file=sys.stderr)
+    return out
+
 
 async def build_agent(checkpointer=None, model_name=None):
-    tools = [suggest_paths, search_blog, read_blog_post]
-    try:
-        client = MultiServerMCPClient({
-            "datahub": {
-                "command": shutil.which("mcp-server-datahub")
-                           or str(ROOT / ".venv/bin/mcp-server-datahub"),
-                "args": [],
-                "transport": "stdio",
-                "env": {"DATAHUB_GMS_URL": DATAHUB_GMS},
-            }
-        })
-        tools += await client.get_tools()
-    except Exception as e:  # DataHub 미기동 시 블로그 검색만으로 동작
-        print(f"[경고] DataHub MCP 연결 실패, 블로그 검색만 사용: {e}", file=sys.stderr)
+    ag = load_agent_settings()
+    tools = list(BUILTIN_TOOLS)
+    if ag["mcp_enabled"]:
+        try:
+            tools += await _mcp_tools()
+        except Exception as e:  # DataHub 미기동 시 블로그 검색만으로 동작
+            print(f"[경고] DataHub MCP 연결 실패, 블로그 검색만 사용: {e}", file=sys.stderr)
+    if ag["disabled_tools"]:
+        tools = [t for t in tools if _tool_name(t) not in ag["disabled_tools"]]
     model = ChatOpenAI(
         base_url=MODEL_URL,
         api_key=config.MODEL_API_KEY,
         model=model_name or MODEL_NAME,
         temperature=config.LLM_TEMPERATURE,
     )
-    return create_deep_agent(model=model, tools=tools, system_prompt=SYSTEM_PROMPT,
+    return create_deep_agent(model=model, tools=tools,
+                             system_prompt=ag["system_prompt"] or SYSTEM_PROMPT,
                              checkpointer=checkpointer)
 
 
