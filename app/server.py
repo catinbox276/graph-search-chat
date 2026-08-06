@@ -157,7 +157,11 @@ def _source_items(refs: dict) -> list:
                 cur.execute("SELECT title, url FROM blog_posts WHERE id = :1", [pid])
                 row = cur.fetchone()
             if row:
-                items.append({"id": pid, "title": row[0], "url": row[1] or "",
+                # 원천 테이블 값이라 신뢰 불가 — http(s) 외 스킴은 링크로 내보내지 않음 (XSS)
+                url = (row[1] or "").strip()
+                if not url.lower().startswith(("http://", "https://")):
+                    url = ""
+                items.append({"id": pid, "title": row[0], "url": url,
                               "kind": refs[pid]})
         con.close()
     except Exception:
