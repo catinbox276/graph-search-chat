@@ -92,6 +92,9 @@
                    overflow: hidden; background: #e5e7eb; }
   #docstat .pbar i { display: block; height: 100%; }
   #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
+  .srcfoot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
+             font-size: .78rem; color: var(--mut); }
+  .srcfoot a { color: inherit; text-decoration: underline dotted; }
   #psform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap;
             align-items: center; margin-top: 6px; }
   #psform input, #psform select { padding: 7px 10px; border-radius: 8px;
@@ -666,7 +669,7 @@ f.onsubmit = async (e) => {
   const {steps, body, d} = addBot();
   body.textContent = "🤔 질문 분석 중…";
   const pending = [];
-  let buf = "", raw = "", lastRender = 0;
+  let buf = "", raw = "", lastRender = 0, srcs = null;
   const mdRender = (text) => {
     // 열린 채 끝난 코드블록은 임시로 닫아 레이아웃 출렁임 방지
     const fences = (text.match(/```/g) || []).length;
@@ -722,9 +725,28 @@ f.onsubmit = async (e) => {
           }
           buf = ""; body.textContent = "✍️ 결과 검토 중…";
         }
+        else if (ev.type === "sources") srcs = ev.items;
         else if (ev.type === "answer") {
           body.classList.remove("streaming");
           mdRender(ev.text || "(빈 답변)");
+          if (srcs?.length) {  // 결정적 footer — 이 턴에 실제 검색·열람된 문서 (서버 도구 기록 기반)
+            const foot = document.createElement("div");
+            foot.className = "srcfoot";
+            foot.append("📎 참고 문서: ");
+            srcs.forEach((s, i) => {
+              if (i) foot.append(" · ");
+              let el;
+              if (s.url) {
+                el = document.createElement("a");
+                el.href = s.url; el.target = "_blank"; el.rel = "noopener";
+              } else el = document.createElement("span");
+              const t = s.title || s.id;
+              el.textContent = (s.kind === "열람" ? "📖 " : "") + (t.length > 40 ? t.slice(0, 40) + "…" : t);
+              el.title = t + "\n" + s.id + (s.kind === "열람" ? " (전문 열람)" : " (검색)");
+              foot.appendChild(el);
+            });
+            body.appendChild(foot);
+          }
           if (steps.children.length) {
             const el = document.createElement("div");
             el.className = "elapsed"; el.textContent = `⏱ ${ev.elapsed_sec}s`;

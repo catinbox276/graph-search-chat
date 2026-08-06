@@ -130,13 +130,15 @@ def search_blog(query: str, limit: int = 5) -> str:
                        FROM corpus_docs WHERE source_name = :1 AND src_id = :2""",
                     [src, sid])
                 t, kind, url, snip = cur.fetchone()
-                out.append(f"[{pid}] {t} (유형: {kind or src}, 매칭: {tag})\n{snip}\n{url or ''}")
+                out.append(f"[{pid}] {t} (유형: {kind or src}, 매칭: {tag})\n{snip}"
+                           + (f"\n링크: {url}" if url else ""))
             else:
                 cur.execute(
                     """SELECT title, source, url, dbms_lob.substr(body, 200, 1)
                        FROM blog_posts WHERE id = :1""", [pid])
                 t, src, url, snip = cur.fetchone()
-                out.append(f"[{pid}] {t} (출처: {src}, 매칭: {tag})\n{snip}\n{url}")
+                out.append(f"[{pid}] {t} (출처: {src}, 매칭: {tag})\n{snip}"
+                           + (f"\n링크: {url}" if url else ""))
     return "\n\n".join(out)
 
 

@@ -7,6 +7,7 @@ usage: .venv/bin/uvicorn app.server:app --port 8500
 접속: http://localhost:8500
 """
 import json
+import re
 import sys
 import time
 import uuid
@@ -135,6 +136,35 @@ def prettify_result(result: str) -> str:
     return result
 
 
+def _source_items(refs: dict) -> list:
+    """이 턴에 실제 검색·열람된 문서 id들의 제목·링크 조회 (footer용 — LLM 미개입).
+    refs: {pid: '열람'|'검색'}. 열람 우선, 최대 8건."""
+    if not refs:
+        return []
+    order = sorted(refs, key=lambda p: refs[p] != "열람")[:8]
+    items = []
+    try:
+        con = db()
+        cur = con.cursor()
+        for pid in order:
+            src, sep, sid_ = pid.partition(":")
+            row = None
+            if sep:
+                cur.execute("""SELECT title, url FROM corpus_docs
+                               WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+                row = cur.fetchone()
+            if row is None:
+                cur.execute("SELECT title, url FROM blog_posts WHERE id = :1", [pid])
+                row = cur.fetchone()
+            if row:
+                items.append({"id": pid, "title": row[0], "url": row[1] or "",
+                              "kind": refs[pid]})
+        con.close()
+    except Exception:
+        pass  # footer는 부가 정보 — 실패해도 답변을 막지 않는다
+    return items
+
+
 @app.post("/chat/stream")
 async def chat_stream(inp: ChatIn, request: Request):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""
@@ -147,6 +177,7 @@ async def chat_stream(inp: ChatIn, request: Request):
         agent = await get_agent(inp.model)
         yield sse({"type": "session", "session_id": sid})
         calls, answer, t0 = [], "", time.time()
+        refs = {}  # 이 턴의 참고 문서: pid -> '열람'|'검색' (footer용, 도구 기록 기반)
         config = {"configurable": {"thread_id": sid}}
         try:
             async for mode, chunk in agent.astream(
@@ -172,11 +203,16 @@ async def chat_stream(inp: ChatIn, request: Request):
                     for m in msgs:
                         for c in getattr(m, "tool_calls", None) or []:
                             calls.append({"name": c["name"], "args": c["args"]})
+                            if c["name"] == "read_blog_post" and c["args"].get("post_id"):
+                                refs[str(c["args"]["post_id"])] = "열람"
                             yield sse({"type": "tool", "name": c["name"],
                                        "args": c["args"]})
                         if getattr(m, "type", "") == "tool":
                             result = m.content if isinstance(m.content, str) \
                                 else json.dumps(m.content, ensure_ascii=False)
+                            if (getattr(m, "name", "") or "") == "search_blog":
+                                for pid in re.findall(r"(?m)^\[([^\]\n]+)\]", result):
+                                    refs.setdefault(pid, "검색")
                             yield sse({"type": "tool_end",
                                        "name": getattr(m, "name", "") or "",
                                        "result": prettify_result(result)[:3000]})
@@ -188,6 +224,8 @@ async def chat_stream(inp: ChatIn, request: Request):
             answer = answer or f"[오류] {e}"
             yield sse({"type": "error", "message": str(e)})
         log_turn(sid, inp.message, calls, answer, user=uid)
+        if (items := _source_items(refs)):
+            yield sse({"type": "sources", "items": items})
         yield sse({"type": "answer", "text": answer,
                    "elapsed_sec": round(time.time() - t0, 1)})
 
