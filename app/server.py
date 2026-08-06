@@ -419,9 +419,10 @@ def admin_select(inp: SelectIn, request: Request,
     model_registry.set_default(inp.kind, inp.name)
     warn = None
     if inp.kind == "embedding":
-        warn = ("임베딩 모델 변경됨 — 기존 벡터와 호환되지 않습니다. "
-                "UPDATE corpus_docs SET embedding=NULL 후 embed_corpus.py 재실행, "
-                "그래프 dedup 임계값 재캘리브레이션 필요")
+        warn = ("임베딩 모델 변경됨 — .env EMBED_MODEL도 함께 바꾸면 백필 배치가 "
+                "embed_model 불일치 청크를 자동 재임베딩합니다 (재백필 중 시맨틱 "
+                "커버리지 점증, lexical이 받침). nodes.embedding 재백필과 "
+                "그래프 dedup 임계값 재캘리브레이션도 필요")
     return {"ok": True, "kind": inp.kind, "default": inp.name, "warning": warn}
 
 
@@ -629,6 +630,8 @@ def admin_pipeline_settings(request: Request, x_admin_token: str = Header(defaul
                                                 config.DOC_PACK_TOKENS),
             "doc_no_think": settings.get_int(st, "doc_no_think", config.DOC_NO_THINK),
             "doc_extract_model": st.get("doc_extract_model") or "",
+            "chunk_chars": settings.get_int(st, "chunk_chars", config.CHUNK_CHARS),
+            "chunk_overlap": settings.get_int(st, "chunk_overlap", config.CHUNK_OVERLAP),
             "overridden": sorted(st.keys())}
 
 
@@ -639,6 +642,8 @@ class PipelineSettingsIn(BaseModel):
     doc_pack_tokens: str = ""     # 0=1건씩 / N=입력 N토큰 예산으로 묶음 판정
     doc_no_think: str = ""        # 1=추론(생각) 출력 끔 (기본) / 0=켬
     doc_extract_model: str = ""   # 빈값 = 대화 모델 사용
+    chunk_chars: str = ""         # 청크 크기(자)
+    chunk_overlap: str = ""       # 인접 청크 겹침(자)
 
 
 @app.post("/admin/pipeline-settings")
@@ -652,7 +657,9 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request,
                              ("doc_concurrency", inp.doc_concurrency, 1, 256),
                              ("doc_body_chars", inp.doc_body_chars, 200, 20000),
                              ("doc_pack_tokens", inp.doc_pack_tokens, 0, 30000),
-                             ("doc_no_think", inp.doc_no_think, 0, 1)):
+                             ("doc_no_think", inp.doc_no_think, 0, 1),
+                             ("chunk_chars", inp.chunk_chars, 200, 8000),
+                             ("chunk_overlap", inp.chunk_overlap, 0, 2000)):
         raw = raw.strip()
         if raw:
             try:

@@ -33,6 +33,9 @@ python3 scripts/build_corpus.py && python3 scripts/load_oracle.py \
 # 원천 테이블 증분 적재: source_registry 등록분 → corpus_docs (야간 03:10과 동일, 멱등)
 python3 scripts/ingest_sources.py
 
+# 문서 청킹: 신규·갱신 문서 → corpus_chunks (야간 03:15과 동일, 멱등)
+python3 scripts/chunk_corpus.py
+
 # 문서 그래프 구조화: 도메인 지정 소스의 corpus_docs를 LLM 판정·그래프 병합 (야간 03:40과 동일)
 .venv/bin/python -m poc.doc_pipeline [--limit N]
 
@@ -60,9 +63,9 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `SOURCE_TABLE_ALLOWLIST` | (빈값=제한 없음) | 원천 테이블 화이트리스트 (쉼표구분) — 목록 밖 테이블은 브라우저 조회·소스 등록·야간 적재 전부 차단 (`source_registry.table_allowed` 한 곳으로 강제). 사내 전환 시 허용 테이블만 나열 |
 | `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). `header`=사내 기본 — 전단 SSO가 준 `SSO_USER_HEADER`(userId)·`SSO_ROLE_HEADER`(role) 2개만 소비, 로그인 UI 없음. `keycloak`=전단 없는 환경용 직접 OIDC(`KEYCLOAK_*`/`OIDC_*` 필요, PoC 파드는 `k8s/keycloak.yaml`). 관리자 = `OIDC_ADMIN_ROLE`(기본 `gsc-admin`) 역할 보유 |
 
-사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 전체 재백필 필요(`scripts/embed_corpus.py`).
+사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 백필 배치가 embed_model 불일치 청크를 자동 재백필(`scripts/embed_corpus.py` — 재백필 중 lexical이 받침). nodes.embedding 재백필과 dedup 임계값 재캘리브레이션은 별도 필요.
 
-**튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`/`DEDUP_SHORT_NAME_CHARS`/`DEDUP_CHAR_RATIO`/`DEDUP_SELECT_MAX`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 시간 감쇠 `MAINT_DECAY_HALF_LIFE_DAYS`/`MAINT_DECAY_GRACE_DAYS`/`MAINT_DECAY_FLOOR`, 게이트 행동 신호 `SIG_REPEAT_SIM`/`SIG_TOPIC_MOVE_SIM`/`SIG_HASTY_RATIO`/`RECUR_DAYS`(재발 창), 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마 중 **1층 도메인은 Oracle `domain_registry` 테이블**이 닫힌 목록(기본 2종은 코드가 시드, 확장은 관리자 API `GET/POST /admin/domains` — 사람 전용, 소급 재분류 없음). 도메인은 등록 때 **용도(scope)를 명시 선택**: `both`(대화+문서)/`chat`(대화 전용)/`doc`(문서 전용 — 대화 분류·폴백에서 제외, 소스 구조화 전용). `DATAHUB_TOOLS`(기본 시드 원천)·`LAYER_KIND`와 프롬프트 길이 가드는 코드에 둔다.
+**튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`/`DEDUP_SHORT_NAME_CHARS`/`DEDUP_CHAR_RATIO`/`DEDUP_SELECT_MAX`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 시간 감쇠 `MAINT_DECAY_HALF_LIFE_DAYS`/`MAINT_DECAY_GRACE_DAYS`/`MAINT_DECAY_FLOOR`, 게이트 행동 신호 `SIG_REPEAT_SIM`/`SIG_TOPIC_MOVE_SIM`/`SIG_HASTY_RATIO`/`RECUR_DAYS`(재발 창), 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 청킹 `CHUNK_CHARS`/`CHUNK_OVERLAP`(운영은 app_settings가 우선), 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마 중 **1층 도메인은 Oracle `domain_registry` 테이블**이 닫힌 목록(기본 2종은 코드가 시드, 확장은 관리자 API `GET/POST /admin/domains` — 사람 전용, 소급 재분류 없음). 도메인은 등록 때 **용도(scope)를 명시 선택**: `both`(대화+문서)/`chat`(대화 전용)/`doc`(문서 전용 — 대화 분류·폴백에서 제외, 소스 구조화 전용). `DATAHUB_TOOLS`(기본 시드 원천)·`LAYER_KIND`와 프롬프트 길이 가드는 코드에 둔다.
 
 **배포(k8s)**: 컨테이너별 env를 나열하지 않고 `k8s/base/gsc.env` 한 파일 → `configMapGenerator`로 ConfigMap 생성 → 앱·CronJob이 `envFrom`으로 주입받는다(클러스터 DNS·사내 모델 값). 로컬 `.env`와는 별개 파일. 값 변경 시 ConfigMap 이름 해시가 바뀌어 롤링 재시작까지 자동.
 
@@ -72,14 +75,14 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 
 - **모놀리스 이미지 1개** — `app/server.py`(FastAPI)가 SSE 스트리밍·세션 기록·그래프 데이터·모델 관리 API를 전부 담당. 기동 시 Oracle에서 임베딩 행렬 1.4GB를 메모리에 로드(`tools/blog_search.load_matrix`). CronJob(파이프라인·유지보수·백필)도 같은 이미지.
 - **에이전트** — `agent/agent.py`가 DeepAgents로 조립. 툴 = `suggest_paths`(새 문제 시 최우선 호출, 시스템 프롬프트로 강제) + `search_blog`/`read_blog_post`(함수 직접 등록) + DataHub 공식 MCP(stdio, 유일한 MCP). 모델별 에이전트 캐시는 server.py의 `_agents`.
-- **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical) top-30 + 인메모리 행렬 코사인(semantic) top-30 → RRF 융합. 검색 대상은 통합 코퍼스 `corpus_docs`(문서 id=`소스명:원천id`, 없으면 구 blog_posts 폴백). 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작.
+- **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical, corpus_docs.body) top-30 + 인메모리 **청크 행렬** 코사인(semantic, corpus_chunks — 현재 EMBED_MODEL 벡터만) top-30 → 문서 단위 best-chunk 집계 → RRF 융합. 문서 id=`소스명:원천id`, 시맨틱 히트는 매칭 청크가 스니펫. 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작. 스키마 상세: docs/schema.md.
 - **원천 테이블 적재** (`tools/source_registry.py` + `scripts/ingest_sources.py`) — 구조화할 저쪽 테이블은 관리자가 `source_registry`에 등록(테이블·id·시간 컬럼·필드→역할 매핑 title/body/question/answer/meta/url·content_kind — API `GET/POST /admin/sources`, UI 📚 소스). 야간 배치가 ts 워터마크 증분으로 역할 조립해 corpus_docs에 MERGE. **원천 테이블은 읽기 전용(SELECT만)**. 상세: docs/integration.md 접점 2.
 - **문서 그래프 구조화** (`poc/doc_pipeline.py`) — 소스에 **그래프 도메인을 지정하면**(source_registry.domain, UI 셀렉트) 야간 03:40 배치가 corpus_docs 문서를 그 도메인의 정의·extract_hint 기준으로 LLM 판정: fits면 목표·접근법을 추출해 대화와 같은 그래프에 병합(`get_or_create` dedup 재사용), **기준 미달은 excluded**(corpus_docs.graph_status·graph_note). 증거는 `doc:소스:id` — sessions와 조인 안 되므로 성공/실패 카운트엔 안 섞임. 도메인 미지정 소스는 검색 전용. LLM 판정은 동시(스레드), 병합은 직렬. **운영 설정은 `app_settings` 테이블**(tools/settings.py — 관리 UI 📚 소스 > 전처리 설정에서 재배포 없이 변경): 실행당 건수·동시성·본문 길이·전처리 전용 모델. 소스별 액션: 드라이런(판정만)·실패 재시도·초기화 재처리(그래프 기여 회수 후 재구조화 — 이중 카운트 방지). 초기화는 도메인 단위(`POST /admin/domains/{도메인}/reset` — 그 도메인의 모든 소스)·전역(`POST /admin/reset-all-docs`)도 지원 — 셋 다 문서 유래 기여만 회수, 대화 세션 기여는 불변.
 - **경로 제안** (`tools/path_suggest.py`) — 그래프에서 검증 경로 제안 + 실패 이력 경고. 노출을 `suggestions` 테이블에 기록(채택률 보정용). 성공/실패는 판정 카운트로 관리 (불리언 금지 — PoC에서 실증된 결정).
 - **멀티턴 기억** — `tools/oracle_checkpointer.py` (LangGraph 체크포인터를 Oracle `lg_checkpoints`/`lg_writes`로 외부화). thread_id=세션id. 복제본 공유·재시작 생존이라 cluster 모드에서 세션 고정 불필요.
 - **그래프 파이프라인** (`poc/graph_pipeline.py`) — 세션 게이트 2갈래(태스크 세션=expect 기준 LLM 판정 / UI 세션=행동 신호 코드 판정 — 후퇴 2개↑ fail, 전진만 있으면 success, 나머지 미판정) → 4계층 추출(도메인은 닫힌 목록, 목표·접근법은 LLM, 행동은 tool_calls에서 결정적) → dedup 병합 → 재발 소급 취소(같은 증상 `RECUR_DAYS` 내 재방문 시 success를 'retracted'로, 기여 가중치 회수). dedup 임계값: 코사인 ≥0.92이고 문자 가드(이름 12자 미만 제외 + difflib ratio ≥0.4) 통과 시 즉시 병합, 그 외 후보(0.70~)는 LLM 후보 선택(`llm_select` — 여러 형제 중 같은 의도 하나 고르기, 쌍별 이지선다보다 정확) 1회로 판정 (캘리브레이션 근거는 파일 상단 주석. 임베딩 모델 교체 시 임계값 재캘리브레이션 필요). 유지보수(`poc/graph_maintenance.py`)는 형제 통합·잎 흡수에 더해 패스3 시간 감쇠(유휴 3층 접근법 가중치를 반감기 곡선으로 하강, 멱등).
 - **Oracle 단일 DB** — 테이블: `corpus_docs`(통합 코퍼스+embedding BLOB, 구 `blog_posts`는 소스 1호로 흡수), `source_registry`, `domain_registry`, `sessions`(+user_id), `nodes`/`edges`/`node_evidence`, `suggestions`, `model_registry`, `lg_checkpoints`/`lg_writes`. DSN 등 접속 상수는 `tools/blog_search.py`에서 import하는 게 관례.
-- **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:10 원천 증분 적재, 03:20 유지보수, 03:30 임베딩 백필, 03:40 문서 그래프 구조화.
+- **야간 배치** — CronJob 03:00 graph-pipeline(UI 세션 포함 미판정분 처리), 03:10 원천 증분 적재, 03:15 문서 청킹, 03:20 유지보수(+무결성 점검 리포트), 03:30 청크 임베딩 백필(모델 불일치 자동 재백필), 03:40 문서 그래프 구조화.
 
 ## 문서
 - `docs/plan.md` — 기획 보고 (비전공자용: 배경·별도 프로젝트 결정·도구 3종·대화 자산화 근거·관리 방안)

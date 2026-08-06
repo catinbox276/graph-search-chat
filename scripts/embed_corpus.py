@@ -1,9 +1,9 @@
-"""코퍼스 임베딩 백필 — Oracle에 원본 저장 (하이브리드 검색용).
+"""청크 임베딩 백필 — Oracle에 원본 저장 (하이브리드 검색용, docs/schema.md §5).
 
-- 대상: corpus_docs(통합 코퍼스 — ingest_sources.py가 적재)의 embedding IS NULL 행.
-  corpus_docs 단일 경로 — 소스별 직조회 없음 (통합 코퍼스만 백필).
-- 대상 텍스트: 제목 + 본문 앞 300자
-- 이어하기: embedding IS NULL 인 것만 처리
+- 대상: corpus_chunks에서 embedding IS NULL 이거나 embed_model이 현재 모델과 다른 행.
+  → 임베딩 모델 교체 시 이 배치가 자동으로 점진 재백필한다 (검색은 현재 모델
+  벡터만 로드 — 재백필 중 커버리지가 점증하고 lexical이 나머지를 받침).
+- 대상 텍스트: 청크 text 전체 (title 접두 포함 — 청킹 때 이미 조립됨)
 usage: .venv/bin/python scripts/embed_corpus.py   (야간 CronJob 03:30과 동일)
 """
 import asyncio
@@ -20,10 +20,9 @@ sys.path.insert(0, str(ROOT))
 from tools import config  # noqa: E402
 from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 
-EMB_MODEL = config.EMBED_MODEL  # .env로 제어
+EMB_MODEL = config.EMBED_MODEL  # .env로 제어 — 청크의 embed_model에 기록됨
 BATCH = config.EMBED_BATCH
 CONCURRENCY = config.EMBED_CONCURRENCY  # 임베딩 서빙 동시 요청 수
-TEXT_CHARS = config.EMBED_TEXT_CHARS    # 임베딩 대상: 제목 + 본문 앞 N자
 
 llm = AsyncOpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 
@@ -31,18 +30,18 @@ llm = AsyncOpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
 async def main():
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_CHUNKS'")
     if not cur.fetchone()[0]:
-        print("corpus_docs 없음 — 먼저 scripts/ingest_sources.py로 적재하세요", flush=True)
+        print("corpus_chunks 없음 — 먼저 scripts/chunk_corpus.py로 청킹하세요", flush=True)
         return
-    # 통합 코퍼스 — 소스 무관하게 미임베딩분 백필
-    cur.execute("""SELECT source_name, src_id,
-                          NVL(title, ' ') || ' ' || dbms_lob.substr(body, :n, 1)
-                   FROM corpus_docs WHERE embedding IS NULL""", n=TEXT_CHARS)
-    todo = [((r[0], r[1]), r[2]) for r in cur.fetchall()]
-    update_sql = ("UPDATE corpus_docs SET embedding = :1 "
-                  "WHERE source_name = :2 AND src_id = :3")
-    print(f"임베딩 대상 {len(todo)}건 (corpus_docs)", flush=True)
+    cur.execute("""SELECT source_name, src_id, chunk_no, text FROM corpus_chunks
+                   WHERE embedding IS NULL OR embed_model IS NULL
+                      OR embed_model != :m""", m=EMB_MODEL)
+    todo = [((r[0], r[1], r[2]), r[3].read() if hasattr(r[3], "read") else r[3])
+            for r in cur.fetchall()]
+    update_sql = ("UPDATE corpus_chunks SET embedding = :1, embed_model = :2 "
+                  "WHERE source_name = :3 AND src_id = :4 AND chunk_no = :5")
+    print(f"임베딩 대상 청크 {len(todo)}건 (모델 {EMB_MODEL})", flush=True)
 
     t0, n = time.time(), 0
     step = BATCH * CONCURRENCY
@@ -54,7 +53,8 @@ async def main():
             for b in batches])
         rows = []
         for b, vecs in zip(batches, results):
-            rows += [(np.asarray(v.embedding, dtype=np.float32).tobytes(), *b[k][0])
+            rows += [(np.asarray(v.embedding, dtype=np.float32).tobytes(),
+                      EMB_MODEL, *b[k][0])
                      for k, v in enumerate(vecs.data)]
         cur.executemany(update_sql, rows)
         con.commit()

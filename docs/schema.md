@@ -85,25 +85,28 @@ erDiagram
 | `graph_status` | VARCHAR2(20) | 구조화 상태: NULL(미처리)/done/excluded/error |
 | `graph_note` | VARCHAR2(1000) | 판정 사유·오류 메시지 |
 
-### corpus_chunks — 청크 임베딩 (신규 설계, 미구현)
+### corpus_chunks — 청크 임베딩 (2026-08-06 구현 완료)
 
-긴 문서의 뒷부분이 임베딩 검색에 잡히지 않는 현 구조(문서 1건=벡터 1개, 제목+본문 앞 300자)의 해소. 문서 1:N.
+긴 문서의 뒷부분이 임베딩 검색에 잡히지 않던 구조(문서 1건=벡터 1개, 제목+본문 앞 300자)의 해소. 문서 1:N — 실측 2,192문서 → 3,402청크.
 
 ```sql
 CREATE TABLE corpus_chunks (
-  source_name VARCHAR2(100) NOT NULL,   -- corpus_docs 참조 (FK 개념 — 물리 FK는 안 건다*)
+  source_name VARCHAR2(100) NOT NULL,
   src_id      VARCHAR2(200) NOT NULL,
   chunk_no    NUMBER        NOT NULL,   -- 0부터, 문서 내 순서
-  text        CLOB          NOT NULL,   -- 청크 원문 (오버랩 포함)
-  char_start  NUMBER,                   -- 원문 내 시작 위치 (문서 뷰 하이라이트용)
+  text        CLOB          NOT NULL,   -- title 접두 + 본문 슬라이스 (오버랩 포함)
+  char_start  NUMBER,                   -- 본문 내 시작 위치 (문서 뷰 하이라이트용)
   char_end    NUMBER,
-  embedding   BLOB,                     -- float32[] (백필 배치가 채움 — NULL=미임베딩)
+  embedding   BLOB,                     -- float32[] (03:30 백필이 채움 — NULL=미임베딩)
   embed_model VARCHAR2(200),            -- 이 벡터를 만든 모델명 (모델 버저닝 — §5)
   created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
-  PRIMARY KEY (source_name, src_id, chunk_no)
+  CONSTRAINT corpus_chunks_pk PRIMARY KEY (source_name, src_id, chunk_no),
+  CONSTRAINT corpus_chunks_doc_fk FOREIGN KEY (source_name, src_id)
+    REFERENCES corpus_docs(source_name, src_id) ON DELETE CASCADE
 );
--- * 물리 FK를 안 거는 이유: 재적재·초기화 때 부모 MERGE와 청크 재생성이 별 배치로
---   돌아 순서 제약이 배치를 깨기 쉬움. 정합성은 재청킹 배치가 멱등하게 보장.
+-- 설계 때는 FK 보류였으나 구현 시 걸었다 (v2 무결성 모델과 일관): corpus_docs는
+-- MERGE만 하고 삭제하지 않아 배치 순서 충돌이 없고, 청킹 배치가 항상 부모를 읽고 쓴다.
+-- 재청킹 신호: corpus_docs.updated_at(적재 MERGE가 갱신) vs 청크 created_at 비교 — 멱등.
 ```
 
 - **텍스트는 참조가 아니라 사본** (조립본 corpus_docs의 슬라이스): ① 원본은 통제 밖(SELECT만, 언제든 변경)이라 검색 시 조인 부적합, ② 임베딩은 그 시점 텍스트의 함수 — 사본이어야 벡터-근거 일관, ③ 조립본·청크 텍스트(역할 라벨·title 접두)는 원본에 존재하지 않아 오프셋 참조로 표현 불가. 표준 RAG 패턴(파생 사본, 원본에서 재생성 가능, 단방향).
@@ -170,9 +173,9 @@ nodes.embedding(노드 이름 벡터)은 청킹과 무관 — 그대로. 단 **�
 
 | 단계 | 작업 | 되돌림 |
 |---|---|---|
-| 1 | `corpus_chunks` DDL + 청킹 배치(문서→청크, 멱등) 추가. 검색은 아직 문서 임베딩 | 테이블 drop |
-| 2 | 임베딩 백필을 청크 대상으로 전환 (`embed_model` 기록 시작) | 백필 대상만 원복 |
-| 3 | `load_matrix`·semantic 검색을 청크→문서 집계로 전환 (설정 스위치로 켬) | 스위치 끔 |
-| 4 | 안정 확인 후 `corpus_docs.embedding` 백필 중단 (컬럼은 두고 값만 방치 → 추후 정리) | — |
+| 1 | ~~`corpus_chunks` DDL + 청킹 배치~~ **완료** (scripts/chunk_corpus.py, cron 03:15) | — |
+| 2 | ~~임베딩 백필 청크 전환~~ **완료** (embed_model 기록, 모델 불일치 자동 재백필) | — |
+| 3 | ~~검색 청크 전환~~ **완료** (best-chunk 집계, 매칭 청크가 스니펫) | — |
+| 4 | ~~doc 임베딩 백필 중단~~ **완료** (corpus_docs.embedding은 잔존 컬럼 — 추후 정리) | — |
 
-야간 배치 순서는 현행 유지: 03:10 적재 → (신규) 03:15 청킹 → 03:30 임베딩 백필 → 03:40 구조화. 소스 초기화(reset)는 구조화 상태만 건드리므로 청크와 무관 — 재적재(MERGE)로 본문이 바뀐 문서만 재청킹 대상(`created_at` 비교, 멱등).
+야간 배치: 03:10 적재 → 03:15 청킹(신규 CronJob) → 03:30 임베딩 백필 → 03:40 구조화. 소스 초기화(reset)는 구조화 상태만 건드리므로 청크와 무관 — 재적재(MERGE)로 본문이 바뀐 문서만 재청킹 대상(`created_at` 비교, 멱등).

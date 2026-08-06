@@ -45,6 +45,7 @@ def ensure_corpus(cur):
         embedding   BLOB,
         src_ts      TIMESTAMP,                -- 원천 ts_column 값 (있으면)
         created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP,  -- 재청킹·재임베딩 신호
         graph_status VARCHAR2(20),            -- 구조화 상태 (doc_pipeline)
         graph_note   VARCHAR2(1000),
         PRIMARY KEY (source_name, src_id),
@@ -115,10 +116,11 @@ def ingest_source(cur, src) -> int:
                USING (SELECT :sn AS sn, :sid AS sid FROM dual) x
                ON (c.source_name = x.sn AND c.src_id = x.sid)
                WHEN MATCHED THEN UPDATE SET title = :t, body = :b, kind = :k,
-                    url = :u, src_ts = :ts, embedding = NULL  -- 본문 변경 → 재임베딩 대상
+                    url = :u, src_ts = :ts, embedding = NULL,
+                    updated_at = SYSTIMESTAMP  -- 본문 변경 → 재청킹·재임베딩 신호
                WHEN NOT MATCHED THEN INSERT
-                    (source_name, src_id, title, body, kind, url, src_ts)
-               VALUES (:sn, :sid, :t, :b, :k, :u, :ts)"""
+                    (source_name, src_id, title, body, kind, url, src_ts, updated_at)
+               VALUES (:sn, :sid, :t, :b, :k, :u, :ts, SYSTIMESTAMP)"""
 
     def flush():
         nonlocal batch

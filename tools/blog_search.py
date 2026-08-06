@@ -29,7 +29,7 @@ _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
                              min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                              increment=config.ORACLE_POOL_INCREMENT)
 _llm = OpenAI(base_url=config.EMBED_URL, api_key=config.MODEL_API_KEY)
-_matrix, _ids, _lock = None, None, threading.Lock()
+_matrix, _ids, _chunk_nos, _lock = None, None, None, threading.Lock()
 
 
 def _corpus_ready(cur) -> bool:
@@ -39,23 +39,29 @@ def _corpus_ready(cur) -> bool:
 
 
 def load_matrix():
-    """Oracle의 임베딩을 메모리 행렬로 로드. 서버 기동 시 1회 호출 권장."""
-    global _matrix, _ids
+    """청크 임베딩을 메모리 행렬로 로드 (현재 모델 벡터만 — 모델 교체 중엔
+    백필된 만큼 커버리지 점증, lexical이 나머지를 받침). 서버 기동 시 1회."""
+    global _matrix, _ids, _chunk_nos
     with _lock:
         with _pool.acquire() as con:
             cur = con.cursor()
-            ids, vecs = [], []
-            if _corpus_ready(cur):
-                cur.execute("""SELECT source_name || ':' || src_id, embedding
-                               FROM corpus_docs WHERE embedding IS NOT NULL""")
-                for pid, blob in cur:
+            ids, nos, vecs = [], [], []
+            cur.execute("""SELECT COUNT(*) FROM user_tables
+                           WHERE table_name = 'CORPUS_CHUNKS'""")
+            if cur.fetchone()[0]:
+                cur.execute("""SELECT source_name || ':' || src_id, chunk_no, embedding
+                               FROM corpus_chunks
+                               WHERE embedding IS NOT NULL AND embed_model = :m""",
+                            m=EMB_MODEL)
+                for pid, no, blob in cur:
                     ids.append(pid)
+                    nos.append(no)
                     vecs.append(np.frombuffer(blob.read(), dtype=np.float32))
         if vecs:
             m = np.stack(vecs)
             m /= np.linalg.norm(m, axis=1, keepdims=True)
-            _matrix, _ids = m, ids
-        print(f"[blog_search] 임베딩 행렬 로드: {len(ids)}건 (corpus_docs)")
+            _matrix, _ids, _chunk_nos = m, ids, nos
+        print(f"[blog_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {EMB_MODEL})")
     return len(ids)
 
 
@@ -69,19 +75,29 @@ def _lexical(cur, query: str, n: int):
         """SELECT source_name || ':' || src_id FROM corpus_docs
            WHERE CONTAINS(body, :q, 1) > 0
            ORDER BY SCORE(1) DESC FETCH FIRST :n ROWS ONLY""",
-        q=" ACCUM ".join(terms), n=n)
+        # {} 이스케이프 — 예약어(AND/OR 등)가 검색어에 섞여도 구문 오류 없게
+        q=" ACCUM ".join("{" + t + "}" for t in terms), n=n)
     return [r[0] for r in cur.fetchall()]
 
 
 def _semantic(query: str, n: int):
+    """청크 코사인 → 문서 단위 집계(best-chunk). 반환: (문서 pid 목록, {pid: 최고 청크 no})."""
     if _matrix is None:
-        return []
+        return [], {}
     q = np.asarray(
         _llm.embeddings.create(model=EMB_MODEL, input=query).data[0].embedding,
         dtype=np.float32)
     q /= np.linalg.norm(q)
-    top = np.argsort(_matrix @ q)[::-1][:n]
-    return [_ids[i] for i in top]
+    scores = _matrix @ q
+    best = {}  # pid -> (score, chunk_no)
+    for i in np.argsort(scores)[::-1]:
+        pid = _ids[i]
+        if pid not in best:
+            best[pid] = (float(scores[i]), _chunk_nos[i])
+            if len(best) >= n:
+                break
+    ordered = sorted(best, key=lambda p: best[p][0], reverse=True)
+    return ordered, {p: best[p][1] for p in ordered}
 
 
 def search_blog(query: str, limit: int = 5) -> str:
@@ -94,7 +110,7 @@ def search_blog(query: str, limit: int = 5) -> str:
     with _pool.acquire() as con:
         cur = con.cursor()
         lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL)
-        sem = _semantic(query, config.SEARCH_TOP_SEMANTIC)
+        sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC)
         scores = {}
         for rank_list in (lex, sem):
             for r, pid in enumerate(rank_list):
@@ -112,6 +128,13 @@ def search_blog(query: str, limit: int = 5) -> str:
                    FROM corpus_docs WHERE source_name = :1 AND src_id = :2""",
                 [src, sid])
             t, kind, url, snip = cur.fetchone()
+            if pid in best_chunk:  # 시맨틱 매칭 — 실제로 맞은 청크를 스니펫으로
+                cur.execute("""SELECT dbms_lob.substr(text, 200, 1) FROM corpus_chunks
+                               WHERE source_name = :1 AND src_id = :2 AND chunk_no = :3""",
+                            [src, sid, best_chunk[pid]])
+                r = cur.fetchone()
+                if r and r[0]:
+                    snip = r[0]
             out.append(f"[{pid}] {t} (유형: {kind or src}, 매칭: {tag})\n{snip}"
                        + (f"\n링크: {url}" if url else ""))
     return "\n\n".join(out)

@@ -54,6 +54,32 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  name: chunk-corpus
+spec:
+  schedule: "15 3 * * *"   # 매일 03:15 — 신규·갱신 문서 청킹 → corpus_chunks (03:30 백필 전)
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          imagePullSecrets:
+            - name: harbor-cred
+          containers:
+            - name: chunk
+              image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
+              imagePullPolicy: Always
+              command: ["python", "scripts/chunk_corpus.py"]
+              envFrom:
+                - configMapRef:
+                    name: gsc-env
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
   name: doc-pipeline
 spec:
   schedule: "40 3 * * *"   # 매일 03:40 — 도메인 지정 소스의 문서를 LLM 판정·그래프화 (실행당 DOC_EXTRACT_LIMIT건)
