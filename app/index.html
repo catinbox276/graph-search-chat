@@ -742,7 +742,7 @@ f.onsubmit = async (e) => {
               }
               const t = s.title || s.id;
               el.textContent = (s.kind === "열람" ? "📖 " : "") + (t.length > 40 ? t.slice(0, 40) + "…" : t);
-              el.title = t + "\n" + s.id + (s.kind === "열람" ? " (전문 열람)" : " (검색)");
+              el.title = t + "\n" + s.id + ` (${s.kind === "열람" ? "전문 열람" : s.kind})`;
               foot.appendChild(el);
             });
             body.appendChild(foot);

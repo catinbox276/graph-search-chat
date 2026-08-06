@@ -214,9 +214,13 @@ async def chat_stream(inp: ChatIn, request: Request):
                         if getattr(m, "type", "") == "tool":
                             result = m.content if isinstance(m.content, str) \
                                 else json.dumps(m.content, ensure_ascii=False)
-                            if (getattr(m, "name", "") or "") == "search_blog":
+                            tname = getattr(m, "name", "") or ""
+                            if tname == "search_blog":
                                 for pid in re.findall(r"(?m)^\[([^\]\n]+)\]", result):
                                     refs.setdefault(pid, "검색")
+                            elif tname == "suggest_paths":  # 경로 제안의 근거 문서
+                                for pid in re.findall(r"\[([^\[\]\s]+:[^\[\]\s]+)\]", result):
+                                    refs.setdefault(pid, "경로 근거")
                             yield sse({"type": "tool_end",
                                        "name": getattr(m, "name", "") or "",
                                        "result": prettify_result(result)[:3000]})

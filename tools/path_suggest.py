@@ -93,6 +93,15 @@ def suggest_paths(problem: str) -> str:
                                WHERE e4.src = :1 AND n4.layer = 4""", [aid])
                 tools = ", ".join(t[0].replace("tool:", "") for t in cur.fetchall())
                 docs = f", 참고 문서 {dc}건" if dc else ""
+                # 근거 문서 id 노출 — 답변 인용·footer 수집·read_blog_post 열람이 가능해진다
+                ev_line = ""
+                if dc:
+                    cur.execute("""SELECT session_id FROM node_evidence
+                                   WHERE node_id = :1 AND session_id LIKE 'doc:%'
+                                   FETCH FIRST 3 ROWS ONLY""", [aid])
+                    pids = " ".join(f"[{r[0][4:]}]" for r in cur.fetchall())
+                    if pids:
+                        ev_line = f"\n     근거 문서 (read_blog_post로 열람 가능): {pids}"
                 if fc > sc:  # 실패 우세일 때만 경고 (성공이 우세하면 검증 경로)
                     out.append(f"  ⚠ 과거 실패 우세 접근 (성공 {sc}/실패 {fc}{docs}): {aname}"
                                f"\n     실패 이유: {reason}"
@@ -100,11 +109,11 @@ def suggest_paths(problem: str) -> str:
                 elif sc:  # 실전 세션 성공이 있어야만 '검증'
                     mixed = f", 실패 {fc}회 있음" if fc else ""
                     out.append(f"  ✅ 검증된 경로 (성공 {sc}회{mixed}{docs}): {aname}"
-                               + (f"\n     사용 도구: {tools}" if tools else ""))
+                               + (f"\n     사용 도구: {tools}" if tools else "") + ev_line)
                 else:  # 세션 성공 없음 — 검증 아님을 명시 (대부분 문서 유래)
                     src = f"문서 {dc}건" if dc else "성공 이력 소급 취소됨"
                     out.append(f"  📄 미검증 경로 ({src}, 실전 검증 이력 없음): {aname}"
-                               + (f"\n     사용 도구: {tools}" if tools else ""))
+                               + (f"\n     사용 도구: {tools}" if tools else "") + ev_line)
                 cur.execute("INSERT INTO suggestions (problem, node_id, weight, session_id) "
                             "VALUES (:1, :2, :3, :4)",
                             [problem[:2000], aid, cnt, current_session.get()])
