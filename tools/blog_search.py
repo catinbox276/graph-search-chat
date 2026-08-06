@@ -6,7 +6,7 @@
 - 서버/프로세스 기동 시 임베딩을 numpy 행렬로 메모리 로드 (정규화 -> dot = cosine)
 - 검색: Oracle Text(lexical) top-30 + 행렬 코사인(semantic) top-30 -> RRF 융합
 - 임베딩이 아직 없으면 lexical 단독으로 동작 (백필 진행 중에도 사용 가능)
-- 문서 id: "소스명:원천id" (접두 없는 구형 id는 config.DOC_ID_DEFAULT_SOURCE로 해석)
+- 문서 id: "소스명:원천id" 단일 형식
 
 에이전트에 함수 툴로 직접 등록해서 쓴다 (MCP 아님 — MCP는 DataHub 공식만 사용).
 """
@@ -120,8 +120,8 @@ def search_blog(query: str, limit: int = 5) -> str:
 def read_blog_post(post_id: str) -> str:
     """검색 결과의 문서 id(post_id)로 전문을 읽는다. '소스명:id' 형식."""
     src, sep, sid = post_id.partition(":")
-    if not sep:  # 접두 없는 구형 id — 기본 소스로 해석 (.env DOC_ID_DEFAULT_SOURCE)
-        src, sid = config.DOC_ID_DEFAULT_SOURCE, post_id
+    if not sep:
+        return f"글을 찾을 수 없습니다: {post_id} (문서 id 형식: 소스명:원천id)"
     with _pool.acquire() as con:
         cur = con.cursor()
         cur.execute("""SELECT title, body, kind, url FROM corpus_docs

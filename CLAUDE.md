@@ -58,7 +58,6 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
 | `ADMIN_TOKEN` | `poc-admin` | 모델 관리 API (`X-Admin-Token` 헤더) — SSO 관리자 역할로도 통과 |
 | `SOURCE_TABLE_ALLOWLIST` | (빈값=제한 없음) | 원천 테이블 화이트리스트 (쉼표구분) — 목록 밖 테이블은 브라우저 조회·소스 등록·야간 적재 전부 차단 (`source_registry.table_allowed` 한 곳으로 강제). 사내 전환 시 허용 테이블만 나열 |
-| `DOC_ID_DEFAULT_SOURCE` | `blog_posts` | 소스 접두 없는 구형 문서 id 해석용 기본 소스 — 특정 테이블 하드코딩 제거됨(검색·읽기·출처·뷰·stats 전부 corpus_docs 단일 경로) |
 | `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). `header`=사내 기본 — 전단 SSO가 준 `SSO_USER_HEADER`(userId)·`SSO_ROLE_HEADER`(role) 2개만 소비, 로그인 UI 없음. `keycloak`=전단 없는 환경용 직접 OIDC(`KEYCLOAK_*`/`OIDC_*` 필요, PoC 파드는 `k8s/keycloak.yaml`). 관리자 = `OIDC_ADMIN_ROLE`(기본 `gsc-admin`) 역할 보유 |
 
 사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 전체 재백필 필요(`scripts/embed_corpus.py`).

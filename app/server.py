@@ -148,8 +148,8 @@ def _source_items(refs: dict) -> list:
         cur = con.cursor()
         for pid in order:
             src, sep, sid_ = pid.partition(":")
-            if not sep:  # 접두 없는 구형 id — 기본 소스로 해석
-                src, sid_ = config.DOC_ID_DEFAULT_SOURCE, pid
+            if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
+                continue
             cur.execute("""SELECT title, url FROM corpus_docs
                            WHERE source_name = :1 AND src_id = :2""", [src, sid_])
             row = cur.fetchone()
@@ -175,8 +175,8 @@ def doc_view(pid: str, request: Request):
     cur = con.cursor()
     try:
         src, sep, sid_ = pid.partition(":")
-        if not sep:  # 접두 없는 구형 id — 기본 소스로 해석
-            src, sid_ = config.DOC_ID_DEFAULT_SOURCE, pid
+        if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
+            raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
         cur.execute("""SELECT title, body, kind, url FROM corpus_docs
                        WHERE source_name = :1 AND src_id = :2""", [src, sid_])
         row = cur.fetchone()

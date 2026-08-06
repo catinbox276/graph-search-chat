@@ -100,8 +100,6 @@ LLM_TEMPERATURE = _getf("LLM_TEMPERATURE", 0.0)
 # 조회·등록·야간 적재 전부 차단된다.
 SOURCE_TABLE_ALLOWLIST = frozenset(
     t.strip().upper() for t in _get("SOURCE_TABLE_ALLOWLIST", "").split(",") if t.strip())
-# 소스 접두가 없는 구형 문서 id("kin-481")를 해석할 기본 소스명 (코드 하드코딩 대신 설정)
-DOC_ID_DEFAULT_SOURCE = _get("DOC_ID_DEFAULT_SOURCE", "blog_posts")
 
 # --- 하이브리드 검색 (tools/blog_search.py) ---
 RRF_K = _geti("RRF_K", 60)                        # RRF 융합 상수
