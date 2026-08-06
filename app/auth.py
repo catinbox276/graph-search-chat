@@ -90,8 +90,10 @@ def require_user(request: Request) -> dict | None:
 
 
 def is_admin(request: Request) -> bool:
-    if not active():  # AUTH_MODE=none — 로컬 개발, 인증 없음 = 관리자 허용
-        return True
+    if not active():  # AUTH_MODE=none — 로컬 개발 한정, 루프백 접속만 관리자 허용
+        # fail-open 방지: 설정 누락 배포에서 원격이 관리 기능을 열 수 없게
+        client = request.client.host if request.client else ""
+        return client in ("127.0.0.1", "::1")
     u = current_user(request)
     return bool(u and config.OIDC_ADMIN_ROLE in u.get("roles", []))
 
