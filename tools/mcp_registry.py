@@ -40,12 +40,20 @@ def ensure(cur):
         # (구 DataHub stdio 시드는 폐기 — 사내는 REST 어댑터로 연동)
     else:
         _migrate_rest_transport(cur)
-    # .env 기본 MCP 시드 — 없을 때만 삽입 (관리 페이지에서의 수정·비활성은 보존)
+    # 구버전 이미지가 시드했던 DataHub stdio 행 자동 정리 (원형 그대로일 때만)
+    cur.execute("""DELETE FROM mcp_registry
+                   WHERE name = 'datahub' AND transport = 'stdio'
+                   AND NVL(command, ' ') = 'mcp-server-datahub'""")
+    # .env 기본 도구 서버 시드 — 없을 때만 삽입 (관리 페이지에서의 수정·비활성은 보존)
     if config.MCP_DEFAULT_URL:
+        tr = config.MCP_DEFAULT_TRANSPORT
+        if tr not in ("streamable_http", "sse", "rest"):
+            tr = "streamable_http"
         cur.execute("""MERGE INTO mcp_registry m USING dual ON (m.name = :n)
                        WHEN NOT MATCHED THEN INSERT (name, transport, url)
-                       VALUES (:n, 'streamable_http', :u)""",
-                    {"n": config.MCP_DEFAULT_NAME, "u": config.MCP_DEFAULT_URL})
+                       VALUES (:n, :t, :u)""",
+                    {"n": config.MCP_DEFAULT_NAME, "t": tr,
+                     "u": config.MCP_DEFAULT_URL})
 
 
 def _migrate_rest_transport(cur):

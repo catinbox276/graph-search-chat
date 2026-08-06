@@ -77,6 +77,8 @@ DATAHUB_GMS_URL = _get("DATAHUB_GMS_URL", "http://localhost:8080")
 # 사내 HTTP MCP를 배포 env만으로 등록할 때 사용. 빈값=시드 없음.
 MCP_DEFAULT_NAME = _get("MCP_DEFAULT_NAME", "mcp")
 MCP_DEFAULT_URL = _get("MCP_DEFAULT_URL", "")
+# streamable_http(표준 MCP) | rest(사내 GET /tools + POST /call) | sse
+MCP_DEFAULT_TRANSPORT = _get("MCP_DEFAULT_TRANSPORT", "streamable_http").strip().lower()
 
 # --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
 # none    = 인증 없음(로컬 개발 기본)
