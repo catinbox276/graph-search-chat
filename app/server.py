@@ -150,8 +150,11 @@ def _source_items(refs: dict) -> list:
             src, sep, sid_ = pid.partition(":")
             if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
                 continue
-            cur.execute("""SELECT title, url FROM corpus_docs
-                           WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+            cur.execute("""SELECT d.title,
+                                  CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
+                           FROM corpus_docs d
+                           JOIN source_registry r ON r.source_name = d.source_name
+                           WHERE d.source_name = :1 AND d.src_id = :2""", [src, sid_])
             row = cur.fetchone()
             if row:
                 # 원천 테이블 값이라 신뢰 불가 — http(s) 외 스킴은 링크로 내보내지 않음 (XSS)
@@ -177,8 +180,11 @@ def doc_view(pid: str, request: Request):
         src, sep, sid_ = pid.partition(":")
         if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
             raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
-        cur.execute("""SELECT title, body, kind, url FROM corpus_docs
-                       WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+        cur.execute("""SELECT d.title, d.body, d.kind,
+                              CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
+                       FROM corpus_docs d
+                       JOIN source_registry r ON r.source_name = d.source_name
+                       WHERE d.source_name = :1 AND d.src_id = :2""", [src, sid_])
         row = cur.fetchone()
         if row is None:
             raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
@@ -507,6 +513,7 @@ class SourceIn(BaseModel):
     content_kind: str = ""  # 문제해결/가이드 등 — 프롬프트 힌트
     domain: str = ""     # 그래프 구조화 도메인 — 지정 시 doc_pipeline이 LLM 판정·구조화 (빈값=검색만)
     enabled: bool = True
+    url_enabled: bool = True  # N이면 검색·출처·문서 뷰에서 원본 링크 숨김 (즉시 반영)
 
 
 @app.get("/admin/sources")
@@ -584,7 +591,7 @@ def admin_source_add(inp: SourceIn, request: Request,
     source_registry.upsert(cur, inp.source_name.strip(), inp.table_name.strip(),
                            inp.id_column.strip(), inp.ts_column.strip(),
                            inp.field_map, inp.content_kind.strip(), inp.enabled,
-                           domain=domain)
+                           domain=domain, url_enabled=inp.url_enabled)
     con.commit()
     con.close()
     return {"ok": True, "source_name": inp.source_name.strip(),

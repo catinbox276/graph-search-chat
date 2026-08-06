@@ -124,8 +124,12 @@ def search_blog(query: str, limit: int = 5) -> str:
                    else "L" if pid in lex else "S")
             src, _, sid = pid.partition(":")
             cur.execute(
-                """SELECT title, kind, url, dbms_lob.substr(body, 200, 1)
-                   FROM corpus_docs WHERE source_name = :1 AND src_id = :2""",
+                """SELECT d.title, d.kind,
+                          CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END,
+                          dbms_lob.substr(d.body, 200, 1)
+                   FROM corpus_docs d
+                   JOIN source_registry r ON r.source_name = d.source_name
+                   WHERE d.source_name = :1 AND d.src_id = :2""",
                 [src, sid])
             t, kind, url, snip = cur.fetchone()
             if pid in best_chunk:  # 시맨틱 매칭 — 실제로 맞은 청크를 스니펫으로
@@ -147,8 +151,11 @@ def read_blog_post(post_id: str) -> str:
         return f"글을 찾을 수 없습니다: {post_id} (문서 id 형식: 소스명:원천id)"
     with _pool.acquire() as con:
         cur = con.cursor()
-        cur.execute("""SELECT title, body, kind, url FROM corpus_docs
-                       WHERE source_name = :1 AND src_id = :2""", [src, sid])
+        cur.execute("""SELECT d.title, d.body, d.kind,
+                              CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
+                       FROM corpus_docs d
+                       JOIN source_registry r ON r.source_name = d.source_name
+                       WHERE d.source_name = :1 AND d.src_id = :2""", [src, sid])
         row = cur.fetchone()
         if not row:
             return f"글을 찾을 수 없습니다: {post_id}"

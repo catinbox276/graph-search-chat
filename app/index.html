@@ -221,6 +221,7 @@
     <select id="sdomain" title="지정하면 야간 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프화 (기준 미달은 제외). 빈값=검색 전용">
       <option value="">그래프 도메인 (없음=검색만)</option></select>
     <label><input type="checkbox" id="senabled" checked>사용</label>
+    <label title="끄면 이 소스 문서의 원본 링크가 검색 결과·출처·문서 뷰에서 숨겨집니다 (본문 열람은 그대로) — 저장 즉시 반영"><input type="checkbox" id="surl" checked>원본 링크</label>
     <span style="flex-basis:100%;font-size:.75rem;color:var(--mut)">역할 매핑 — 본문(body) 또는 지문(question)+답(answer) 중 최소 하나:</span>
     <select id="r_title"><option value="">title 컬럼…</option></select>
     <select id="r_body"><option value="">body 컬럼…</option></select>
@@ -507,6 +508,7 @@ async function loadSources(selName) {
       $("sname").value = s.source_name; $("skind").value = s.content_kind;
       $("sdomain").value = s.domain || "";
       $("senabled").checked = s.enabled;
+      $("surl").checked = s.url_enabled !== false;
       if ($("stable").value !== s.table_name || $("sidc").options.length <= 1) {
         $("stable").value = s.table_name;
         await loadCols(s.table_name);  // 같은 테이블이면 건드리지 않음 — 깜빡임 방지
@@ -717,7 +719,7 @@ $("sform").onsubmit = async (e) => {
                           id_column: $("sidc").value, ts_column: $("stsc").value,
                           field_map: fmap, content_kind: $("skind").value.trim(),
                           domain: $("sdomain").value,
-                          enabled: $("senabled").checked}),
+                          enabled: $("senabled").checked, url_enabled: $("surl").checked}),
   });
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;

@@ -60,6 +60,11 @@ def ensure(cur):
                    WHERE table_name = 'SOURCE_REGISTRY' AND column_name = 'DOMAIN'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE source_registry ADD (domain VARCHAR2(100))")
+    # 원본 링크 노출 스위치 (N이면 검색·출처·문서 뷰에서 url 숨김 — 즉시 반영)
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SOURCE_REGISTRY' AND column_name = 'URL_ENABLED'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE source_registry ADD (url_enabled CHAR(1) DEFAULT 'Y')")
     _ensure_domain_fk(cur)
 
 
@@ -149,30 +154,33 @@ def assemble_doc(row: dict) -> tuple:
 def list_sources(cur) -> list:
     ensure(cur)
     cur.execute("""SELECT source_name, table_name, id_column, ts_column, field_map,
-                          content_kind, domain, enabled, last_ingest_ts
+                          content_kind, domain, enabled, last_ingest_ts,
+                          NVL(url_enabled, 'Y')
                    FROM source_registry ORDER BY source_name""")
     return [{"source_name": r[0], "table_name": r[1], "id_column": r[2],
              "ts_column": r[3] or "", "field_map": json.loads(r[4]),
              "content_kind": r[5] or "", "domain": r[6] or "",
              "enabled": r[7] == "Y",
-             "last_ingest_ts": r[8].isoformat() if r[8] else None}
+             "last_ingest_ts": r[8].isoformat() if r[8] else None,
+             "url_enabled": r[9] == "Y"}
             for r in cur.fetchall()]
 
 
 def upsert(cur, source_name: str, table_name: str, id_column: str, ts_column: str,
-           field_map: dict, content_kind: str, enabled: bool, domain: str = ""):
+           field_map: dict, content_kind: str, enabled: bool, domain: str = "",
+           url_enabled: bool = True):
     ensure(cur)
     cur.execute("""MERGE INTO source_registry s USING dual ON (s.source_name = :n)
                    WHEN MATCHED THEN UPDATE SET table_name = :t, id_column = :i,
                         ts_column = :ts, field_map = :f, content_kind = :k,
-                        domain = :dm, enabled = :e
+                        domain = :dm, enabled = :e, url_enabled = :ue
                    WHEN NOT MATCHED THEN INSERT
                         (source_name, table_name, id_column, ts_column, field_map,
-                         content_kind, domain, enabled)
-                   VALUES (:n, :t, :i, :ts, :f, :k, :dm, :e)""",
+                         content_kind, domain, enabled, url_enabled)
+                   VALUES (:n, :t, :i, :ts, :f, :k, :dm, :e, :ue)""",
                 {"n": source_name, "t": table_name.upper(), "i": id_column.upper(),
                  "ts": ts_column.upper() if ts_column else None,
                  "f": json.dumps({k: v.upper() for k, v in field_map.items()},
                                  ensure_ascii=False),
                  "k": content_kind or None, "dm": domain or None,
-                 "e": "Y" if enabled else "N"})
+                 "e": "Y" if enabled else "N", "ue": "Y" if url_enabled else "N"})
