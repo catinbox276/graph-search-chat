@@ -17,6 +17,17 @@
   .steps details { margin: 3px 0; }
   .steps summary { cursor: pointer; opacity: .85; }
   .steps summary.ok { color: var(--ok); }
+  /* 에이전트 궤적 타임라인 — 판단(🧠) → 행동(도구) → 관찰(요약) */
+  .tl-think { color: var(--mut); font-size: .76rem; margin: 6px 0 1px;
+              font-style: italic; cursor: default; }
+  .tl-step summary { display: flex; gap: 8px; align-items: baseline; list-style: none; }
+  .tl-step summary::before { content: "▸"; opacity: .5; }
+  .tl-step[open] summary::before { content: "▾"; }
+  .tl-obs { color: var(--mut); font-size: .75rem; font-weight: 400;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-step summary.ok .tl-obs { color: inherit; opacity: .9; }
+  .tl-time { margin-left: auto; font-family: ui-monospace, monospace;
+             font-size: .7rem; opacity: .55; flex-shrink: 0; }
   .steps .detail-body { font-family: ui-monospace, monospace; font-size: .75rem;
                         white-space: pre-wrap; background: #0001; border-radius: 6px;
                         padding: 6px 8px; margin: 4px 0 6px; max-height: 260px; overflow-y: auto; }
@@ -338,7 +349,22 @@ async function openSession(id) {
   sid = id; log.innerHTML = ""; hello.style.display = "none";
   j.turns.forEach(t => {
     addUser(t.question);
-    const {body} = addBot();
+    const {steps, body} = addBot();
+    // 저장된 도구 호출 기록으로 궤적 재생 (응답 원문은 저장 안 하므로 호출만)
+    (t.tool_calls || []).forEach(c => {
+      const det = document.createElement("details");
+      det.className = "tl-step";
+      const sum = document.createElement("summary");
+      const lbl = document.createElement("span");
+      lbl.textContent = `${TOOL_ICON[c.name] || "⚙"} ${TOOL_LABEL[c.name] || c.name}`;
+      sum.appendChild(lbl);
+      sum.classList.add("ok");
+      const bd = document.createElement("div");
+      bd.className = "detail-body";
+      bd.textContent = "📤 요청\n" + JSON.stringify(c.args || {}, null, 1);
+      det.append(sum, bd);
+      steps.appendChild(det);
+    });
     body.classList.remove("streaming");
     body.innerHTML = marked.parse(t.answer || "(빈 답변)");
     // 저장된 답변의 [문서id] 인용 토큰을 번호 각주로 (footer 데이터는 저장 안 하므로 번호만)
@@ -712,6 +738,33 @@ const TOOL_LABEL = {
   search: "DataHub 테이블 검색", get_entities: "테이블 스키마 조회",
   list_schema_fields: "컬럼 목록 조회", get_lineage: "리니지 추적",
 };
+const TOOL_ICON = {
+  suggest_paths: "🧭", search_blog: "🔍", read_blog_post: "📖",
+  search: "🗄", get_entities: "🗄", list_schema_fields: "🗄",
+  get_lineage: "🗄", get_dataset_queries: "🗄",
+};
+// 도구 응답을 타임라인용 한 줄 관찰 요약으로 (원문은 펼치면 그대로)
+function obsSummary(name, r) {
+  r = (r || "").trim();
+  if (!r) return "빈 응답";
+  if (r.startsWith("검색 결과가 없습니다")) return "0건";
+  if (name === "suggest_paths") {
+    if (r.includes("해결 이력이 그래프에 없")) return "유사 이력 없음 — 자유 접근";
+    const v = (r.match(/✅/g) || []).length, dc = (r.match(/📄/g) || []).length,
+          w = (r.match(/⚠/g) || []).length;
+    return [v && `검증 경로 ${v}`, dc && `문서 근거 ${dc}`, w && `실패 이력 ${w}`]
+      .filter(Boolean).join(" · ") || "결과 있음";
+  }
+  if (name === "search_blog")
+    return `히트 ${(r.match(/(^|\n)\[[^\]\n]+\]/g) || []).length}건`;
+  if (name === "read_blog_post") {
+    if (r.startsWith("글을 찾을 수 없")) return "문서 없음";
+    const t = (r.split("\n")[0] || "").replace(/^#\s*/, "");
+    return `"${t.length > 34 ? t.slice(0, 34) + "…" : t}" 열람`;
+  }
+  const line = r.replace(/\s+/g, " ");
+  return line.length > 44 ? line.slice(0, 44) + "…" : line;
+}
 function addUser(text) {
   const d = document.createElement("div");
   d.className = "msg user"; d.textContent = text;
@@ -745,17 +798,32 @@ f.onsubmit = async (e) => {
     mdRender(buf);
     d.scrollIntoView(false);
   };
-  const addStep = (label, reasoning, args) => {
+  const addStep = (name, reasoning, args) => {
+    const think = (reasoning || "").trim();
+    if (think) {  // 도구 선택 직전의 판단 — 타임라인 노드로
+      const first = think.split("\n").map(l => l.trim()).find(Boolean) || "";
+      const th = document.createElement("div");
+      th.className = "tl-think";
+      th.textContent = "🧠 " + (first.length > 88 ? first.slice(0, 88) + "…" : first);
+      th.title = think.length > 800 ? think.slice(0, 800) + "…" : think;
+      steps.appendChild(th);
+    }
     const det = document.createElement("details");
+    det.className = "tl-step";
     const sum = document.createElement("summary");
-    sum.textContent = "⚙ " + label;
+    const lbl = document.createElement("span");
+    lbl.textContent = `${TOOL_ICON[name] || "⚙"} ${TOOL_LABEL[name] || name}`;
+    const obs = document.createElement("span");
+    obs.className = "tl-obs"; obs.textContent = "⏳ 실행 중…";
+    const tm = document.createElement("span");
+    tm.className = "tl-time";
+    sum.append(lbl, obs, tm);
     const bd = document.createElement("div");
     bd.className = "detail-body";
-    const think = (reasoning || "").trim();
     bd.textContent = (think ? "🧠 판단\n" + think + "\n\n" : "") + "📤 요청\n" + args;
     det.append(sum, bd);
     steps.appendChild(det);
-    pending.push({bd, sum});
+    pending.push({bd, sum, obs, tm, name, t0: Date.now()});
   };
   try {
     const r = await fetch("/chat/stream", {
@@ -776,7 +844,7 @@ f.onsubmit = async (e) => {
         if (ev.type === "session") sid = ev.session_id;
         else if (ev.type === "token") { buf += ev.text; render(false); }
         else if (ev.type === "tool") {
-          addStep(TOOL_LABEL[ev.name] || ev.name, buf, JSON.stringify(ev.args, null, 1));
+          addStep(ev.name, buf, JSON.stringify(ev.args, null, 1));
           buf = ""; body.textContent = "⏳ 도구 실행 중…";
           d.scrollIntoView(false);
         }
@@ -784,6 +852,8 @@ f.onsubmit = async (e) => {
           const p = pending.shift();
           if (p) {
             p.bd.textContent += "\n\n📥 응답 (MCP/함수)\n" + (ev.result || "(빈 응답)");
+            p.obs.textContent = "→ " + obsSummary(p.name, ev.result);
+            p.tm.textContent = ((Date.now() - p.t0) / 1000).toFixed(1) + "s";
             p.sum.classList.add("ok");  /* 완료된 단계 = 초록 (그래프의 '검증' 색) */
           }
           buf = ""; body.textContent = "✍️ 결과 검토 중…";
@@ -824,7 +894,8 @@ f.onsubmit = async (e) => {
           }
           if (steps.children.length) {
             const el = document.createElement("div");
-            el.className = "elapsed"; el.textContent = `⏱ ${ev.elapsed_sec}s`;
+            el.className = "elapsed";
+            el.textContent = `✍ 답변 완료${srcs?.length ? ` · 출처 ${srcs.length}건` : ""} · ⏱ ${ev.elapsed_sec}s`;
             steps.appendChild(el);
           }
           d.scrollIntoView(false);

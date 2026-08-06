@@ -322,17 +322,25 @@ def get_session(sid: str, request: Request):
     uid = (u or {}).get("user")
     con = db()
     cur = con.cursor()
-    cur.execute("""SELECT turn, question, answer, user_id FROM sessions
+    cur.execute("""SELECT turn, question, answer, user_id, tool_calls FROM sessions
                    WHERE id = :1 ORDER BY turn""", [sid])
-    rows = [(t, q.read() if q else "", a.read() if a else "", owner)
-            for t, q, a, owner in cur.fetchall()]
+    rows = [(t, q.read() if q else "", a.read() if a else "", owner,
+             c.read() if c else "")
+            for t, q, a, owner, c in cur.fetchall()]
     con.close()
     if not rows:
         raise HTTPException(404, "세션이 없습니다")
     if rows[0][3] != uid:
         raise HTTPException(403, "본인 세션만 볼 수 있습니다")
+
+    def calls(raw):
+        try:
+            return json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            return []
     return {"session_id": sid,
-            "turns": [{"turn": t, "question": q, "answer": a} for t, q, a, _ in rows]}
+            "turns": [{"turn": t, "question": q, "answer": a,
+                       "tool_calls": calls(c)} for t, q, a, _, c in rows]}
 
 
 @app.get("/static/shell.css")
