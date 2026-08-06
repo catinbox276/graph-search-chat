@@ -169,6 +169,38 @@ def _source_items(refs: dict) -> list:
     return items
 
 
+@app.get("/doc/{pid}")
+def doc_view(pid: str, request: Request):
+    """참고 문서 사내 뷰 — 에이전트가 실제로 읽은 corpus 본문을 그대로 보여준다.
+    원문 URL로 바로 보내지 않고 근거를 먼저 확인할 수 있게 (footer·각주 클릭)."""
+    auth.require_user(request)
+    con = db()
+    cur = con.cursor()
+    try:
+        src, sep, sid_ = pid.partition(":")
+        row, source, kind = None, src, ""
+        if sep:
+            cur.execute("""SELECT title, body, kind, url FROM corpus_docs
+                           WHERE source_name = :1 AND src_id = :2""", [src, sid_])
+            row = cur.fetchone()
+            kind = row[2] if row else ""
+        if row is None:
+            cur.execute("SELECT title, body, source, url FROM blog_posts WHERE id = :1",
+                        [pid])
+            row = cur.fetchone()
+            source = row[2] if row else ""
+        if row is None:
+            raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
+        body = row[1].read() if hasattr(row[1], "read") else (row[1] or "")
+        url = (row[3] or "").strip()
+        if not url.lower().startswith(("http://", "https://")):  # XSS — http(s)만
+            url = ""
+        return {"id": pid, "title": row[0], "body": body[:20000],
+                "kind": kind, "source": source, "url": url}
+    finally:
+        con.close()
+
+
 @app.post("/chat/stream")
 async def chat_stream(inp: ChatIn, request: Request):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""

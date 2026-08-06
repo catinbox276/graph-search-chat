@@ -94,9 +94,23 @@
   #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
   .srcfoot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
              font-size: .78rem; color: var(--mut); }
-  .srcfoot a { color: inherit; text-decoration: underline dotted; }
   .srcfoot div { margin: 2px 0; }
-  sup.cite { font-size: .7em; color: var(--acc, #2563eb); cursor: help; }
+  .srcfoot .doclink { cursor: pointer; text-decoration: underline dotted; }
+  .srcfoot .doclink:hover { color: var(--path); }
+  sup.cite { font-size: .7em; color: var(--acc, #2563eb); cursor: pointer; }
+  /* 참고 문서 뷰 — 에이전트가 실제로 읽은 본문을 원문 이동 전에 확인 */
+  dialog#docDlg { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+                  width: min(760px, 94vw); }
+  dialog#docDlg::backdrop { background: #0006; }
+  #docDlg h3 { margin: 0 0 4px; font-size: .98rem; line-height: 1.4; }
+  #docDlg .dvmeta { color: var(--mut); font-size: .74rem; margin: 0 0 8px; }
+  #dvBody { white-space: pre-wrap; max-height: 55vh; overflow-y: auto; font-size: .84rem;
+            line-height: 1.6; background: #0001; border-radius: 8px; padding: 10px 12px; }
+  #docDlg .dvact { display: flex; gap: 8px; margin-top: 12px; position: static; padding: 0; }
+  #docDlg .dvact a, #docDlg .dvact button { padding: 7px 12px; border-radius: 8px;
+            font-size: .85rem; cursor: pointer; text-decoration: none; }
+  #docDlg .dvact a { background: var(--path); color: #fff; }
+  #docDlg .dvact button { background: #fff; color: var(--ink); border: 1px solid var(--line); }
   #psform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap;
             align-items: center; margin-top: 6px; }
   #psform input, #psform select { padding: 7px 10px; border-radius: 8px;
@@ -237,6 +251,16 @@
   <p class="hint err" id="serr"></p>
 </dialog>
 
+<dialog id="docDlg">
+  <h3 id="dvTitle">문서</h3>
+  <p class="dvmeta" id="dvMeta"></p>
+  <div id="dvBody"></div>
+  <div class="dvact">
+    <a id="dvUrl" target="_blank" rel="noopener noreferrer" style="display:none">원문 열기 ↗</a>
+    <button type="button" id="dvClose">닫기</button>
+  </div>
+</dialog>
+
 <main>
   <div id="hello">
     <h2>무엇을 도와드릴까요?</h2>
@@ -320,11 +344,37 @@ async function openSession(id) {
     body.innerHTML = body.innerHTML.replace(/\[([\w-]+:[\w.-]+)\]/g, (_m, pid) => {
       let n = seen.indexOf(pid) + 1;
       if (!n) { seen.push(pid); n = seen.length; }
-      return `<sup class="cite" title="${pid}">[${n}]</sup>`;
+      return `<sup class="cite" data-pid="${pid}" title="${pid}">[${n}]</sup>`;
     });
   });
   loadSessions(); q.focus();
 }
+
+// 참고 문서 사내 뷰 — 원문으로 보내기 전에 에이전트가 실제로 읽은 본문을 보여준다
+const docDlg = $("docDlg");
+$("dvClose").onclick = () => docDlg.close();
+async function openDoc(pid) {
+  $("dvTitle").textContent = "불러오는 중…";
+  $("dvMeta").textContent = pid;
+  $("dvBody").textContent = "";
+  $("dvUrl").style.display = "none";
+  docDlg.showModal();
+  const r = await fetch("/doc/" + encodeURIComponent(pid)).catch(() => null);
+  if (!r?.ok) { $("dvTitle").textContent = "문서를 불러올 수 없습니다"; return; }
+  const doc = await r.json();
+  $("dvTitle").textContent = doc.title || pid;
+  $("dvMeta").textContent = `${doc.id}${doc.kind ? " · " + doc.kind : ""}${doc.source ? " · 소스: " + doc.source : ""}`;
+  $("dvBody").textContent = doc.body || "(본문 없음)";
+  if (/^https?:\/\//i.test(doc.url || "")) {  // 서버도 거르지만 심층 방어
+    $("dvUrl").href = doc.url;
+    $("dvUrl").style.display = "inline-block";
+  }
+}
+// 답변 속 [n] 각주 클릭 → 해당 문서 뷰 (innerHTML 삽입이라 위임으로)
+document.getElementById("log").addEventListener("click", (e) => {
+  const s = e.target.closest("sup.cite[data-pid]");
+  if (s) openDoc(s.dataset.pid);
+});
 
 // SSO 로그인 사용자 표시 (AUTH_MODE=none이면 숨김 유지)
 fetch("/me").then(r => r.json()).then(m => {
@@ -748,23 +798,21 @@ f.onsubmit = async (e) => {
             const escAttr = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
             srcs.forEach((s, i) => {
               out = out.replaceAll(`[${s.id}]`,
-                `<sup class="cite" title="${escAttr(s.title || s.id)}">[${i + 1}]</sup>`);
+                `<sup class="cite" data-pid="${escAttr(s.id)}" title="${escAttr(s.title || s.id)}">[${i + 1}]</sup>`);
             });
             body.innerHTML = out;
             const foot = document.createElement("div");
             foot.className = "srcfoot";
-            foot.append("📎 참고 문서 ");
+            foot.append("📎 참고 문서 (클릭 = 에이전트가 읽은 본문 보기) ");
             srcs.forEach((s, i) => {
               const row = document.createElement("div");
               row.append(`[${i + 1}] ${s.kind === "열람" ? "📖 " : ""}`);
-              let el = document.createElement("span");
-              if (/^https?:\/\//i.test(s.url || "")) {  // 서버도 거르지만 심층 방어 (javascript: XSS)
-                el = document.createElement("a");
-                el.href = s.url; el.target = "_blank"; el.rel = "noopener noreferrer";
-              }
+              const el = document.createElement("span");
+              el.className = "doclink";
+              el.onclick = () => openDoc(s.id);
               const t = s.title || s.id;
               el.textContent = t.length > 60 ? t.slice(0, 60) + "…" : t;
-              el.title = t + "\n" + s.id + ` (${s.kind === "열람" ? "전문 열람" : s.kind})`;
+              el.title = t + "\n" + s.id + ` (${s.kind === "열람" ? "전문 열람" : s.kind}) — 클릭해서 본문 보기`;
               row.appendChild(el);
               foot.appendChild(row);
             });
