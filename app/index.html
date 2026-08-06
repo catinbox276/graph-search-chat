@@ -95,6 +95,8 @@
   .srcfoot { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line);
              font-size: .78rem; color: var(--mut); }
   .srcfoot a { color: inherit; text-decoration: underline dotted; }
+  .srcfoot div { margin: 2px 0; }
+  sup.cite { font-size: .7em; color: var(--acc, #2563eb); cursor: help; }
   #psform { display: flex; gap: 6px; position: static; padding: 0; flex-wrap: wrap;
             align-items: center; margin-top: 6px; }
   #psform input, #psform select { padding: 7px 10px; border-radius: 8px;
@@ -313,6 +315,13 @@ async function openSession(id) {
     const {body} = addBot();
     body.classList.remove("streaming");
     body.innerHTML = marked.parse(t.answer || "(빈 답변)");
+    // 저장된 답변의 [문서id] 인용 토큰을 번호 각주로 (footer 데이터는 저장 안 하므로 번호만)
+    const seen = [];
+    body.innerHTML = body.innerHTML.replace(/\[([\w-]+:[\w.-]+)\]/g, (_m, pid) => {
+      let n = seen.indexOf(pid) + 1;
+      if (!n) { seen.push(pid); n = seen.length; }
+      return `<sup class="cite" title="${pid}">[${n}]</sup>`;
+    });
   });
   loadSessions(); q.focus();
 }
@@ -730,20 +739,34 @@ f.onsubmit = async (e) => {
           body.classList.remove("streaming");
           mdRender(ev.text || "(빈 답변)");
           if (srcs?.length) {  // 결정적 footer — 이 턴에 실제 검색·열람된 문서 (서버 도구 기록 기반)
+            // 답변 속 [문서id] 인용 토큰 → [n] 번호 각주로 치환.
+            // 답변에 인용된 문서가 앞 번호를 받도록 정렬 (인용 안 된 문서는 뒤에)
+            const html = body.innerHTML;
+            srcs.sort((a, b) => html.includes(`[${a.id}]`) === html.includes(`[${b.id}]`)
+                                ? 0 : html.includes(`[${a.id}]`) ? -1 : 1);
+            let out = html;
+            const escAttr = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+            srcs.forEach((s, i) => {
+              out = out.replaceAll(`[${s.id}]`,
+                `<sup class="cite" title="${escAttr(s.title || s.id)}">[${i + 1}]</sup>`);
+            });
+            body.innerHTML = out;
             const foot = document.createElement("div");
             foot.className = "srcfoot";
-            foot.append("📎 참고 문서: ");
+            foot.append("📎 참고 문서 ");
             srcs.forEach((s, i) => {
-              if (i) foot.append(" · ");
+              const row = document.createElement("div");
+              row.append(`[${i + 1}] ${s.kind === "열람" ? "📖 " : ""}`);
               let el = document.createElement("span");
               if (/^https?:\/\//i.test(s.url || "")) {  // 서버도 거르지만 심층 방어 (javascript: XSS)
                 el = document.createElement("a");
                 el.href = s.url; el.target = "_blank"; el.rel = "noopener noreferrer";
               }
               const t = s.title || s.id;
-              el.textContent = (s.kind === "열람" ? "📖 " : "") + (t.length > 40 ? t.slice(0, 40) + "…" : t);
+              el.textContent = t.length > 60 ? t.slice(0, 60) + "…" : t;
               el.title = t + "\n" + s.id + ` (${s.kind === "열람" ? "전문 열람" : s.kind})`;
-              foot.appendChild(el);
+              row.appendChild(el);
+              foot.appendChild(row);
             });
             body.appendChild(foot);
           }
