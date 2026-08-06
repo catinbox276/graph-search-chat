@@ -400,6 +400,16 @@ def graph_page(request: Request):
                         headers={"Cache-Control": "no-store"})
 
 
+@app.get("/admin")
+def admin_page(request: Request):
+    """관리 콘솔 페이지 — 도메인·소스·처리 현황·전처리 설정 (모달에서 분리).
+    페이지는 로그인만 요구, 내용 API가 각자 관리자 권한을 검사한다."""
+    if (r := auth.page_guard(request)):
+        return r
+    return FileResponse(ROOT / "app" / "admin.html",
+                        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/reload")
 def reload_embeddings():
     """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요)."""

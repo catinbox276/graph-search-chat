@@ -72,7 +72,7 @@ flowchart LR
 | `tools/source_registry.py` `settings.py` | 원천 테이블 등록(역할 매핑)·조립 / 운영 설정 KV | 원천 테이블은 SELECT만 |
 | `app/server.py` | FastAPI: SSE 스트리밍, 세션 기록, 관리자 API(도메인·소스·설정·초기화·현황), 그래프 데이터 | HTML no-store (캐시 사고 방지) |
 | `app/auth.py` | SSO: header(전단 헤더 2개 소비) / keycloak(직접 OIDC) | 로그인 UI 없음 — integration.md 접점 1 |
-| `app/index.html` `graph.html` `shell.css` | 통합 UI 셸, 관리 대화상자(도메인·소스·전처리 설정·처리 현황 프로그래스), force-directed 그래프+패널(문서/대화 출처 분리 표기) | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
+| `app/index.html` `graph.html` `shell.css` | 통합 UI 셸, 관리 페이지 /admin (admin.html — 도메인·소스·전처리 설정·처리 현황 프로그래스), force-directed 그래프+패널(문서/대화 출처 분리 표기) | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
 | `poc/selfplay.py` `graph_pipeline.py` | 47세션 생성 / 게이트→4계층 추출→병합→가중치 | dedup 3단: ≥0.92+문자 가드 즉시 병합 / ≥0.70 LLM 후보 선택 / 신규 (캘리브레이션 실측 기반, 모델 교체 시 재캘리브레이션) |
 | `poc/doc_pipeline.py` | 도메인 지정 소스의 corpus_docs를 LLM 판정→같은 그래프에 병합, 미달은 excluded | 판정 동시(기본 16)·병합 직렬(정합성). 생각 끄기로 ~15,000건/h |
 | `poc/graph_maintenance.py` | 형제 통합·잎 흡수·시간 감쇠(패스3, 반감기+하한) — 멱등 | |
