@@ -735,11 +735,11 @@ f.onsubmit = async (e) => {
             foot.append("📎 참고 문서: ");
             srcs.forEach((s, i) => {
               if (i) foot.append(" · ");
-              let el;
-              if (s.url) {
+              let el = document.createElement("span");
+              if (/^https?:\/\//i.test(s.url || "")) {  // 서버도 거르지만 심층 방어 (javascript: XSS)
                 el = document.createElement("a");
-                el.href = s.url; el.target = "_blank"; el.rel = "noopener";
-              } else el = document.createElement("span");
+                el.href = s.url; el.target = "_blank"; el.rel = "noopener noreferrer";
+              }
               const t = s.title || s.id;
               el.textContent = (s.kind === "열람" ? "📖 " : "") + (t.length > 40 ? t.slice(0, 40) + "…" : t);
               el.title = t + "\n" + s.id + (s.kind === "열람" ? " (전문 열람)" : " (검색)");
