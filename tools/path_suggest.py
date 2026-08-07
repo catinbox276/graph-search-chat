@@ -92,7 +92,7 @@ def suggest_paths(problem: str) -> str:
                                WHERE e4.src = :1 AND n4.layer = 4""", [aid])
                 tools = ", ".join(t[0].replace("tool:", "") for t in cur.fetchall())
                 docs = f", 참고 문서 {dc}건" if dc else ""
-                # 근거 문서 id 노출 — 답변 인용·footer 수집·read_blog_post 열람이 가능해진다
+                # 근거 문서 id 노출 — 답변 인용·footer 수집·read_doc 열람이 가능해진다
                 ev_line = ""
                 if dc:
                     cur.execute("""SELECT ref FROM node_evidence
@@ -100,7 +100,7 @@ def suggest_paths(problem: str) -> str:
                                    FETCH FIRST 3 ROWS ONLY""", [aid])
                     pids = " ".join(f"[{r[0]}]" for r in cur.fetchall())
                     if pids:
-                        ev_line = f"\n     근거 문서 (read_blog_post로 열람 가능): {pids}"
+                        ev_line = f"\n     근거 문서 (read_doc로 열람 가능): {pids}"
                 if fc > sc:  # 실패 우세일 때만 경고 (성공이 우세하면 검증 경로)
                     out.append(f"  ⚠ 과거 실패 우세 접근 (성공 {sc}/실패 {fc}{docs}): {aname}"
                                f"\n     실패 이유: {reason}"

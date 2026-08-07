@@ -268,12 +268,14 @@ document.querySelectorAll(".chips button").forEach(c =>
 
 const TOOL_LABEL = {
   suggest_paths: "과거 해결 경로 조회",
-  search_blog: "사내 블로그 검색", read_blog_post: "블로그 글 읽기",
+  search_docs: "사내 문서 검색", read_doc: "문서 읽기",
+  search_blog: "사내 문서 검색", read_blog_post: "문서 읽기",  // 구명 세션 재생 호환
   search: "DataHub 테이블 검색", get_entities: "테이블 스키마 조회",
   list_schema_fields: "컬럼 목록 조회", get_lineage: "리니지 추적",
 };
 const TOOL_ICON = {
-  suggest_paths: "🧭", search_blog: "🔍", read_blog_post: "📖",
+  suggest_paths: "🧭", search_docs: "🔍", read_doc: "📖",
+  search_blog: "🔍", read_blog_post: "📖",
   search: "🗄", get_entities: "🗄", list_schema_fields: "🗄",
   get_lineage: "🗄", get_dataset_queries: "🗄",
 };
@@ -289,9 +291,9 @@ function obsSummary(name, r) {
     return [v && `검증 경로 ${v}`, dc && `문서 근거 ${dc}`, w && `실패 이력 ${w}`]
       .filter(Boolean).join(" · ") || "결과 있음";
   }
-  if (name === "search_blog")
+  if (name.startsWith("search_"))
     return `히트 ${(r.match(/(^|\n)\[[^\]\n]+\]/g) || []).length}건`;
-  if (name === "read_blog_post") {
+  if (name === "read_doc" || name === "read_blog_post") {
     if (r.startsWith("글을 찾을 수 없")) return "문서 없음";
     const t = (r.split("\n")[0] || "").replace(/^#\s*/, "");
     return `"${t.length > 34 ? t.slice(0, 34) + "…" : t}" 열람`;

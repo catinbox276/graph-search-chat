@@ -233,7 +233,7 @@ async def chat_stream(inp: ChatIn, request: Request):
                     for m in msgs:
                         for c in getattr(m, "tool_calls", None) or []:
                             calls.append({"name": c["name"], "args": c["args"]})
-                            if c["name"] == "read_blog_post" and c["args"].get("post_id"):
+                            if c["name"] in ("read_doc", "read_blog_post") and c["args"].get("post_id"):
                                 refs[str(c["args"]["post_id"])] = "열람"
                             yield sse({"type": "tool", "name": c["name"],
                                        "args": c["args"]})
@@ -241,7 +241,7 @@ async def chat_stream(inp: ChatIn, request: Request):
                             result = m.content if isinstance(m.content, str) \
                                 else json.dumps(m.content, ensure_ascii=False)
                             tname = getattr(m, "name", "") or ""
-                            if tname == "search_blog":
+                            if tname.startswith("search_"):  # search_docs·search_{소스명} 공통
                                 for pid in re.findall(r"(?m)^\[([^\]\n]+)\]", result):
                                     refs.setdefault(pid, "검색")
                             elif tname == "suggest_paths":  # 경로 제안의 근거 문서

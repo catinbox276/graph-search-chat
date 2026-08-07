@@ -103,7 +103,7 @@ def _semantic(query: str, n: int, source: str = ""):
     return ordered, {p: best[p][1] for p in ordered}
 
 
-def search_blog(query: str, limit: int = 5) -> str:
+def search_docs(query: str, limit: int = 5) -> str:
     """사내 지식 코퍼스(등록된 모든 원천 통합)를 키워드+시맨틱 하이브리드로 검색한다.
 
     Args:
@@ -165,7 +165,7 @@ def source_search_tools() -> list:
             return _search(query, limit, source=src)
         f.__name__ = f"search_{src}"
         f.__doc__ = (f"'{src}' 소스({kind or '문서'})만 하이브리드 검색한다. "
-                     f"전체 통합 검색은 search_blog.\n\n"
+                     f"전체 통합 검색은 search_docs.\n\n"
                      "    Args:\n"
                      "        query: 검색어 (한국어/영어, 자연어 가능)\n"
                      "        limit: 최대 결과 수 (기본 5)\n")
@@ -174,7 +174,7 @@ def source_search_tools() -> list:
             for r in rows if r["enabled"]]
 
 
-def read_blog_post(post_id: str) -> str:
+def read_doc(post_id: str) -> str:
     """검색 결과의 문서 id(post_id)로 전문을 읽는다. '소스명:id' 형식."""
     src, sep, sid = post_id.partition(":")
     if not sep:
@@ -196,4 +196,4 @@ def read_blog_post(post_id: str) -> str:
 
 if __name__ == "__main__":
     load_matrix()
-    print(search_blog("파이썬 패키지 설치가 사내망에서 안 됨", 5))
+    print(search_docs("파이썬 패키지 설치가 사내망에서 안 됨", 5))

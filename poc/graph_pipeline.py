@@ -138,7 +138,7 @@ SEED_DOMAINS = (
     ("데이터 조회", None, 1,  # tools=None → DATAHUB_TOOLS에서 채움
      "목표는 데이터 탐색 의도(무엇을 찾고/조인하고/추적하려 했나)로, "
      "접근법은 도구+방법(테이블 탐색, 스키마 확인, 조인 키, 리니지)으로 일반화하라"),
-    ("사내 노하우", "search_blog,read_blog_post", 2,
+    ("사내 노하우", "search_docs,read_doc", 2,
      "목표는 해결하려던 문제 증상으로, 접근법은 검색으로 찾은 해법의 핵심 조치로 일반화하라"),
 )
 
@@ -396,7 +396,7 @@ def judge_by_signals(turns):
     seen = {}
     for t in turns:
         for c in t["calls"]:
-            if c.get("name") == "read_blog_post":
+            if c.get("name") in ("read_doc", "read_blog_post"):  # 구명 세션 호환
                 pid = json.dumps(c.get("args", {}), sort_keys=True, ensure_ascii=False)
                 seen.setdefault(pid, set()).add(t["turn"])
     if any(len(v) > 1 for v in seen.values()):

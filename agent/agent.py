@@ -19,7 +19,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
 from tools import config
-from tools.blog_search import read_blog_post, search_blog
+from tools.blog_search import read_doc, search_docs
 from tools.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
@@ -34,9 +34,9 @@ SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴�
 - suggest_paths가 실패 이력을 경고하면, 그 접근을 쓰기 전에 사용자에게
   과거 실패 사실과 이유를 먼저 알린다 (차단하지는 말 것).
 - 데이터 질문(테이블 찾기, 스키마, 조인, 리니지)은 DataHub 도구로 조회한다.
-- 사내 노하우/문제해결 질문(설치 오류, 설정, 사용법)은 search_blog로 기존 해결 글을
-  찾고, 필요하면 read_blog_post로 전문을 읽은 뒤 답한다. suggest_paths가 근거 문서
-  id를 제시하면 그 문서를 read_blog_post로 열람해 실제 내용 기반으로 답한다 —
+- 사내 노하우/문제해결 질문(설치 오류, 설정, 사용법)은 search_docs로 기존 해결 글을
+  찾고, 필요하면 read_doc로 전문을 읽은 뒤 답한다. suggest_paths가 근거 문서
+  id를 제시하면 그 문서를 read_doc로 열람해 실제 내용 기반으로 답한다 —
   경로 요약만 보고 세부 절차를 지어내지 말 것.
 - 검색·열람·경로 제안 결과의 문서를 근거로 쓴 문장 끝에는 그 문서 id를 대괄호
   그대로 표기한다. 예: "...메뉴에서 확인할 수 있습니다 [blog_posts:kin-1507]".
@@ -46,7 +46,7 @@ SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴�
 - 근거를 못 찾으면 그 사실을 밝히고 일반 지식으로 답한다.
 - 한국어로 답한다."""
 
-BUILTIN_TOOLS = (suggest_paths, search_blog, read_blog_post)
+BUILTIN_TOOLS = (suggest_paths, search_docs, read_doc)
 
 
 def load_agent_settings() -> dict:
