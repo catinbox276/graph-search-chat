@@ -81,15 +81,19 @@ MCP_DEFAULT_URL = _get("MCP_DEFAULT_URL", "")
 MCP_DEFAULT_TRANSPORT = _get("MCP_DEFAULT_TRANSPORT", "streamable_http").strip().lower()
 
 # --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
-# gateway = 사내 단일 모드 — 요청 헤더의 토큰을 GATEWAY_AUTH_URL 검증 API로 보내
-#           {result:{userId,…}}를 받는다. 앱이 아는 주소는 GATEWAY_AUTH_URL 하나.
+# proxy   = 사내 표준(타 서비스와 동일) — 기본은 게이트웨이가 붙여준 userId 헤더 신뢰
+#           (토큰 검증 X), 요청 쿼리 ?authMode=gateway 일 때만 토큰 검증 수행.
+# gateway = 모든 요청을 토큰 검증 (proxy의 상시 검증판)
 # none    = 인증 없음 (로컬 개발 스위치 — 관리자는 루프백 접속만)
 # keycloak= PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인 (사내 미사용)
 AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
-if AUTH_MODE not in ("none", "gateway", "keycloak"):
+if AUTH_MODE not in ("none", "proxy", "gateway", "keycloak"):
     # 폐기된 모드(header 등)를 조용한 인증 꺼짐으로 두지 않는다 — 기동 실패가 안전
     raise RuntimeError(f"AUTH_MODE={AUTH_MODE!r}는 지원하지 않습니다 "
-                       "(gateway | none | keycloak). 사내는 AUTH_MODE=gateway")
+                       "(proxy | gateway | none | keycloak). 사내는 AUTH_MODE=proxy")
+# proxy 모드: 게이트웨이가 백엔드로 전달하는 userId 헤더 이름 (사내 게이트웨이 문서 확인)
+PROXY_USER_HEADER = _get("PROXY_USER_HEADER", "X-DL-User-Id")
+PROXY_ROLE_HEADER = _get("PROXY_ROLE_HEADER", "")  # role 헤더가 있으면 지정 (빈값=미사용)
 GATEWAY_AUTH_URL = _get("GATEWAY_AUTH_URL", "")           # 검증 API (gateway 모드 필수)
 # 토큰이 실려올 수 있는 헤더 — 앞에서부터 순서대로 시도 (쉼표구분, 사내 스펙 기본)
 GATEWAY_TOKEN_HEADERS = [h.strip() for h in

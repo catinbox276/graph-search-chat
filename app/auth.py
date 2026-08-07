@@ -2,9 +2,12 @@
 
 AUTH_MODE:
 
-- gateway (사내 단일 모드): 요청 헤더(X-DL-Access-Token 또는 Authorization)의 토큰을
-  게이트웨이 검증 API(POST {accessToken})로 보내 {result:{userId,…}}를 받는다.
-  앱이 아는 주소는 GATEWAY_AUTH_URL 하나 — Keycloak 등 IdP는 게이트웨이 소관.
+- proxy (사내 표준 — 타 서비스와 동일): 기본은 게이트웨이가 붙여준 userId 헤더
+  (PROXY_USER_HEADER)를 신뢰 — 토큰 검증 없음. 요청 쿼리에 ?authMode=gateway가
+  있을 때만 토큰(X-DL-Access-Token/Authorization)을 검증 API로 확인한다.
+  전제: 앱에 게이트웨이 우회 직접 접근 불가 (헤더 신뢰의 근거는 네트워크).
+
+- gateway: 모든 요청을 토큰 검증 (proxy의 상시 검증판 — 리허설·강화 환경용).
 
 - keycloak (PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인): 앱이 직접 OIDC 코드 플로우.
   - 로그인 상태는 서명 쿠키(itsdangerous)로만 유지 — 서버 저장소가 없어
@@ -15,7 +18,7 @@ AUTH_MODE:
     대신 iss(발급자)·aud(수신자)·state(브라우저 바인딩 nonce)는 검증한다.
 
 관리자 = OIDC_ADMIN_ROLE 역할 보유 또는 GATEWAY_ADMIN_USERS 지정.
-사내 전환: AUTH_MODE=gateway + GATEWAY_AUTH_URL 하나면 끝.
+사내 전환: AUTH_MODE=proxy + PROXY_USER_HEADER (+검증용 GATEWAY_AUTH_URL).
 """
 import base64
 import json
@@ -36,8 +39,8 @@ router = APIRouter()
 
 
 def active() -> bool:
-    """인증이 켜져 있는가 (gateway / keycloak)."""
-    return config.AUTH_MODE in ("gateway", "keycloak")
+    """인증이 켜져 있는가 (proxy / gateway / keycloak)."""
+    return config.AUTH_MODE in ("proxy", "gateway", "keycloak")
 
 
 def enabled() -> bool:
@@ -55,18 +58,24 @@ def current_user(request: Request) -> dict | None:
     gateway: 요청 헤더의 토큰을 게이트웨이 검증 API로 확인
     keycloak: 서명 쿠키 (위조·만료면 None)
     """
+    if config.AUTH_MODE == "proxy":
+        # 요청 단위 스위치: ?authMode=gateway → 토큰 검증, 기본 → userId 헤더 신뢰
+        if request.query_params.get("authMode") == "gateway":
+            return _token_user(request)
+        uid = (request.headers.get(config.PROXY_USER_HEADER) or "").strip()
+        if not uid:
+            if config.AUTH_DEBUG:
+                import sys
+                print(f"[auth-debug] userId 헤더({config.PROXY_USER_HEADER}) 없음 — "
+                      f"수신 헤더: {sorted(request.headers.keys())}", file=sys.stderr)
+            return None
+        roles = []
+        if config.PROXY_ROLE_HEADER:
+            raw = request.headers.get(config.PROXY_ROLE_HEADER) or ""
+            roles = [r for r in re.split(r"[,;\s]+", raw) if r]
+        return {"user": uid, "roles": roles}
     if config.AUTH_MODE == "gateway":
-        for name in config.GATEWAY_TOKEN_HEADERS:  # X-DL-Access-Token 우선, Authorization 폴백
-            # 헤더 → 없으면 같은 이름의 쿠키 (게이트웨이가 쿠키로 넘기는 구성 대응)
-            raw = (request.headers.get(name) or request.cookies.get(name) or "").strip()
-            token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
-            if token:
-                return _gateway_verify(token)
-        if config.AUTH_DEBUG:  # 진단: 게이트웨이가 실제로 뭘 보내는지 (이름만, 값 미기록)
-            import sys
-            print(f"[auth-debug] 토큰 없음 — 수신 헤더: {sorted(request.headers.keys())} "
-                  f"/ 쿠키: {sorted(request.cookies.keys())}", file=sys.stderr)
-        return None
+        return _token_user(request)
     if config.AUTH_MODE == "keycloak":
         raw = request.cookies.get(COOKIE)
         if not raw:
@@ -75,6 +84,20 @@ def current_user(request: Request) -> dict | None:
             return _signer.loads(raw, max_age=config.SESSION_MAX_AGE)
         except (BadSignature, SignatureExpired):
             return None
+    return None
+
+
+def _token_user(request: Request) -> dict | None:
+    """토큰 검증 경로 — X-DL-Access-Token 우선, Authorization 폴백 (헤더→쿠키 순)."""
+    for name in config.GATEWAY_TOKEN_HEADERS:
+        raw = (request.headers.get(name) or request.cookies.get(name) or "").strip()
+        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+        if token:
+            return _gateway_verify(token)
+    if config.AUTH_DEBUG:  # 진단: 게이트웨이가 실제로 뭘 보내는지 (이름만, 값 미기록)
+        import sys
+        print(f"[auth-debug] 토큰 없음 — 수신 헤더: {sorted(request.headers.keys())} "
+              f"/ 쿠키: {sorted(request.cookies.keys())}", file=sys.stderr)
     return None
 
 
@@ -130,6 +153,9 @@ def _gateway_verify(token: str) -> dict | None:
 def _unauthorized() -> HTTPException:
     if enabled():
         return HTTPException(401, "로그인이 필요합니다 — /oidc/login")
+    if config.AUTH_MODE == "proxy":
+        return HTTPException(401, f"사용자 식별({config.PROXY_USER_HEADER} 헤더 또는 "
+                                  "?authMode=gateway 토큰)이 없습니다 — 게이트웨이를 경유해 접속하세요")
     return HTTPException(401, f"유효한 토큰({'/'.join(config.GATEWAY_TOKEN_HEADERS)})이 "
                               "없습니다 — 게이트웨이 SSO를 경유해 접속하세요")
 
