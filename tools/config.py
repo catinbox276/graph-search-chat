@@ -104,6 +104,8 @@ GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐�
 # 응답에 role이 없는 환경용 관리자 지정 폴백 — userId 쉼표 목록 (빈값=역할 기반만)
 GATEWAY_ADMIN_USERS = frozenset(
     u.strip() for u in _get("GATEWAY_ADMIN_USERS", "").split(",") if u.strip())
+# 1이면 토큰 미수신 시 수신 헤더/쿠키 이름을 로그에 출력 (연동 진단용 — 값은 미기록)
+AUTH_DEBUG = _geti("AUTH_DEBUG", 0)
 
 # --- REST 도구 서버 어댑터 (tools/rest_tools.py — mcp_registry transport='rest') ---
 REST_TOOL_TIMEOUT = _getf("REST_TOOL_TIMEOUT", 30.0)  # /tools·/call 호출 타임아웃(초)

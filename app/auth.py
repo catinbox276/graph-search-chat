@@ -56,11 +56,16 @@ def current_user(request: Request) -> dict | None:
     keycloak: 서명 쿠키 (위조·만료면 None)
     """
     if config.AUTH_MODE == "gateway":
-        for header in config.GATEWAY_TOKEN_HEADERS:  # X-DL-Access-Token 우선, Authorization 폴백
-            raw = (request.headers.get(header) or "").strip()
+        for name in config.GATEWAY_TOKEN_HEADERS:  # X-DL-Access-Token 우선, Authorization 폴백
+            # 헤더 → 없으면 같은 이름의 쿠키 (게이트웨이가 쿠키로 넘기는 구성 대응)
+            raw = (request.headers.get(name) or request.cookies.get(name) or "").strip()
             token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
             if token:
                 return _gateway_verify(token)
+        if config.AUTH_DEBUG:  # 진단: 게이트웨이가 실제로 뭘 보내는지 (이름만, 값 미기록)
+            import sys
+            print(f"[auth-debug] 토큰 없음 — 수신 헤더: {sorted(request.headers.keys())} "
+                  f"/ 쿠키: {sorted(request.cookies.keys())}", file=sys.stderr)
         return None
     if config.AUTH_MODE == "keycloak":
         raw = request.cookies.get(COOKIE)
