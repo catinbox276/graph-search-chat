@@ -195,6 +195,27 @@ def ensure_corpus(cur):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
     if cur.fetchone()[0]:
         return
+    # 렉서 프리퍼런스를 테이블보다 먼저 — 권한이 없으면 테이블도 안 만들어
+    # 어중간한 상태(테이블만 있고 Text 인덱스 없음)를 남기지 않는다
+    lexer = config.ORACLE_TEXT_LEXER
+    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
+        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
+    try:
+        cur.execute(f"""
+            BEGIN
+              BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
+              EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
+              END;
+            END;
+        """)
+    except Exception as e:
+        if "PLS-00201" in str(e) or "06550" in str(e):
+            raise RuntimeError(
+                "Oracle Text 권한이 없습니다 — 검색 인덱스 생성에 필요합니다.\n"
+                "DBA 권한 계정에서 1회 실행하세요:\n"
+                "  GRANT CTXAPP TO <앱 계정>;\n"
+                "  GRANT EXECUTE ON CTXSYS.CTX_DDL TO <앱 계정>;") from e
+        raise
     cur.execute("""CREATE TABLE corpus_docs (
         source_name VARCHAR2(100) NOT NULL,   -- source_registry.source_name
         src_id      VARCHAR2(200) NOT NULL,   -- 원천 테이블의 고유 id 값
@@ -213,17 +234,6 @@ def ensure_corpus(cur):
           REFERENCES source_registry(source_name)
     )""")
     cur.execute("CREATE INDEX corpus_docs_status_ix ON corpus_docs (graph_status)")
-    # 렉서 프리퍼런스: load_oracle.py가 만든 blog_lexer 재사용, 없으면 생성
-    lexer = config.ORACLE_TEXT_LEXER
-    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
-        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
-    cur.execute(f"""
-        BEGIN
-          BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
-          EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
-          END;
-        END;
-    """)
     cur.execute("""
         CREATE INDEX corpus_docs_body_idx ON corpus_docs(body)
         INDEXTYPE IS CTXSYS.CONTEXT
