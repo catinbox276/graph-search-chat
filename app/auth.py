@@ -97,6 +97,7 @@ def _gateway_verify(token: str) -> dict | None:
     try:
         r = httpx.post(config.GATEWAY_AUTH_URL,
                        json={config.GATEWAY_TOKEN_FIELD: token},
+                       headers={"Authorization": f"Bearer {token}"},  # 바디+헤더 동시 요구 (사내 스펙)
                        timeout=config.GATEWAY_TIMEOUT)
         if r.status_code != 200:
             print(f"[auth] 게이트웨이 검증 거부: HTTP {r.status_code}", file=sys.stderr)
