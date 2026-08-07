@@ -1,286 +1,180 @@
-"""SSO 인증 — 앱이 소비하는 건 userId·role 2개뿐 (docs/integration.md 접점 1).
+"""자체 계정 인증 — 외부 SSO 없이 앱이 사용자를 직접 관리한다.
 
-AUTH_MODE:
-
-- proxy (사내 표준 — 타 서비스와 동일): 기본은 게이트웨이가 붙여준 userId 헤더
-  (PROXY_USER_HEADER)를 신뢰 — 토큰 검증 없음. 요청 쿼리에 ?authMode=gateway가
-  있을 때만 토큰(X-DL-Access-Token/Authorization)을 검증 API로 확인한다.
-  전제: 앱에 게이트웨이 우회 직접 접근 불가 (헤더 신뢰의 근거는 네트워크).
-
-- gateway: 모든 요청을 토큰 검증 (proxy의 상시 검증판 — 리허설·강화 환경용).
-
-- keycloak (PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인): 앱이 직접 OIDC 코드 플로우.
-  - 로그인 상태는 서명 쿠키(itsdangerous)로만 유지 — 서버 저장소가 없어
-    복제본 공유·재시작 생존이 자동 (cluster 모드에서 세션 고정 불필요).
-  - 역할은 access_token의 realm_access.roles에서 읽는다.
-  - ID 토큰 서명 검증은 생략한다: 코드→토큰 교환이 client_secret으로 인증된
-    서버-서버 채널이라 OIDC Core 3.1.3.7이 TLS 채널 검증으로 갈음을 허용.
-    대신 iss(발급자)·aud(수신자)·state(브라우저 바인딩 nonce)는 검증한다.
-
-관리자 = OIDC_ADMIN_ROLE 역할 보유 또는 GATEWAY_ADMIN_USERS 지정.
-사내 전환: AUTH_MODE=proxy + PROXY_USER_HEADER (+검증용 GATEWAY_AUTH_URL).
+- 관리자: 환경 설정 계정 1개 (ADMIN_ID/ADMIN_PASSWORD — DB 아님, env 수정으로 복구 가능)
+- 일반 계정: /login에서 가입(id+pw만) → app_users에 미승인(approved='N')으로 저장
+  → 관리자가 관리 페이지에서 승인해야 로그인 가능
+- 세션: 서명 쿠키(itsdangerous) — 서버 저장소 없음 → 복제본 공유·재시작 생존 자동
+- 비밀번호: PBKDF2-HMAC-SHA256 (stdlib — 의존성 추가 없음)
 """
-import base64
-import json
+import hashlib
 import re
 import secrets
 import urllib.parse
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from pydantic import BaseModel
 
 from tools import config
 
 COOKIE = "gsc_auth"
-_signer = URLSafeTimedSerializer(config.SESSION_SECRET, salt="gsc-oidc")
+_signer = URLSafeTimedSerializer(config.SESSION_SECRET, salt="gsc-local-auth")
 router = APIRouter()
 
-
-def active() -> bool:
-    """인증이 켜져 있는가 (proxy / gateway / keycloak)."""
-    return config.AUTH_MODE in ("proxy", "gateway", "keycloak")
+_ID_RE = re.compile(r"^[A-Za-z0-9._-]{2,32}$")
+_PBKDF2_ITERS = 100_000
 
 
-def enabled() -> bool:
-    """keycloak(직접 OIDC) 모드인가 — /oidc/* 라우트는 이 모드에서만 동작."""
-    return config.AUTH_MODE == "keycloak"
+# ── 비밀번호 해시 (stdlib PBKDF2) ─────────────────────────────
+def _hash_pw(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), _PBKDF2_ITERS)
+    return f"pbkdf2${_PBKDF2_ITERS}${salt}${dk.hex()}"
 
 
-def _ep(base: str, name: str) -> str:
-    return f"{base}/realms/{config.KEYCLOAK_REALM}/protocol/openid-connect/{name}"
-
-
-def current_user(request: Request) -> dict | None:
-    """로그인 정보 {user, roles} — 모드별 출처에서 읽고, 없으면 None.
-
-    gateway: 요청 헤더의 토큰을 게이트웨이 검증 API로 확인
-    keycloak: 서명 쿠키 (위조·만료면 None)
-    """
-    if config.AUTH_MODE == "proxy":
-        # 요청 단위 스위치: ?authMode=gateway → 토큰 검증, 기본 → userId 헤더 신뢰
-        if request.query_params.get("authMode") == "gateway":
-            return _token_user(request)
-        uid = (request.headers.get(config.PROXY_USER_HEADER) or "").strip()
-        if not uid:
-            if config.AUTH_DEBUG:
-                import sys
-                print(f"[auth-debug] userId 헤더({config.PROXY_USER_HEADER}) 없음 — "
-                      f"수신 헤더: {sorted(request.headers.keys())}", file=sys.stderr)
-            return None
-        roles = []
-        if config.PROXY_ROLE_HEADER:
-            raw = request.headers.get(config.PROXY_ROLE_HEADER) or ""
-            roles = [r for r in re.split(r"[,;\s]+", raw) if r]
-        return {"user": uid, "roles": roles}
-    if config.AUTH_MODE == "gateway":
-        return _token_user(request)
-    if config.AUTH_MODE == "keycloak":
-        raw = request.cookies.get(COOKIE)
-        if not raw:
-            return None
-        try:
-            return _signer.loads(raw, max_age=config.SESSION_MAX_AGE)
-        except (BadSignature, SignatureExpired):
-            return None
-    return None
-
-
-def _token_user(request: Request) -> dict | None:
-    """토큰 검증 경로 — X-DL-Access-Token 우선, Authorization 폴백 (헤더→쿠키 순)."""
-    for name in config.GATEWAY_TOKEN_HEADERS:
-        raw = (request.headers.get(name) or request.cookies.get(name) or "").strip()
-        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
-        if token:
-            return _gateway_verify(token)
-    if config.AUTH_DEBUG:  # 진단: 게이트웨이가 실제로 뭘 보내는지 (이름만, 값 미기록)
-        import sys
-        print(f"[auth-debug] 토큰 없음 — 수신 헤더: {sorted(request.headers.keys())} "
-              f"/ 쿠키: {sorted(request.cookies.keys())}", file=sys.stderr)
-    return None
-
-
-_gw_cache = {}  # token -> (만료 epoch, user) — 매 요청 게이트웨이 왕복 방지
-
-
-def _dig(obj, path: str):
-    """점 표기 중첩 경로 조회 — 'result.userId' 같은 응답 스펙 대응."""
-    for k in path.split("."):
-        if not isinstance(obj, dict):
-            return None
-        obj = obj.get(k)
-    return obj
-
-
-def _gateway_verify(token: str) -> dict | None:
-    """게이트웨이 검증 API 호출 — 사내 스펙: POST {accessToken} → {result:{userId, role}}.
-    필드명은 GATEWAY_TOKEN/USER/ROLE_FIELD로 매핑. 실패 이유는 stderr에 남긴다(토큰 미기록)."""
-    import sys
-    import time
-    now = time.time()
-    hit = _gw_cache.get(token)
-    if hit and hit[0] > now:
-        return hit[1]
+def _verify_pw(password: str, stored: str) -> bool:
     try:
-        r = httpx.post(config.GATEWAY_AUTH_URL,
-                       json={config.GATEWAY_TOKEN_FIELD: token},
-                       headers={"Authorization": f"Bearer {token}"},  # 바디+헤더 동시 요구 (사내 스펙)
-                       timeout=config.GATEWAY_TIMEOUT)
-        if r.status_code != 200:
-            print(f"[auth] 게이트웨이 검증 거부: HTTP {r.status_code}", file=sys.stderr)
-            return None
-        j = r.json()
-        uid = str(_dig(j, config.GATEWAY_USER_FIELD) or "").strip()
-        if not uid:
-            print(f"[auth] 게이트웨이 응답에 사용자 필드({config.GATEWAY_USER_FIELD}) 없음"
-                  f" — 최상위 키: {list(j)[:5]}", file=sys.stderr)
-            return None
-        roles = _dig(j, config.GATEWAY_ROLE_FIELD) or []
-        if isinstance(roles, str):
-            roles = [x for x in re.split(r"[,;\s]+", roles) if x]
-        user = {"user": uid, "roles": [str(x) for x in roles]}
-    except Exception as e:
-        print(f"[auth] 게이트웨이 검증 호출 실패({config.GATEWAY_AUTH_URL}): "
-              f"{type(e).__name__}", file=sys.stderr)
-        return None  # 게이트웨이 장애 = 미인증 (fail-closed)
-    if len(_gw_cache) > 1000:  # 무한 성장 가드
-        _gw_cache.clear()
-    _gw_cache[token] = (now + config.GATEWAY_CACHE_TTL, user)
-    return user
+        _, iters, salt, hexhash = stored.split("$")
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(iters))
+        return secrets.compare_digest(dk.hex(), hexhash)
+    except Exception:
+        return False
 
 
-def _unauthorized() -> HTTPException:
-    if enabled():
-        return HTTPException(401, "로그인이 필요합니다 — /oidc/login")
-    if config.AUTH_MODE == "proxy":
-        return HTTPException(401, f"사용자 식별({config.PROXY_USER_HEADER} 헤더 또는 "
-                                  "?authMode=gateway 토큰)이 없습니다 — 게이트웨이를 경유해 접속하세요")
-    return HTTPException(401, f"유효한 토큰({'/'.join(config.GATEWAY_TOKEN_HEADERS)})이 "
-                              "없습니다 — 게이트웨이 SSO를 경유해 접속하세요")
+# ── 사용자 테이블 ─────────────────────────────────────────────
+def ensure_users(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'APP_USERS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE app_users (
+            user_id     VARCHAR2(64) PRIMARY KEY,
+            pw_hash     VARCHAR2(200) NOT NULL,
+            approved    CHAR(1) DEFAULT 'N',
+            is_admin    CHAR(1) DEFAULT 'N',   -- 관리자가 부여/해제 (2권한: 일반/관리자)
+            created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+            approved_at TIMESTAMP)""")
 
 
-def require_user(request: Request) -> dict | None:
-    """API 가드: 미식별 401. AUTH_MODE=none이면 통과(None)."""
-    if not active():
+def _db():
+    from app.server import db  # 서버 커넥션 풀 재사용 (지연 임포트 — 순환 방지)
+    return db()
+
+
+# ── 세션 (서명 토큰 — 쿠키 또는 Authorization Bearer 이중 전달) ──
+def current_user(request: Request) -> dict | None:
+    raw = request.cookies.get(COOKIE)
+    if not raw:  # API/스크립트용: 같은 토큰을 Bearer 헤더로도 수용
+        h = (request.headers.get("Authorization") or "").strip()
+        raw = h[7:].strip() if h.lower().startswith("bearer ") else ""
+    if not raw:
         return None
+    try:
+        return _signer.loads(raw, max_age=config.SESSION_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def issue_token(user: dict) -> str:
+    """서명 토큰 발급 — 쿠키·Bearer 공용 (무상태, SESSION_MAX_AGE 만료)."""
+    return _signer.dumps(user)
+
+
+def _set_login_cookie(resp, token: str):
+    resp.set_cookie(COOKIE, token, max_age=config.SESSION_MAX_AGE,
+                    httponly=True, samesite="lax")
+
+
+def require_user(request: Request) -> dict:
     u = current_user(request)
     if not u:
-        raise _unauthorized()
+        raise HTTPException(401, "로그인이 필요합니다 — /login")
     return u
 
 
 def is_admin(request: Request) -> bool:
-    if not active():  # AUTH_MODE=none — 로컬 개발 한정, 루프백 접속만 관리자 허용
-        # fail-open 방지: 설정 누락 배포에서 원격이 관리 기능을 열 수 없게
-        client = request.client.host if request.client else ""
-        return client in ("127.0.0.1", "::1")
     u = current_user(request)
-    if not u:
-        return False
-    if config.OIDC_ADMIN_ROLE in u.get("roles", []):
-        return True
-    # 게이트웨이 응답에 role이 없는 환경용 폴백 — userId 지정 목록
-    return u.get("user") in config.GATEWAY_ADMIN_USERS
+    return bool(u and u.get("admin"))
 
 
 def page_guard(request: Request) -> RedirectResponse | None:
-    """페이지 가드 — keycloak: 로그인으로 리다이렉트 / gateway: 401 (로그인은 게이트웨이 담당)."""
-    if not active() or current_user(request):
+    """페이지 가드 — 미로그인은 로그인 페이지로."""
+    if current_user(request):
         return None
-    if enabled():
-        nxt = urllib.parse.quote(request.url.path or "/")
-        return RedirectResponse(f"/oidc/login?next={nxt}")
-    raise _unauthorized()
+    nxt = urllib.parse.quote(request.url.path or "/")
+    return RedirectResponse(f"/login?next={nxt}")
 
 
-def _safe_next(n: str) -> str:
-    """로그인 후 이동 경로 — 사이트 내부 절대경로만 허용 (오픈 리다이렉트 차단).
-    '//host'·'/\\host'는 브라우저가 외부 주소로 해석하므로 함께 거른다."""
-    return n if n.startswith("/") and not n.startswith(("//", "/\\")) else "/"
+# ── 로그인 / 가입 / 로그아웃 ─────────────────────────────────
+class CredIn(BaseModel):
+    user_id: str
+    password: str
 
 
-def _jwt_payload(token: str) -> dict:
-    """JWT payload 디코드(서명 검증 없음 — 모듈 docstring의 근거 참조)."""
+@router.post("/auth/login")
+def login(inp: CredIn):
+    from fastapi.responses import JSONResponse
+    uid, pw = inp.user_id.strip(), inp.password
+    # 1) 관리자 (환경 설정 계정 — DB 조회 없음)
+    if secrets.compare_digest(uid, config.ADMIN_ID):
+        if not secrets.compare_digest(pw, config.ADMIN_PASSWORD):
+            raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다")
+        token = issue_token({"user": uid, "admin": True})
+        resp = JSONResponse({"ok": True, "user": uid, "admin": True, "token": token})
+        _set_login_cookie(resp, token)
+        return resp
+    # 2) 일반 계정 (가입 + 승인 필요)
+    con = _db()
     try:
-        seg = token.split(".")[1]
-        return json.loads(base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4)))
-    except Exception:
-        return {}
-
-
-@router.get("/oidc/login")
-def login(next: str = "/"):
-    if not enabled():
-        return RedirectResponse("/")
-    # state를 브라우저에 바인딩(로그인 CSRF 차단): nonce를 쿠키와 서명 state 양쪽에
-    # 넣고 콜백에서 일치를 요구 — 공격자가 만든 콜백 URL은 쿠키가 없어 거부된다.
-    nonce = secrets.token_urlsafe(16)
-    state = _signer.dumps({"next": _safe_next(next), "n": nonce})
-    q = urllib.parse.urlencode({
-        "client_id": config.OIDC_CLIENT_ID, "response_type": "code",
-        "scope": "openid",
-        "redirect_uri": f"{config.APP_BASE_URL}/oidc/callback", "state": state})
-    resp = RedirectResponse(f"{_ep(config.KEYCLOAK_PUBLIC_URL, 'auth')}?{q}")
-    resp.set_cookie("oidc_state", nonce, max_age=600, httponly=True, samesite="lax")
+        cur = con.cursor()
+        ensure_users(cur)
+        cur.execute("""SELECT pw_hash, approved, NVL(is_admin, 'N')
+                       FROM app_users WHERE user_id = :1""", [uid])
+        row = cur.fetchone()
+    finally:
+        con.close()
+    if not row or not _verify_pw(pw, row[0]):
+        raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다")
+    if row[1] != "Y":
+        raise HTTPException(403, "가입 승인 대기 중입니다 — 관리자에게 승인을 요청하세요")
+    admin = row[2] == "Y"  # 관리자가 부여한 권한 (재로그인 시 반영)
+    token = issue_token({"user": uid, "admin": admin})
+    resp = JSONResponse({"ok": True, "user": uid, "admin": admin, "token": token})
+    _set_login_cookie(resp, token)
     return resp
 
 
-@router.get("/oidc/callback")
-async def callback(request: Request, code: str = "", state: str = ""):
-    if not enabled():
-        return RedirectResponse("/")
+@router.post("/auth/signup")
+def signup(inp: CredIn):
+    uid, pw = inp.user_id.strip(), inp.password
+    if not _ID_RE.fullmatch(uid):
+        raise HTTPException(400, "아이디는 영문/숫자/._- 2~32자여야 합니다")
+    if uid == config.ADMIN_ID:
+        raise HTTPException(409, "사용할 수 없는 아이디입니다")
+    if len(pw) < 4:
+        raise HTTPException(400, "비밀번호는 4자 이상이어야 합니다")
+    con = _db()
     try:
-        st = _signer.loads(state, max_age=600)
-    except (BadSignature, SignatureExpired):
-        raise HTTPException(400, "잘못되었거나 만료된 state — 다시 로그인하세요")
-    if not st.get("n") or st["n"] != request.cookies.get("oidc_state"):
-        raise HTTPException(400, "state가 이 브라우저의 로그인 시도와 일치하지 않습니다 "
-                                 "— 다시 로그인하세요")
-    nxt = _safe_next(st.get("next", "/"))
-    async with httpx.AsyncClient(timeout=15) as cli:
-        r = await cli.post(_ep(config.KEYCLOAK_INTERNAL_URL, "token"), data={
-            "grant_type": "authorization_code", "code": code,
-            "redirect_uri": f"{config.APP_BASE_URL}/oidc/callback",
-            "client_id": config.OIDC_CLIENT_ID,
-            "client_secret": config.OIDC_CLIENT_SECRET})
-    if r.status_code != 200:
-        raise HTTPException(502, f"Keycloak 토큰 교환 실패: {r.text[:300]}")
-    tok = r.json()
-    idt = _jwt_payload(tok.get("id_token", ""))
-    acc = _jwt_payload(tok.get("access_token", ""))
-    iss = f"{config.KEYCLOAK_PUBLIC_URL}/realms/{config.KEYCLOAK_REALM}"
-    aud = idt.get("aud")
-    if idt.get("iss") != iss or not (
-            aud == config.OIDC_CLIENT_ID
-            or (isinstance(aud, list) and config.OIDC_CLIENT_ID in aud)):
-        raise HTTPException(502, "ID 토큰 검증 실패 (iss/aud 불일치)")
-    user = {"user": idt.get("preferred_username") or idt.get("sub"),
-            "roles": (acc.get("realm_access") or {}).get("roles", [])}
-    resp = RedirectResponse(nxt)
-    resp.set_cookie(COOKIE, _signer.dumps(user), max_age=config.SESSION_MAX_AGE,
-                    httponly=True, samesite="lax")
-    resp.delete_cookie("oidc_state")
-    return resp
+        cur = con.cursor()
+        ensure_users(cur)
+        cur.execute("SELECT COUNT(*) FROM app_users WHERE user_id = :1", [uid])
+        if cur.fetchone()[0]:
+            raise HTTPException(409, "이미 존재하는 아이디입니다")
+        cur.execute("INSERT INTO app_users (user_id, pw_hash) VALUES (:1, :2)",
+                    [uid, _hash_pw(pw)])
+        con.commit()
+    finally:
+        con.close()
+    return {"ok": True, "note": "가입 완료 — 관리자 승인 후 로그인할 수 있습니다"}
 
 
-@router.get("/oidc/logout")
+@router.get("/auth/logout")
 def logout():
-    if enabled():
-        q = urllib.parse.urlencode({
-            "client_id": config.OIDC_CLIENT_ID,
-            "post_logout_redirect_uri": config.APP_BASE_URL})
-        resp = RedirectResponse(f"{_ep(config.KEYCLOAK_PUBLIC_URL, 'logout')}?{q}")
-    else:
-        resp = RedirectResponse("/")
+    resp = RedirectResponse("/login")
     resp.delete_cookie(COOKIE)
     return resp
 
 
 @router.get("/me")
 def me(request: Request):
-    """UI 헤더용: 현재 로그인 사용자·관리자 여부."""
     u = current_user(request)
-    return {"auth_mode": config.AUTH_MODE,
-            "user": (u or {}).get("user"),
-            "admin": is_admin(request)}
+    return {"user": (u or {}).get("user"), "admin": bool((u or {}).get("admin"))}

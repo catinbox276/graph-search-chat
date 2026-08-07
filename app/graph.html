@@ -46,19 +46,16 @@
   <span id="who" style="display:none;font-size:12px;color:#8892a6;align-items:center;gap:8px"></span>
 </header>
 <script>
-// SSO 로그인 사용자 표시 (AUTH_MODE=none이면 숨김 유지)
+// 로그인 사용자 표시
 fetch("/me").then(r => r.json()).then(m => {
-  if (m.auth_mode === "none" || !m.user) return;
+  if (!m.user) return;
   const w = document.getElementById("who");
   const name = document.createElement("b");
   name.textContent = m.user + (m.admin ? " (관리자)" : "");
-  w.append(name);
-  if (m.auth_mode === "keycloak") {  // header 모드 로그아웃은 전단 SSO 담당
-    const out = document.createElement("a");
-    out.href = "/oidc/logout"; out.textContent = "로그아웃";
-    out.style.color = "inherit";
-    w.append(out);
-  }
+  const out = document.createElement("a");
+  out.href = "/auth/logout"; out.textContent = "로그아웃";
+  out.style.color = "inherit";
+  w.append(name, out);
   w.style.display = "inline-flex";
 });
 </script>

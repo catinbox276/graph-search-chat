@@ -80,48 +80,16 @@ MCP_DEFAULT_URL = _get("MCP_DEFAULT_URL", "")
 # streamable_http(표준 MCP) | rest(사내 GET /tools + POST /call) | sse
 MCP_DEFAULT_TRANSPORT = _get("MCP_DEFAULT_TRANSPORT", "streamable_http").strip().lower()
 
-# --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
-# proxy   = 사내 표준(타 서비스와 동일) — 기본은 게이트웨이가 붙여준 userId 헤더 신뢰
-#           (토큰 검증 X), 요청 쿼리 ?authMode=gateway 일 때만 토큰 검증 수행.
-# gateway = 모든 요청을 토큰 검증 (proxy의 상시 검증판)
-# none    = 인증 없음 (로컬 개발 스위치 — 관리자는 루프백 접속만)
-# keycloak= PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인 (사내 미사용)
-AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
-if AUTH_MODE not in ("none", "proxy", "gateway", "keycloak"):
-    # 폐기된 모드(header 등)를 조용한 인증 꺼짐으로 두지 않는다 — 기동 실패가 안전
-    raise RuntimeError(f"AUTH_MODE={AUTH_MODE!r}는 지원하지 않습니다 "
-                       "(proxy | gateway | none | keycloak). 사내는 AUTH_MODE=proxy")
-# proxy 모드: 게이트웨이가 백엔드로 전달하는 userId 헤더 이름 (사내 게이트웨이 문서 확인)
-PROXY_USER_HEADER = _get("PROXY_USER_HEADER", "X-DL-User-Id")
-PROXY_ROLE_HEADER = _get("PROXY_ROLE_HEADER", "")  # role 헤더가 있으면 지정 (빈값=미사용)
-GATEWAY_AUTH_URL = _get("GATEWAY_AUTH_URL", "")           # 검증 API (gateway 모드 필수)
-# 토큰이 실려올 수 있는 헤더 — 앞에서부터 순서대로 시도 (쉼표구분, 사내 스펙 기본)
-GATEWAY_TOKEN_HEADERS = [h.strip() for h in
-                         _get("GATEWAY_TOKEN_HEADERS",
-                              "X-DL-Access-Token,Authorization").split(",") if h.strip()]
-# 검증 API 호출: POST {GATEWAY_TOKEN_FIELD: <JWT>} — 사내 스펙 (2026-08-06 확정)
-GATEWAY_TOKEN_FIELD = _get("GATEWAY_TOKEN_FIELD", "accessToken")  # 요청 바디의 토큰 필드명
-# 응답 필드는 점 표기 중첩 경로 지원 — 사내 응답: {"result": {"userId":…, "role":…}}
-GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "result.userId")
-GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "result.role")
-GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
-# 응답에 role이 없는 환경용 관리자 지정 폴백 — userId 쉼표 목록 (빈값=역할 기반만)
-GATEWAY_ADMIN_USERS = frozenset(
-    u.strip() for u in _get("GATEWAY_ADMIN_USERS", "").split(",") if u.strip())
-# 1이면 토큰 미수신 시 수신 헤더/쿠키 이름을 로그에 출력 (연동 진단용 — 값은 미기록)
-AUTH_DEBUG = _geti("AUTH_DEBUG", 0)
-
-# --- REST 도구 서버 어댑터 (tools/rest_tools.py — mcp_registry transport='rest') ---
-REST_TOOL_TIMEOUT = _getf("REST_TOOL_TIMEOUT", 30.0)  # /tools·/call 호출 타임아웃(초)
-GATEWAY_TIMEOUT = _getf("GATEWAY_TIMEOUT", 5.0)            # 검증 API 호출 타임아웃(초) — 초과 시 미인증(fail-closed)
-KEYCLOAK_PUBLIC_URL = _get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080").rstrip("/")
-KEYCLOAK_INTERNAL_URL = _get("KEYCLOAK_INTERNAL_URL", KEYCLOAK_PUBLIC_URL).rstrip("/")
-KEYCLOAK_REALM = _get("KEYCLOAK_REALM", "gsc")
-OIDC_CLIENT_ID = _get("OIDC_CLIENT_ID", "gsc-app")
-OIDC_CLIENT_SECRET = _get("OIDC_CLIENT_SECRET", "")
-OIDC_ADMIN_ROLE = _get("OIDC_ADMIN_ROLE", "gsc-admin")  # 이 역할 보유 시 관리자 (gateway·keycloak 공통)
-APP_BASE_URL = _get("APP_BASE_URL", "http://localhost:8500").rstrip("/")  # redirect_uri 기준
-SESSION_SECRET = _get("SESSION_SECRET", "gsc-poc-session-secret")  # 사내 전환 시 Secret로
+# --- 인증 (자체 계정 — app/auth.py) ---
+# 관리자 = 환경 설정 계정 1개 (DB 아님 — 분실 시 env 수정으로 복구).
+# 일반 계정 = /login에서 가입(id+pw) 후 관리자 승인(app_users.approved='Y')돼야 로그인 가능.
+ADMIN_ID = _get("ADMIN_ID", "admin")
+ADMIN_PASSWORD = _get("ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD:
+    raise RuntimeError("ADMIN_PASSWORD가 비어 있습니다 — .env에 관리자 비밀번호를 설정하세요")
+SESSION_SECRET = _get("SESSION_SECRET", "")
+if not SESSION_SECRET:
+    raise RuntimeError("SESSION_SECRET이 비어 있습니다 — 로그인 쿠키 서명 키를 설정하세요")
 SESSION_MAX_AGE = _geti("SESSION_MAX_AGE", 28800)  # 로그인 쿠키 수명(초) — 기본 8시간
 
 # --- LLM 호출 ---

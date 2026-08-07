@@ -70,6 +70,15 @@
 
 <main>
 <section class="card">
+  <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
+  <table id="ulist"><thead><tr><th>아이디</th><th>상태</th><th>권한</th><th>가입일</th><th></th></tr></thead>
+    <tbody></tbody></table>
+  <p class="hint">가입 직후는 <b>승인 대기</b> — 승인해야 로그인할 수 있습니다.
+     관리자 권한은 재로그인 시부터 반영됩니다.</p>
+  <p class="hint err" id="uerr"></p>
+</section>
+
+<section class="card">
   <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
   <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
     <tbody></tbody></table>
@@ -215,33 +224,70 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const derr = $("derr"), serr = $("serr");
-localStorage.removeItem("admin_token");  // 토큰 방식 폐기 — SSO 관리자 역할만
 const dmsg = (t, ok) => { derr.textContent = t; derr.classList.toggle("ok", !!ok); };
 const smsg = (t, ok) => { serr.textContent = t; serr.classList.toggle("ok", !!ok); };
 const ROLE_IDS = ["r_title", "r_body", "r_question", "r_answer", "r_meta", "r_url"];
 const _colCache = {};  // 테이블→컬럼 캐시 (행 클릭 때 재조회·깜빡임 방지)
 
-// SSO 로그인 사용자 표시 (AUTH_MODE=none이면 숨김 유지)
+// 로그인 사용자 표시
 fetch("/me").then(r => r.json()).then(m => {
-  if (m.auth_mode === "none" || !m.user) return;
+  if (!m.user) return;
   const w = $("who");
   const name = document.createElement("b");
   name.textContent = m.user + (m.admin ? " (관리자)" : "");
-  w.append(name);
-  if (m.auth_mode === "keycloak") {
-    const out = document.createElement("a");
-    out.href = "/oidc/logout"; out.textContent = "로그아웃";
-    out.style.color = "inherit";
-    w.append(out);
-  }
+  const out = document.createElement("a");
+  out.href = "/auth/logout"; out.textContent = "로그아웃";
+  out.style.color = "inherit";
+  w.append(name, out);
   w.style.display = "inline-flex";
 });
+
+// ── 계정 관리 ────────────────────────────────────────────────
+async function loadUsers() {
+  const r = await fetch("/admin/users");
+  if (!r.ok) { $("uerr").textContent = `조회 실패 (${r.status}) — 관리자 권한이 필요합니다`; return; }
+  const tb = $("ulist").querySelector("tbody");
+  tb.innerHTML = "";
+  const users = (await r.json()).users;
+  if (!users.length) { tb.innerHTML = "<tr><td colspan=5 style='color:var(--mut)'>가입한 계정 없음</td></tr>"; return; }
+  users.forEach(u => {
+    const tr = document.createElement("tr");
+    [u.user_id, u.approved ? "승인됨" : "⏳ 승인 대기",
+     u.is_admin ? "관리자" : "일반",
+     (u.created_at || "").slice(0, 16)].forEach(v => {
+      const td = document.createElement("td"); td.textContent = v; tr.appendChild(td);
+    });
+    const btns = document.createElement("td");
+    const mk = (label, action, warn) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = label;
+      b.style.cssText = "margin-right:6px;padding:3px 10px;border-radius:6px;cursor:pointer;background:#fff;" +
+        (warn ? "border:1px solid var(--fail);color:var(--fail)" : "border:1px solid var(--line);color:var(--ink)");
+      b.onclick = () => userAct(u.user_id, action, label);
+      btns.appendChild(b);
+    };
+    if (!u.approved) mk("승인", "approve");
+    if (u.is_admin) mk("관리자 해제", "admin_off"); else mk("관리자 부여", "admin_on");
+    mk("삭제", "delete", true);
+    tr.appendChild(btns);
+    tb.appendChild(tr);
+  });
+}
+async function userAct(uid, action, label) {
+  if (action === "delete" && !confirm(`${uid} 계정을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  const r = await fetch("/admin/users/act", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({user_id: uid, action})});
+  $("uerr").textContent = r.ok ? "" : `${label} 실패 (${r.status})`;
+  loadUsers();
+}
+loadUsers();
 
 // ── 도메인 시드 관리 ──────────────────────────────────────────
 async function loadDomains(selName) {
   dmsg("");
   const r = await fetch("/admin/domains");
-  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — SSO 관리자 역할이 필요합니다`); return; }
+  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — 관리자 권한이 필요합니다`); return; }
   const tb = $("dlist").querySelector("tbody");
   tb.innerHTML = "";
   const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
@@ -308,7 +354,7 @@ $("dreset").onclick = async () => {
 async function loadSources(selName) {
   smsg("");
   const r = await fetch("/admin/sources");
-  if (!r.ok) { smsg(`조회 실패 (${r.status}) — SSO 관리자 역할이 필요합니다`); return; }
+  if (!r.ok) { smsg(`조회 실패 (${r.status}) — 관리자 권한이 필요합니다`); return; }
   const tb = $("slist").querySelector("tbody");
   tb.innerHTML = "";
   (await r.json()).sources.forEach(s => {

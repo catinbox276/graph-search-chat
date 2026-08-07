@@ -29,13 +29,13 @@ from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 from tools.session_ctx import current_session
 
 app = FastAPI()
-app.include_router(auth.router)  # SSO: /oidc/login·callback·logout, /me
+app.include_router(auth.router)  # 자체 계정: /auth/login·signup·logout, /me
 _agents = {}          # model_name -> agent (모델별 캐시)
 _saver = None         # 공유 checkpointer (같은 세션이 모델 바꿔도 기억 유지)
 def check_admin(request: Request):
-    """관리자 = SSO 관리자 역할(gsc-admin). AUTH_MODE=none(로컬)은 전부 허용."""
+    """관리자 = env 계정 또는 is_admin 부여 계정."""
     if not auth.is_admin(request):
-        raise HTTPException(403, "관리자 권한이 필요합니다 (SSO 관리자 역할)")
+        raise HTTPException(403, "관리자 권한이 필요합니다")
 
 
 async def get_agent(model_name: str | None):
@@ -292,10 +292,7 @@ async def chat(inp: ChatIn, request: Request):
 
 @app.get("/sessions")
 def list_sessions(request: Request):
-    """내 대화 목록 — 사용자별 독립 (다른 사람 세션은 안 보임).
-
-    AUTH_MODE=none(로컬)에선 user_id 없는 세션만 보인다 — 같은 규칙의 자연스러운 귀결.
-    """
+    """내 대화 목록 — 사용자별 독립 (다른 사람 세션은 안 보임)."""
     u = auth.require_user(request)
     uid = (u or {}).get("user")
     con = db()
@@ -394,6 +391,62 @@ def graph_page(request: Request):
         return r
     return FileResponse(ROOT / "app" / "graph.html",
                         headers={"Cache-Control": "no-store"})
+
+
+@app.get("/login")
+def login_page():
+    """로그인/회원가입 페이지 — 유일하게 가드 없는 화면."""
+    return FileResponse(ROOT / "app" / "login.html",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/users")
+def admin_users(request: Request):
+    """관리자: 계정 목록 (승인 대기 + 활성, 권한 표시)."""
+    check_admin(request)
+    con = db()
+    cur = con.cursor()
+    auth.ensure_users(cur)
+    cur.execute("""SELECT user_id, approved, NVL(is_admin, 'N'), created_at
+                   FROM app_users ORDER BY approved, created_at DESC""")
+    rows = [{"user_id": r[0], "approved": r[1] == "Y", "is_admin": r[2] == "Y",
+             "created_at": r[3].isoformat() if r[3] else None}
+            for r in cur.fetchall()]
+    con.close()
+    return {"users": rows}
+
+
+class UserActIn(BaseModel):
+    user_id: str
+    action: str  # approve(승인) | admin_on | admin_off | delete(거절/삭제)
+
+
+@app.post("/admin/users/act")
+def admin_user_act(inp: UserActIn, request: Request):
+    """관리자: 계정 승인 / 관리자 권한 부여·해제 / 삭제. 권한 변경은 재로그인 시 반영."""
+    check_admin(request)
+    con = db()
+    cur = con.cursor()
+    auth.ensure_users(cur)
+    uid = inp.user_id.strip()
+    if inp.action == "approve":
+        cur.execute("""UPDATE app_users SET approved = 'Y', approved_at = SYSTIMESTAMP
+                       WHERE user_id = :1""", [uid])
+    elif inp.action == "admin_on":
+        cur.execute("UPDATE app_users SET is_admin = 'Y' WHERE user_id = :1", [uid])
+    elif inp.action == "admin_off":
+        cur.execute("UPDATE app_users SET is_admin = 'N' WHERE user_id = :1", [uid])
+    elif inp.action == "delete":
+        cur.execute("DELETE FROM app_users WHERE user_id = :1", [uid])
+    else:
+        con.close()
+        raise HTTPException(400, "action은 approve/admin_on/admin_off/delete 중 하나")
+    n = cur.rowcount
+    con.commit()
+    con.close()
+    if not n:
+        raise HTTPException(404, f"계정이 없습니다: {uid}")
+    return {"ok": True}
 
 
 @app.get("/admin")

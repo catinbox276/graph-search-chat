@@ -60,7 +60,8 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `MODEL_API_KEY` | `lm-studio` | OpenAI 호환 키. vLLM에 `--api-key` 미설정 시 더미값이면 됨 |
 | `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
 | `SOURCE_TABLE_ALLOWLIST` | (빈값=제한 없음) | 원천 테이블 화이트리스트 (쉼표구분) — 목록 밖 테이블은 브라우저 조회·소스 등록·야간 적재 전부 차단 (`source_registry.table_allowed` 한 곳으로 강제). 사내 전환 시 허용 테이블만 나열 |
-| `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). **`proxy`=사내 표준(타 서비스 동일)** — 기본은 게이트웨이가 붙인 `PROXY_USER_HEADER`(userId) 신뢰(토큰 검증 X), 요청 쿼리 `?authMode=gateway`일 때만 토큰(`GATEWAY_TOKEN_HEADERS`, 기본 X-DL-Access-Token→Authorization, 헤더→쿠키)을 `GATEWAY_AUTH_URL`로 POST `{accessToken}`+Bearer 헤더 검증 → `{result:{userId,role}}`. `gateway`=모든 요청 토큰 검증(상시 검증판). `none`=로컬 개발(관리자는 루프백만). `keycloak`=PoC 데모 전용. 폐기 모드(header) 설정 시 기동 실패. 관리자 = `OIDC_ADMIN_ROLE` 역할 또는 `GATEWAY_ADMIN_USERS` 지정. 진단은 `AUTH_DEBUG=1` |
+| `ADMIN_ID` / `ADMIN_PASSWORD` | `admin` / (필수) | 자체 계정 인증 (`app/auth.py`, docs/integration.md). 관리자는 이 env 계정 1개 — `ADMIN_PASSWORD` 비면 **기동 실패**(fail-fast). 일반 계정은 `/login` 가입 → `app_users` 미승인 저장 → 관리 페이지 "계정 관리"에서 승인해야 로그인. 관리자가 일반 계정에 is_admin 부여/해제 가능(재로그인 시 반영) |
+| `SESSION_SECRET` / `SESSION_MAX_AGE` | (필수) / `28800` | 로그인 서명 토큰(itsdangerous) — 쿠키(httponly)와 `Authorization: Bearer` 이중 수용, 무상태라 복제본 공유·재시작 생존 자동. SECRET 비면 기동 실패 |
 
 사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 백필 배치가 embed_model 불일치 청크를 자동 재백필(`scripts/embed_corpus.py` — 재백필 중 lexical이 받침). nodes.embedding 재백필과 dedup 임계값 재캘리브레이션은 별도 필요.
 
@@ -75,7 +76,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - **모놀리스 이미지 1개** — `app/server.py`(FastAPI)가 SSE 스트리밍·세션 기록·그래프 데이터·모델 관리 API를 전부 담당. 기동 시 Oracle에서 임베딩 행렬 1.4GB를 메모리에 로드(`tools/blog_search.load_matrix`). CronJob(파이프라인·유지보수·백필)도 같은 이미지.
 - **에이전트** — `agent/agent.py`가 DeepAgents로 조립. 툴 = `suggest_paths`(새 문제 시 최우선 호출, 시스템 프롬프트로 강제) + `search_blog`/`read_blog_post`(함수 직접 등록) + **소스별 검색 도구 자동 생성**(`search_{소스명}` — source_registry 등록 = 검색 툴 등록) + **mcp_registry에 등록된 도구 서버들**(streamable_http/sse/stdio + **rest** — 사내 `GET /tools`+`POST /call` 패턴 전용 어댑터 `tools/rest_tools.py`, MCP와 무손실 1:1 매핑. 시드 없음 — 관리 페이지나 MCP_DEFAULT_URL로 등록, 주소 등록만으로 도구 자동 조립). 모델별 에이전트 캐시는 server.py의 `_agents`. **전역 제어는 관리 페이지 /admin > 에이전트 설정**(app_settings: `agent_system_prompt` 덮어쓰기·`agent_mcp_enabled`·`agent_disabled_tools` — 저장 시 캐시 무효화로 다음 질문부터 반영, MCP 서버 주소는 .env 소관).
 - **하이브리드 검색** (`tools/blog_search.py`) — Oracle Text(lexical, corpus_docs.body) top-30 + 인메모리 **청크 행렬** 코사인(semantic, corpus_chunks — 현재 EMBED_MODEL 벡터만) top-30 → 문서 단위 best-chunk 집계 → RRF 융합. 문서 id=`소스명:원천id`, 시맨틱 히트는 매칭 청크가 스니펫. 검색당 임베딩 계산은 질의 1건뿐. 임베딩 없으면 lexical 단독으로도 동작. 스키마 상세: docs/schema.md.
-- **원천 테이블 적재** (`tools/source_registry.py` + `scripts/ingest_sources.py`) — 구조화할 저쪽 테이블은 관리자가 `source_registry`에 등록(테이블·id·시간 컬럼·필드→역할 매핑 title/body/question/answer/meta/url·content_kind — API `GET/POST /admin/sources`, 관리 페이지 /admin). 야간 배치가 ts 워터마크 증분으로 역할 조립해 corpus_docs에 MERGE. **원천 테이블은 읽기 전용(SELECT만)**. 상세: docs/integration.md 접점 2.
+- **원천 테이블 적재** (`tools/source_registry.py` + `scripts/ingest_sources.py`) — 구조화할 저쪽 테이블은 관리자가 `source_registry`에 등록(테이블·id·시간 컬럼·필드→역할 매핑 title/body/question/answer/meta/url·content_kind — API `GET/POST /admin/sources`, 관리 페이지 /admin). 야간 배치가 ts 워터마크 증분으로 역할 조립해 corpus_docs에 MERGE. **원천 테이블은 읽기 전용(SELECT만)**. 상세: docs/integration.md.
 - **문서 그래프 구조화** (`poc/doc_pipeline.py`) — 소스에 **그래프 도메인을 지정하면**(source_registry.domain, UI 셀렉트) 야간 03:40 배치가 corpus_docs 문서를 그 도메인의 정의·extract_hint 기준으로 LLM 판정: fits면 목표·접근법을 추출해 대화와 같은 그래프에 병합(`get_or_create` dedup 재사용), **기준 미달은 excluded**(corpus_docs.graph_status·graph_note). 증거는 node_evidence(kind='doc', ref=`소스:id`) — 세션 증거와 분리돼 성공/실패 카운트엔 안 섞임. 도메인 미지정 소스는 검색 전용. LLM 판정은 동시(스레드), 병합은 직렬. **운영 설정은 `app_settings` 테이블**(tools/settings.py — 관리 페이지 /admin > 전처리 설정에서 재배포 없이 변경): 실행당 건수·동시성·본문 길이·전처리 전용 모델. 소스별 액션: 드라이런(판정만)·실패 재시도·초기화 재처리(그래프 기여 회수 후 재구조화 — 이중 카운트 방지). 초기화는 도메인 단위(`POST /admin/domains/{도메인}/reset` — 그 도메인의 모든 소스)·전역(`POST /admin/reset-all-docs`)도 지원 — 셋 다 문서 유래 기여만 회수, 대화 세션 기여는 불변.
 - **경로 제안** (`tools/path_suggest.py`) — 그래프에서 검증 경로 제안 + 실패 이력 경고. 노출을 `suggestions` 테이블에 기록(채택률 보정용). 성공/실패는 판정 카운트로 관리 (불리언 금지 — PoC에서 실증된 결정).
 - **멀티턴 기억** — `tools/oracle_checkpointer.py` (LangGraph 체크포인터를 Oracle `lg_checkpoints`/`lg_writes`로 외부화). thread_id=세션id. 복제본 공유·재시작 생존이라 cluster 모드에서 세션 고정 불필요.
@@ -91,7 +92,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - `docs/poc-results.md` — PoC 실증 결과 (병합·가중치 검증, 캘리브레이션 수치, 남은 이슈)
 - `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
 - `docs/schema.md` — 테이블 스키마 설계 (실스키마 전체 + 청크 임베딩·모델 버저닝 확장 설계, 마이그레이션 계획)
-- `docs/integration.md` — 사내 전환 통합 설계 (외부 의존 2개: SSO 사용자 식별 소비 + 원천 테이블 source_registry)
+- `docs/integration.md` — 사내 전환 통합 설계 (외부 의존은 원천 테이블 source_registry 1개 — 인증은 자체 계정)
 - `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
 - `docs/component-architecture.drawio` — 컴포넌트별 아키텍처 8페이지 (에이전트 / 앱 서버 / 검색 / 경로 제안 / 파이프라인 / 유지보수 / 저장소 / 배포)
 

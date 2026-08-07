@@ -53,7 +53,7 @@ flowchart LR
 | `corpus_docs` | 통합 검색 코퍼스 (등록 소스 조립본 + `embedding` BLOB). 문서 id=`소스명:원천id` | ingest_sources.py |
 | `source_registry` | 구조화 원천 테이블 등록 (테이블·id·시간·필드 역할 매핑 — 사람 전용) | source_registry.py |
 | `blog_posts` | 구 노하우 코퍼스 — corpus_docs에 '소스 1호'로 흡수(임베딩 SQL 복사) | load_oracle.py / embed_corpus.py |
-| `sessions` | 대화 증거 계층: 질문·툴호출·답변·게이트 판정(verdict)·user_id(SSO) | server.py / selfplay.py |
+| `sessions` | 대화 증거 계층: 질문·툴호출·답변·게이트 판정(verdict)·user_id | server.py / selfplay.py |
 | `nodes` / `edges` / `node_evidence` | 4계층 지식그래프 + 가중치 + 출처 | graph_pipeline.py |
 | `suggestions` | 경로 제안 노출 기록 (채택률 보정용 데이터) | path_suggest.py |
 | `domain_registry` | 1층 도메인 닫힌 목록 + 추출 지침 + 용도(scope: both/chat/doc) (사람 전용) | graph_pipeline.py |
@@ -71,7 +71,7 @@ flowchart LR
 | `tools/model_registry.py` | 모델 등록/기본값. 서빙 동기화 | 임베딩 교체 시 재백필 경고 |
 | `tools/source_registry.py` `settings.py` | 원천 테이블 등록(역할 매핑)·조립 / 운영 설정 KV | 원천 테이블은 SELECT만 |
 | `app/server.py` | FastAPI: SSE 스트리밍, 세션 기록, 관리자 API(도메인·소스·설정·초기화·현황), 그래프 데이터 | HTML no-store (캐시 사고 방지) |
-| `app/auth.py` | SSO: header(전단 헤더 2개 소비) / keycloak(직접 OIDC) | 로그인 UI 없음 — integration.md 접점 1 |
+| `app/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = app/login.html — integration.md |
 | `app/index.html` `graph.html` `shell.css` | 통합 UI 셸, 관리 페이지 /admin (admin.html — 도메인·소스·전처리 설정·처리 현황 프로그래스), force-directed 그래프+패널(문서/대화 출처 분리 표기) | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
 | `poc/selfplay.py` `graph_pipeline.py` | 47세션 생성 / 게이트→4계층 추출→병합→가중치 | dedup 3단: ≥0.92+문자 가드 즉시 병합 / ≥0.70 LLM 후보 선택 / 신규 (캘리브레이션 실측 기반, 모델 교체 시 재캘리브레이션) |
 | `poc/doc_pipeline.py` | 도메인 지정 소스의 corpus_docs를 LLM 판정→같은 그래프에 병합, 미달은 excluded | 판정 동시(기본 16)·병합 직렬(정합성). 생각 끄기로 ~15,000건/h |
@@ -83,7 +83,7 @@ flowchart LR
 
 - `POST /chat/stream` — SSE: token(생각·답변 실시간) / tool / tool_end(정리된 응답) / answer
 - `POST /chat` — 비스트리밍 (스크립트용). 둘 다 `model` 필드로 LLM 선택, 멀티턴 기억
-- `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자(SSO 역할)
+- `GET /models` — 사용자용 LLM 목록 · `POST /admin/models/{sync,select}` — 관리자
 - `GET/POST /admin/domains` — 1층 도메인 닫힌 목록 조회/추가 (`domain_registry` 시드 테이블, 관리자 전용. 삭제 API는 의도적으로 없음)
 - `GET/POST /admin/sources` · `GET /admin/sources/tables[/{t}]` — 구조화 원천 테이블 등록 + 접속 DB 테이블·컬럼 브라우저 (관리자 전용, docs/integration.md 접점 2)
 - `POST /admin/sources/{s}/dryrun` — 미처리 문서 판정만(그래프 반영 없음, 지침 튜닝용) · `POST /admin/sources/{s}/reprocess` — mode=errors(실패 재시도)/reset(기여 회수 후 재구조화)
@@ -93,8 +93,9 @@ flowchart LR
 - `GET/POST /admin/agent-settings` — 에이전트 전역 제어: 시스템 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 에이전트 캐시 무효화 — 다음 질문부터)
 - `GET /admin/models/all` · `POST /admin/models/add` — 모델 레지스트리 (kind·이름·모델별 base_url) — 임베딩 기본값이 검색·백필·dedup 전역을 결정
 - `GET/POST /admin/mcp` — MCP 서버 등록 (transport: streamable_http/sse/stdio) — 등록 즉시 도구 자동 조립
-- `GET /sessions` · `GET /sessions/{id}` — 내 대화 목록·복원 (본인 것만 — SSO user_id 기준, 이어하기는 같은 session_id로 /chat)
-- `GET /oidc/login·callback·logout` · `GET /me` — SSO (AUTH_MODE에 따라 활성, app/auth.py)
+- `GET /sessions` · `GET /sessions/{id}` — 내 대화 목록·복원 (본인 것만 — user_id 기준, 이어하기는 같은 session_id로 /chat)
+- `POST /auth/{login,signup}` · `GET /auth/logout` · `GET /me` — 자체 계정 (app/auth.py)
+- `GET /admin/users` · `POST /admin/users/act` — 계정 관리 (승인/관리자 부여·해제/삭제)
 - `GET /graph/data` — 노드(사용 카운트를 문서/대화로 분리 + 성공·실패)·엣지 · `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 
 ## 실행 방법 (전부 파드)
@@ -118,7 +119,7 @@ kubectl apply -k k8s/base          # 앱 Deployment + 야간 CronJob 5종 (env�
 
 1. 로컬은 대형 LLM 1개만 동시 로드(LM Studio, 유일한 비파드 구성요소) — GPU 서빙(vLLM 파드)에서 드롭다운 선택 그대로 동작
 2. ~~멀티턴 기억은 서버 메모리~~ → **Oracle 체크포인터로 외부화 완료** (lg_checkpoints/lg_writes) — 복제본 공유·재시작 생존
-3. ~~관리자 인증은 단일 토큰~~ → **SSO 구현 완료** (AUTH_MODE: header=전단 SSO 헤더 소비/keycloak=직접 OIDC — docs/integration.md 접점 1. X-Admin-Token은 폐기 — SSO 역할만 (AUTH_MODE=none 로컬은 전부 허용))
+3. ~~관리자 인증은 단일 토큰~~ → **자체 계정 인증** (env 관리자 + 가입·승인·is_admin 권한 — docs/integration.md. SSO/게이트웨이 모드는 기획 변경으로 전부 폐기)
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
 5. 야간 CronJob 5종이 미판정 세션·신규 문서를 자동 처리 (03:00 파이프라인 / 03:10 원천 증분 / 03:20 유지보수 / 03:30 임베딩 / 03:40 문서 구조화). 로컬은 야간에 모델 서빙이 켜져 있어야 동작
 6. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정, supersession 자동화 등)

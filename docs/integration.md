@@ -1,115 +1,78 @@
-# 사내 전환 통합 설계 — 외부 의존은 딱 2개
+# 사내 전환 통합 설계 — 외부 의존은 원천 테이블 1개
 
 > 전제가 되는 설계 결정은 [design.md](design.md), 현재 구현 지도는 [implementation.md](implementation.md).
-> 이 문서는 **사내(운영) 환경에 붙일 때 저쪽과 맞춰야 하는 접점**을 정의한다. (2026-08-05)
+> 이 문서는 **사내(운영) 환경에 붙일 때 저쪽과 맞춰야 하는 접점**을 정의한다. (2026-08-07)
 
 ## 전제 (저쪽 환경에 이미 있는 것)
 
-1. **SSO(Keycloak)가 이미 있다.** 사용자는 우리 앱에 도달하는 시점에 이미 인증된 상태다.
-   우리 앱이 로그인 화면을 만들 필요가 없고, 만들어서도 안 된다.
-2. **Oracle DB가 이미 있고, 구조화할 원천 데이터가 적재되어 있다.** 데이터 형태는 제각각:
+1. **Oracle DB가 이미 있고, 구조화할 원천 데이터가 적재되어 있다.** 데이터 형태는 제각각:
    - 본문 컬럼 1개짜리 (블로그형)
    - 지문/답 2필드 (QA형)
    - 3필드 이상 + 필드 간 관계가 있는 형태
    - 내용 유형: 문제해결, 가이드 등
-3. **그 DB 안에 우리 테이블을 만들어도 된다.** 원천 테이블만 저쪽 소유(읽기 전용)이고,
+2. **그 DB 안에 우리 테이블을 만들어도 된다.** 원천 테이블만 저쪽 소유(읽기 전용)이고,
    나머지 저장소는 전부 우리가 같은 DB에 생성한다.
-4. **DataHub MCP 서버도 이미 제공된다** — `GET http://<서버>/tools`(도구 목록),
+3. **DataHub MCP 서버도 이미 제공된다** — `GET http://<서버>/tools`(도구 목록),
    `POST http://<서버>/call`(도구 실행). 우리는 총 8개 중 읽기 전용 5개
    (`search` / `get_entities` / `list_schema_fields` / `get_lineage` / `get_dataset_queries`)만
-   소비한다. 제공받는 것이라 협의 대상이 아니며, 엔드포인트 주소만 .env로 받는다.
+   소비한다. 제공받는 것이라 협의 대상이 아니며, 엔드포인트 주소만 관리 페이지/env로 등록한다.
 
-**따라서 우리가 맞춰야 하는 접점은 SSO와 원천 테이블, 2개뿐이다.**
-그 외(그래프·세션·레지스트리·체크포인터)는 전부 우리 소유라 협의 대상이 아니다.
+**따라서 저쪽과 맞춰야 하는 접점은 원천 테이블 1개뿐이다.**
+인증은 앱이 자체 계정으로 직접 관리하고(아래), 그 외(그래프·세션·레지스트리·체크포인터)는
+전부 우리 소유라 협의 대상이 아니다.
 
 ---
 
-## 접점 1 — SSO: 사용자 식별을 받아쓴다 (로그인 없음)
+## 인증 — 자체 계정 (외부 SSO 의존 없음)
 
-### 원칙
+> 변천: header(전단 SSO 헤더) → keycloak(직접 OIDC) → gateway/proxy(게이트웨이 토큰 검증)를
+> 차례로 구현·리허설했으나, **기획 변경으로 사용자를 앱이 자체 관리**하는 것으로 확정(2026-08-07).
+> 구 모드는 코드·설정에서 전부 제거됐다.
 
-- 인증은 전단(SSO 게이트웨이/프록시)이 끝낸다. 앱은 **인증하지 않고 식별만 소비**한다.
-- 앱이 받는 것은 userId 하나다. 이것으로:
-  - **세션 분리** — 대화 세션은 사용자에 묶인다. 여러 대화를 겹쳐 쌓아도
-    사용자별로 독립이고, 세션 목록은 본인 것만 보인다.
-  - **멀티턴 기억** — thread_id=세션id 그대로 (세션이 이미 사용자에 묶이므로 충분).
-  - **재발 판정** — 같은 userId 안에서만 매칭. 다른 사람이 같은 문제를 만난 건
-    재발이 아니라 경로가 유효하다는 신호 (graph_pipeline.retract_recurrences).
-  - **관리자 판별** — SSO의 역할(realm role 등)로 관리자 API 접근 제어.
+### 구조 (app/auth.py)
 
-### 앱의 인증 모드 (`AUTH_MODE`, tools/config.py)
+- **관리자 = 환경 설정 계정 1개** (`ADMIN_ID`/`ADMIN_PASSWORD` — DB가 아니라 env,
+  잠금 사고 시 env 수정으로 복구 가능).
+- **일반 계정 = 회원가입 + 승인**: `/login`에서 가입(id+pw만) → `app_users`에
+  미승인(approved='N')으로 저장 → **관리자가 관리 페이지에서 승인해야 로그인 가능**.
+- **2권한**: 일반/관리자. 관리자는 관리 페이지 "계정 관리"에서 일반 계정에
+  관리자 권한(is_admin)을 부여/해제할 수 있다 — 재로그인 시부터 반영.
+- **세션 = 서명 토큰** (itsdangerous, `SESSION_SECRET` 서명, `SESSION_MAX_AGE` 만료) —
+  쿠키(httponly)와 `Authorization: Bearer` 헤더 양쪽으로 수용. 서버 저장소가 없어
+  복제본 공유·재시작 생존이 자동(cluster 모드 세션 고정 불필요).
+- **비밀번호 = PBKDF2-HMAC-SHA256** (stdlib — 의존성 추가 없음).
+- 미로그인: 페이지는 `/login`으로 리다이렉트, API는 401.
 
-**`gateway` 모드 — 사내 단일 모드 (구 header 모드는 폐기, 설정 시 기동 실패)** — 사내 실구조(Keycloak이 JWT 발급 → 게이트웨이 SSO
-미들웨어가 검증 API 제공 → 앱은 게이트웨이만 호출) 대응. 앱은 요청의 JWT를
-`GATEWAY_AUTH_URL`로 보내 `{userId, roles}` JSON을 받는다 — 필요한 주소는 이것 하나,
-Keycloak은 앱이 전혀 모름. 응답 필드명은 `GATEWAY_USER_FIELD/ROLE_FIELD`로 매핑(스펙 무관 수용),
-검증 결과는 `GATEWAY_CACHE_TTL`(기본 60초) 캐시, 게이트웨이 장애 시 fail-closed(미인증).
-PoC 리허설: `k8s/gateway-sim.yaml`(Keycloak introspection 프록시, ~50줄)이 미들웨어를 흉내 —
-사내 전환 시 이 파드는 버리고 GATEWAY_AUTH_URL만 실제 미들웨어로 교체.
+### userId가 하는 일 (기존과 동일)
 
-**로컬 PC 리허설 (python + .env + Oracle)**:
-```bash
-# 1) 클러스터 자원 포트포워딩 (로컬에 Oracle·Keycloak 없이)
-#    ⚠ 주소는 localhost가 아니라 127.0.0.1로 고정할 것 — 파이썬은 localhost를 IPv6(::1)로
-#      해석할 수 있는데 port-forward는 IPv4에만 바인딩된다. 8080은 다른 프로세스(IDE 프록시
-#      등)와 충돌하기 쉬우니 8180 권장.
-kubectl port-forward svc/oracle 1521:1521 &
-kubectl port-forward svc/keycloak 8180:8080 &
-# 2) .env — ORACLE_DSN=127.0.0.1:1521/FREEPDB1, ORACLE_MODE=thin(로컬에 Instant Client 없으면),
-#    AUTH_MODE=gateway, GATEWAY_AUTH_URL=http://127.0.0.1:8600/verify,
-#    KEYCLOAK_INTERNAL_URL=http://127.0.0.1:8180/auth (+ OIDC_CLIENT_SECRET)
-# 3) 실행 (터미널 2개)
-uvicorn app.gateway_sim:app --port 8600   # 게이트웨이 미들웨어 흉내
-uvicorn app.server:app --port 8500        # 앱
-# 4) 토큰 발급 후 Bearer로 호출
-JWT=$(curl -s -X POST http://127.0.0.1:8180/auth/realms/gsc/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=gsc-app -d client_secret=<시크릿> \
-  -d username=dalgo -d password=<pw> | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-curl http://127.0.0.1:8500/me -H "Authorization: Bearer $JWT"   # → {"user":"dalgo","admin":true}
-```
+- **세션 분리** — 대화 세션은 사용자에 묶이고 목록은 본인 것만 보인다.
+- **멀티턴 기억** — thread_id=세션id 그대로.
+- **재발 판정** — 같은 userId 안에서만 매칭 (graph_pipeline.retract_recurrences).
+- **관리자 판별** — env 계정 또는 is_admin 부여 계정만 관리 API 통과.
 
-2026-08-06 로컬 리허설 실측: 무토큰/위조 401 · dalgo(관리자) /me·관리 API·Oracle 문서 뷰 정상 ·
-analyst1(일반) /me 정상·관리 API 403. 신규 계정이 "Account is not fully set up"이면 Keycloak
-admin API로 프로필(firstName/email)·requiredActions를 채우면 된다.
-
-
-| 모드 | 용도 | userId 출처 |
-|---|---|---|
-| `none` | 로컬 개발 | 없음 (user_id NULL) |
-| `header` | **사내 기본** — 전단 SSO가 인증 후 헤더로 식별 전달 | `SSO_USER_HEADER`(예: `X-Auth-Request-User`)에서 읽음 |
-| `keycloak` | 전단 프록시가 없는 환경 — 앱이 직접 OIDC 코드 플로우 | ID 토큰 `preferred_username` |
-
-- 이 클러스터의 Istio 정책이 이미 `X-Auth-Request-User: dalgo@quantumcns.ai` 헤더를
-  쓰고 있다 — 사내 SSO가 oauth2-proxy 계열 헤더 주입 방식이라는 근거. `header` 모드는
-  이 패턴을 그대로 신뢰한다.
-- **`header` 모드의 전제**: 사용자가 앱에 전단을 우회해 직접 접근할 수 없어야 한다
-  (헤더는 위조 가능하므로). 인그레스/네트워크 정책으로 보장하고, 배포 체크리스트에 포함.
-- `keycloak` 모드(직접 OIDC)는 구현되어 있고(app/auth.py + k8s/keycloak.yaml PoC 파드),
-  전단 없는 검증·데모 환경에서 사용자 분리를 실험하는 용도로 유지한다.
-
-### 앱이 저쪽과 맞출 값 (전부 .env) — **앱이 SSO에서 보는 것은 userId·role 2개뿐**
+### 설정 (.env / k8s/base/gsc.env)
 
 ```
-AUTH_MODE=header
-SSO_USER_HEADER=X-Auth-Request-User      # userId 헤더명 (필수 — 없으면 401)
-SSO_ROLE_HEADER=X-Auth-Request-Groups    # role 헤더명 (,;공백 구분 목록, 선택)
-OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 관리자
+ADMIN_ID=admin                # 관리자 아이디
+ADMIN_PASSWORD=<필수>          # 비어 있으면 기동 실패 (fail-fast)
+SESSION_SECRET=<필수>          # 로그인 토큰 서명키
+SESSION_MAX_AGE=28800         # 토큰 수명(초), 기본 8시간
 ```
 
 ### 구현 상태
 
 | 항목 | 상태 |
 |---|---|
-| sessions.user_id 컬럼 + 기록 | 완료 (server.py log_turn) |
+| 가입/승인/로그인/로그아웃 (+ /login UI) | 완료 (app/auth.py + app/login.html) |
+| 계정 관리 UI (승인·권한 부여/해제·삭제) | 완료 (/admin "계정 관리" — GET /admin/users + POST /admin/users/act) |
+| 쿠키 + Bearer 이중 수용 | 완료 (스크립트/API 호출용) |
+| sessions.user_id 기록·본인 세션만 목록 | 완료 (server.py) |
 | 재발 판정 사용자 단위 매칭 | 완료 (graph_pipeline.retract_recurrences) |
-| `header` 모드 (userId·role 헤더 소비) | 완료 (app/auth.py — 미식별 401, 로그인 UI 없음) |
-| `keycloak` 모드 (직접 OIDC — 데모·검증용) | 완료 (app/auth.py + k8s/keycloak.yaml) |
-| 사용자별 세션 목록·이어하기 UI | **미구현** — GET /sessions(본인 것만) + 사이드바 |
 | suggestions에 user 기록 (채택률 사용자 차원) | 미구현 (선택) |
 
 ---
 
-## 접점 2 — 구조화 원천 테이블: 관리자가 선택·등록한다
+## 접점 — 구조화 원천 테이블: 관리자가 선택·등록한다
 
 ### 문제
 
@@ -130,13 +93,15 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 | `field_map` | 컬럼→역할 매핑 (JSON) — 어떤 필드를 구조화할지 | `{"title":"SUBJECT","question":"BODY_Q","answer":"BODY_A"}` |
 | `content_kind` | 내용 유형 — 추출·검색 프롬프트에 반영 | `문제해결` / `가이드` |
 | `domain` | 그래프 구조화 도메인 (NULL=검색 전용) — 지정 시 야간 03:40 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프 병합 | `사내 노하우` |
+| `url_enabled` | 원본 링크 노출 여부 — 끄면 검색 결과·출처·문서 뷰에서 링크 숨김 | `Y/N` |
 | `enabled` | 적재 대상 여부 | `Y/N` |
 
 - **역할(role) 어휘는 닫아둔다**: `title / body / question / answer / meta / url`.
   1필드 블로그형은 `body` 하나, QA형은 `question`+`answer`, N필드는 조합.
   역할이 검색 문서 조립 방식(아래)을 결정한다 — 필드 간 관계는 역할 조합으로 표현.
-- 관리 통로는 domain_registry와 동일: 관리자 API(`GET/POST /admin/sources`) + 관리 UI 모달.
+- 관리 통로는 domain_registry와 동일: 관리자 API(`GET/POST /admin/sources`) + 관리 페이지.
   등록을 돕기 위해 `GET /admin/sources/tables`(접속 DB의 테이블·컬럼 목록 조회)를 제공.
+- `SOURCE_TABLE_ALLOWLIST`(.env)로 등록·조회·적재 가능한 테이블을 화이트리스트로 제한할 수 있다.
 
 ### 파이프라인 일반화
 
@@ -144,8 +109,8 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
    역할 매핑으로 **검색 문서를 조립**(예: QA형은 "Q: {question}\nA: {answer}")하고
    통합 코퍼스 테이블(`corpus_docs`: source_name, src_id, title, text, embedding, ts)에 넣는다.
    기존 `blog_posts`는 "소스 1호"로 등록되어 같은 흐름에 흡수된다.
-2. **임베딩 백필** — 기존 03:30 CronJob이 corpus_docs 기준으로 동작 (embed_corpus.py 일반화).
-3. **검색** — 하이브리드 검색(blog_search.py)이 corpus_docs를 대상으로 동작.
+2. **임베딩 백필** — 기존 03:30 CronJob이 corpus_chunks 기준으로 동작 (embed_corpus.py).
+3. **검색** — 하이브리드 검색(blog_search.py)이 corpus_docs/corpus_chunks를 대상으로 동작.
    `content_kind`는 검색 결과 라벨과 (도메인 extract_hint처럼) 프롬프트 힌트에 쓴다.
 4. **읽기 도구** — `read_blog_post`가 문서 id `"소스명:원천id"`를 받도록 일반화
    (도구명은 기존 그래프 4층 행동·도메인 시드와의 호환을 위해 유지. 구형 blog id도 동작).
@@ -158,23 +123,18 @@ OIDC_ADMIN_ROLE=gsc-admin                # role 목록에 이 값이 있으면 �
 
 - **원천 테이블은 읽기 전용.** UPDATE/DELETE/DDL 금지. 인덱스가 필요하면 corpus_docs(우리 것)에 만든다.
 - **우리 테이블은 같은 DB에 생성** — sessions, nodes/edges/node_evidence, suggestions,
-  model_registry, domain_registry, **source_registry, corpus_docs(신규)**, lg_checkpoints/lg_writes.
+  model_registry, domain_registry, mcp_registry, source_registry, corpus_docs/corpus_chunks,
+  app_users, app_settings, lg_checkpoints/lg_writes.
 - design §6(별도 검색 엔진 도입 금지)은 그대로 — 전부 Oracle 하나에서.
 
 ---
 
 ## 요약: 사내 전환 체크리스트
 
-1. **SSO**: `AUTH_MODE=header` + 헤더명 2개(`SSO_USER_HEADER`=userId, `SSO_ROLE_HEADER`=role)만
-   협의. 전단 우회 접근 차단 확인. — 앱 쪽 구현은 완료(user_id 기록·사용자 단위 재발 판정 포함).
+1. **인증**: 협의 불필요 — 자체 계정. `.env`에 `ADMIN_ID`/`ADMIN_PASSWORD`/`SESSION_SECRET`만
+   설정(누락 시 기동 실패). 일반 사용자는 가입 → 관리 페이지 승인.
 2. **원천 테이블**: 관리자가 UI에서 테이블·id·시간·필드 역할을 등록(`source_registry`).
-   야간 증분 적재가 자동으로 코퍼스·임베딩·검색에 반영.
-3. 그 외 전부(그래프·세션·레지스트리·체크포인터)는 같은 Oracle에 우리가 생성 — 협의 불필요.
-
-### 남은 구현 (착수 전 확인용 목록)
-
-- [x] `header` 인증 모드 (auth.py — userId·role 헤더 2개 소비)
-- [x] 사용자별 세션 목록·이어하기 (GET /sessions + UI 사이드바 — 소유권 검사 포함)
-- [x] `source_registry` 테이블 + 관리자 API/UI (`/admin/sources`, 테이블·컬럼 브라우저 포함)
-- [x] 적재 일반화: corpus_docs + 증분 적재 배치(scripts/ingest_sources.py, 야간 03:10)
-      + embed/검색/read 도구 전환 (corpus 없으면 blog_posts 폴백 — 전환기 무중단)
+   야간 증분 적재가 자동으로 코퍼스·임베딩·검색에 반영. 필요 시 `SOURCE_TABLE_ALLOWLIST`로 제한.
+3. **DataHub 도구 서버**: 관리 페이지(또는 `MCP_DEFAULT_NAME/URL/TRANSPORT` env)에 주소만 등록 —
+   사내 REST 서버(GET /tools + POST /call)는 `transport=rest`.
+4. 그 외 전부(그래프·세션·레지스트리·체크포인터)는 같은 Oracle에 우리가 생성 — 협의 불필요.

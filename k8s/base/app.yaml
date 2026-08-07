@@ -27,7 +27,7 @@ spec:
         app: gsc-app
       annotations:
         # Kubeflow 프로필 네임스페이스의 Istio RBAC이 nginx 인그레스발 트래픽을
-        # 사이드카에서 차단 → 주입 제외 (keycloak.yaml과 동일한 이유)
+        # 사이드카에서 차단 → 주입 제외
         sidecar.istio.io/inject: "false"
     spec:
       imagePullSecrets:
