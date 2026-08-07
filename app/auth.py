@@ -1,12 +1,12 @@
 """SSO 인증 — 앱이 소비하는 건 userId·role 2개뿐 (docs/integration.md 접점 1).
 
-AUTH_MODE 두 갈래 (none이면 전부 비활성):
+AUTH_MODE:
 
-- header (사내 기본): 전단 SSO가 인증을 끝내고 헤더로 식별을 넘겨준다.
-  앱은 SSO_USER_HEADER(userId)·SSO_ROLE_HEADER(role 목록)만 읽는다 — 로그인 UI 없음.
-  전제: 앱에 전단 우회 직접 접근 불가(헤더 위조 방지는 네트워크/인그레스가 보장).
+- gateway (사내 단일 모드): 요청 헤더(X-DL-Access-Token 또는 Authorization)의 토큰을
+  게이트웨이 검증 API(POST {accessToken})로 보내 {result:{userId,…}}를 받는다.
+  앱이 아는 주소는 GATEWAY_AUTH_URL 하나 — Keycloak 등 IdP는 게이트웨이 소관.
 
-- keycloak (전단 프록시 없는 환경): 앱이 직접 OIDC 코드 플로우.
+- keycloak (PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인): 앱이 직접 OIDC 코드 플로우.
   - 로그인 상태는 서명 쿠키(itsdangerous)로만 유지 — 서버 저장소가 없어
     복제본 공유·재시작 생존이 자동 (cluster 모드에서 세션 고정 불필요).
   - 역할은 access_token의 realm_access.roles에서 읽는다.
@@ -14,8 +14,8 @@ AUTH_MODE 두 갈래 (none이면 전부 비활성):
     서버-서버 채널이라 OIDC Core 3.1.3.7이 TLS 채널 검증으로 갈음을 허용.
     대신 iss(발급자)·aud(수신자)·state(브라우저 바인딩 nonce)는 검증한다.
 
-관리자 = OIDC_ADMIN_ROLE(기본 gsc-admin) 역할 보유 — 두 모드 공통.
-사내 SSO 전환: .env의 AUTH_MODE=header + 헤더명 2개만 맞추면 끝.
+관리자 = OIDC_ADMIN_ROLE 역할 보유 또는 GATEWAY_ADMIN_USERS 지정.
+사내 전환: AUTH_MODE=gateway + GATEWAY_AUTH_URL 하나면 끝.
 """
 import base64
 import json
@@ -36,8 +36,8 @@ router = APIRouter()
 
 
 def active() -> bool:
-    """인증이 켜져 있는가 (header / gateway / keycloak)."""
-    return config.AUTH_MODE in ("header", "gateway", "keycloak")
+    """인증이 켜져 있는가 (gateway / keycloak)."""
+    return config.AUTH_MODE in ("gateway", "keycloak")
 
 
 def enabled() -> bool:
@@ -52,19 +52,16 @@ def _ep(base: str, name: str) -> str:
 def current_user(request: Request) -> dict | None:
     """로그인 정보 {user, roles} — 모드별 출처에서 읽고, 없으면 None.
 
-    header: 전단 SSO가 주입한 헤더 2개 (userId 필수, role은 선택)
+    gateway: 요청 헤더의 토큰을 게이트웨이 검증 API로 확인
     keycloak: 서명 쿠키 (위조·만료면 None)
     """
-    if config.AUTH_MODE == "header":
-        uid = (request.headers.get(config.SSO_USER_HEADER) or "").strip()
-        if not uid:
-            return None
-        raw = request.headers.get(config.SSO_ROLE_HEADER) or ""
-        return {"user": uid, "roles": [r for r in re.split(r"[,;\s]+", raw) if r]}
     if config.AUTH_MODE == "gateway":
-        raw = (request.headers.get(config.GATEWAY_TOKEN_HEADER) or "").strip()
-        token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
-        return _gateway_verify(token) if token else None
+        for header in config.GATEWAY_TOKEN_HEADERS:  # X-DL-Access-Token 우선, Authorization 폴백
+            raw = (request.headers.get(header) or "").strip()
+            token = raw[7:].strip() if raw.lower().startswith("bearer ") else raw
+            if token:
+                return _gateway_verify(token)
+        return None
     if config.AUTH_MODE == "keycloak":
         raw = request.cookies.get(COOKIE)
         if not raw:
@@ -127,11 +124,8 @@ def _gateway_verify(token: str) -> dict | None:
 def _unauthorized() -> HTTPException:
     if enabled():
         return HTTPException(401, "로그인이 필요합니다 — /oidc/login")
-    if config.AUTH_MODE == "gateway":
-        return HTTPException(401, f"유효한 토큰({config.GATEWAY_TOKEN_HEADER})이 없습니다 "
-                                  "— 게이트웨이 SSO를 경유해 접속하세요")
-    return HTTPException(401, f"SSO 식별 헤더({config.SSO_USER_HEADER})가 없습니다 "
-                              "— 전단 SSO를 경유해 접속하세요")
+    return HTTPException(401, f"유효한 토큰({'/'.join(config.GATEWAY_TOKEN_HEADERS)})이 "
+                              "없습니다 — 게이트웨이 SSO를 경유해 접속하세요")
 
 
 def require_user(request: Request) -> dict | None:
@@ -150,11 +144,16 @@ def is_admin(request: Request) -> bool:
         client = request.client.host if request.client else ""
         return client in ("127.0.0.1", "::1")
     u = current_user(request)
-    return bool(u and config.OIDC_ADMIN_ROLE in u.get("roles", []))
+    if not u:
+        return False
+    if config.OIDC_ADMIN_ROLE in u.get("roles", []):
+        return True
+    # 게이트웨이 응답에 role이 없는 환경용 폴백 — userId 지정 목록
+    return u.get("user") in config.GATEWAY_ADMIN_USERS
 
 
 def page_guard(request: Request) -> RedirectResponse | None:
-    """페이지 가드 — keycloak: 로그인으로 리다이렉트 / header: 401 (로그인 UI 없음)."""
+    """페이지 가드 — keycloak: 로그인으로 리다이렉트 / gateway: 401 (로그인은 게이트웨이 담당)."""
     if not active() or current_user(request):
         return None
     if enabled():

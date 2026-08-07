@@ -81,33 +81,39 @@ MCP_DEFAULT_URL = _get("MCP_DEFAULT_URL", "")
 MCP_DEFAULT_TRANSPORT = _get("MCP_DEFAULT_TRANSPORT", "streamable_http").strip().lower()
 
 # --- 인증 (SSO, app/auth.py) — docs/integration.md 접점 1 ---
-# none    = 인증 없음(로컬 개발 기본)
-# header  = 사내 기본 — 전단 SSO가 인증을 끝내고 헤더로 넘겨주는 userId·role 2개만 소비.
-#           전제: 앱에 전단 우회 직접 접근 불가(헤더 위조 방지는 네트워크가 보장).
-# keycloak= 전단 프록시가 없는 환경 — 앱이 직접 OIDC 코드 플로우 + 서명 세션 쿠키.
-# gateway = 게이트웨이 SSO 미들웨어 — 요청의 JWT를 게이트웨이 검증 API로 보내
-#           JSON({userId, roles})을 받는다. 앱이 아는 주소는 GATEWAY_AUTH_URL 하나.
+# gateway = 사내 단일 모드 — 요청 헤더의 토큰을 GATEWAY_AUTH_URL 검증 API로 보내
+#           {result:{userId,…}}를 받는다. 앱이 아는 주소는 GATEWAY_AUTH_URL 하나.
+# none    = 인증 없음 (로컬 개발 스위치 — 관리자는 루프백 접속만)
+# keycloak= PoC 데모 전용 — 게이트웨이 없는 환경의 브라우저 로그인 (사내 미사용)
 AUTH_MODE = _get("AUTH_MODE", "none").strip().lower()
+if AUTH_MODE not in ("none", "gateway", "keycloak"):
+    # 폐기된 모드(header 등)를 조용한 인증 꺼짐으로 두지 않는다 — 기동 실패가 안전
+    raise RuntimeError(f"AUTH_MODE={AUTH_MODE!r}는 지원하지 않습니다 "
+                       "(gateway | none | keycloak). 사내는 AUTH_MODE=gateway")
 GATEWAY_AUTH_URL = _get("GATEWAY_AUTH_URL", "")           # 검증 API (gateway 모드 필수)
-GATEWAY_TOKEN_HEADER = _get("GATEWAY_TOKEN_HEADER", "Authorization")  # JWT가 실려오는 헤더
+# 토큰이 실려올 수 있는 헤더 — 앞에서부터 순서대로 시도 (쉼표구분, 사내 스펙 기본)
+GATEWAY_TOKEN_HEADERS = [h.strip() for h in
+                         _get("GATEWAY_TOKEN_HEADERS",
+                              "X-DL-Access-Token,Authorization").split(",") if h.strip()]
 # 검증 API 호출: POST {GATEWAY_TOKEN_FIELD: <JWT>} — 사내 스펙 (2026-08-06 확정)
 GATEWAY_TOKEN_FIELD = _get("GATEWAY_TOKEN_FIELD", "accessToken")  # 요청 바디의 토큰 필드명
 # 응답 필드는 점 표기 중첩 경로 지원 — 사내 응답: {"result": {"userId":…, "role":…}}
 GATEWAY_USER_FIELD = _get("GATEWAY_USER_FIELD", "result.userId")
 GATEWAY_ROLE_FIELD = _get("GATEWAY_ROLE_FIELD", "result.role")
 GATEWAY_CACHE_TTL = _geti("GATEWAY_CACHE_TTL", 60)         # 검증 결과 캐시(초) — 게이트웨이 부하 방지
+# 응답에 role이 없는 환경용 관리자 지정 폴백 — userId 쉼표 목록 (빈값=역할 기반만)
+GATEWAY_ADMIN_USERS = frozenset(
+    u.strip() for u in _get("GATEWAY_ADMIN_USERS", "").split(",") if u.strip())
 
 # --- REST 도구 서버 어댑터 (tools/rest_tools.py — mcp_registry transport='rest') ---
 REST_TOOL_TIMEOUT = _getf("REST_TOOL_TIMEOUT", 30.0)  # /tools·/call 호출 타임아웃(초)
 GATEWAY_TIMEOUT = _getf("GATEWAY_TIMEOUT", 5.0)            # 검증 API 호출 타임아웃(초) — 초과 시 미인증(fail-closed)
-SSO_USER_HEADER = _get("SSO_USER_HEADER", "X-Auth-Request-User")    # userId 헤더명
-SSO_ROLE_HEADER = _get("SSO_ROLE_HEADER", "X-Auth-Request-Groups")  # role 헤더명(구분자 ,;공백)
 KEYCLOAK_PUBLIC_URL = _get("KEYCLOAK_PUBLIC_URL", "http://localhost:8080").rstrip("/")
 KEYCLOAK_INTERNAL_URL = _get("KEYCLOAK_INTERNAL_URL", KEYCLOAK_PUBLIC_URL).rstrip("/")
 KEYCLOAK_REALM = _get("KEYCLOAK_REALM", "gsc")
 OIDC_CLIENT_ID = _get("OIDC_CLIENT_ID", "gsc-app")
 OIDC_CLIENT_SECRET = _get("OIDC_CLIENT_SECRET", "")
-OIDC_ADMIN_ROLE = _get("OIDC_ADMIN_ROLE", "gsc-admin")  # 이 역할 보유 시 관리자(header·keycloak 공통)
+OIDC_ADMIN_ROLE = _get("OIDC_ADMIN_ROLE", "gsc-admin")  # 이 역할 보유 시 관리자 (gateway·keycloak 공통)
 APP_BASE_URL = _get("APP_BASE_URL", "http://localhost:8500").rstrip("/")  # redirect_uri 기준
 SESSION_SECRET = _get("SESSION_SECRET", "gsc-poc-session-secret")  # 사내 전환 시 Secret로
 SESSION_MAX_AGE = _geti("SESSION_MAX_AGE", 28800)  # 로그인 쿠키 수명(초) — 기본 8시간

@@ -60,7 +60,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 | `MODEL_API_KEY` | `lm-studio` | OpenAI 호환 키. vLLM에 `--api-key` 미설정 시 더미값이면 됨 |
 | `DATAHUB_GMS_URL` | `http://localhost:8080` | DataHub MCP·ingest가 붙는 GMS |
 | `SOURCE_TABLE_ALLOWLIST` | (빈값=제한 없음) | 원천 테이블 화이트리스트 (쉼표구분) — 목록 밖 테이블은 브라우저 조회·소스 등록·야간 적재 전부 차단 (`source_registry.table_allowed` 한 곳으로 강제). 사내 전환 시 허용 테이블만 나열 |
-| `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). `header`=사내 기본 — 전단 SSO가 준 `SSO_USER_HEADER`(userId)·`SSO_ROLE_HEADER`(role) 2개만 소비, 로그인 UI 없음. `gateway`=사내 게이트웨이 SSO 미들웨어 — 요청의 JWT를 `GATEWAY_AUTH_URL` 검증 API로 보내 `{userId, roles}` JSON 수신 (주소 하나만 필요, 필드명 매핑·TTL 캐시·fail-closed. 리허설 파드 `k8s/gateway-sim.yaml`). `keycloak`=전단 없는 환경용 직접 OIDC(`KEYCLOAK_*`/`OIDC_*` 필요, PoC 파드는 `k8s/keycloak.yaml`). 관리자 = `OIDC_ADMIN_ROLE`(기본 `gsc-admin`) 역할 보유 |
+| `AUTH_MODE` | `none` | SSO 인증 (`app/auth.py`, docs/integration.md 접점 1). **`gateway`=사내 단일 모드** — 요청 헤더(`GATEWAY_TOKEN_HEADERS`, 기본 X-DL-Access-Token→Authorization)의 토큰을 `GATEWAY_AUTH_URL`로 POST `{accessToken}` 검증, `{result:{userId,role}}` 수신 (필드명 매핑·TTL 캐시·fail-closed. 리허설 파드 `k8s/gateway-sim.yaml`). `none`=로컬 개발(관리자는 루프백만). `keycloak`=PoC 데모 전용 브라우저 로그인. 구 `header` 모드는 폐기 — 설정 시 기동 실패. 관리자 = `OIDC_ADMIN_ROLE` 역할 보유 또는 `GATEWAY_ADMIN_USERS` 지정 |
 
 사내 vLLM은 모델마다 호스트가 달라 URL을 역할별(CHAT/EMBED/RERANK)로 분리한다. served-model-name은 각 호스트 `GET /v1/models`로 확인 후 `.env`에 정확히 기입. 임베딩 모델을 바꾸면 백필 배치가 embed_model 불일치 청크를 자동 재백필(`scripts/embed_corpus.py` — 재백필 중 lexical이 받침). nodes.embedding 재백필과 dedup 임계값 재캘리브레이션은 별도 필요.
 

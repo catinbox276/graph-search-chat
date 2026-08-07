@@ -39,7 +39,7 @@
 
 ### 앱의 인증 모드 (`AUTH_MODE`, tools/config.py)
 
-**`gateway` 모드 (2026-08-06 추가)** — 사내 실구조(Keycloak이 JWT 발급 → 게이트웨이 SSO
+**`gateway` 모드 — 사내 단일 모드 (구 header 모드는 폐기, 설정 시 기동 실패)** — 사내 실구조(Keycloak이 JWT 발급 → 게이트웨이 SSO
 미들웨어가 검증 API 제공 → 앱은 게이트웨이만 호출) 대응. 앱은 요청의 JWT를
 `GATEWAY_AUTH_URL`로 보내 `{userId, roles}` JSON을 받는다 — 필요한 주소는 이것 하나,
 Keycloak은 앱이 전혀 모름. 응답 필드명은 `GATEWAY_USER_FIELD/ROLE_FIELD`로 매핑(스펙 무관 수용),
