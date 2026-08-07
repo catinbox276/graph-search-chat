@@ -30,48 +30,6 @@ def _ident(name: str) -> str:
     return name
 
 
-def ensure_corpus(cur):
-    """통합 코퍼스 테이블 + Oracle Text 인덱스 (멱등). 렉서는 blog_lexer를 공유."""
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
-    if cur.fetchone()[0]:
-        return
-    cur.execute("""CREATE TABLE corpus_docs (
-        source_name VARCHAR2(100) NOT NULL,   -- source_registry.source_name
-        src_id      VARCHAR2(200) NOT NULL,   -- 원천 테이블의 고유 id 값
-        title       VARCHAR2(1000),
-        body        CLOB,                     -- 역할 매핑으로 조립된 검색 문서
-        kind        VARCHAR2(100),            -- content_kind (검색 라벨·프롬프트 힌트)
-        url         VARCHAR2(1000),           -- 원문 참조 (url 역할, 있으면)
-        embedding   BLOB,
-        src_ts      TIMESTAMP,                -- 원천 ts_column 값 (있으면)
-        created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
-        updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP,  -- 재청킹·재임베딩 신호
-        graph_status VARCHAR2(20),            -- 구조화 상태 (doc_pipeline)
-        graph_note   VARCHAR2(1000),
-        PRIMARY KEY (source_name, src_id),
-        CONSTRAINT corpus_docs_src_fk FOREIGN KEY (source_name)
-          REFERENCES source_registry(source_name)
-    )""")
-    cur.execute("CREATE INDEX corpus_docs_status_ix ON corpus_docs (graph_status)")
-    # 렉서 프리퍼런스: load_oracle.py가 만든 blog_lexer 재사용, 없으면 생성
-    lexer = config.ORACLE_TEXT_LEXER
-    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
-        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
-    cur.execute(f"""
-        BEGIN
-          BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
-          EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
-          END;
-        END;
-    """)
-    cur.execute("""
-        CREATE INDEX corpus_docs_body_idx ON corpus_docs(body)
-        INDEXTYPE IS CTXSYS.CONTEXT
-        PARAMETERS ('LEXER blog_lexer SYNC (ON COMMIT)')
-    """)
-    print("corpus_docs 테이블 + Text 인덱스 생성")
-
-
 def migrate_blog_posts(cur, src) -> int:
     """소스 1호 특례: blog_posts → corpus_docs 최초 이관을 임베딩까지 SQL 복사.
 
@@ -155,7 +113,7 @@ def main():
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
     source_registry.ensure(cur)
-    ensure_corpus(cur)
+    source_registry.ensure_corpus(cur)
     total = 0
     for src in source_registry.list_sources(cur):
         if not src["enabled"]:

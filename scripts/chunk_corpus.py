@@ -15,32 +15,8 @@ sys.path.insert(0, str(ROOT))
 
 import oracledb
 
-from tools import config, settings
+from tools import config, settings, source_registry
 from tools.blog_search import DSN, PASSWORD, USER
-
-
-def ensure_ddl(cur):
-    """corpus_chunks 테이블 + corpus_docs.updated_at (멱등)."""
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_CHUNKS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE corpus_chunks (
-            source_name VARCHAR2(100) NOT NULL,
-            src_id      VARCHAR2(200) NOT NULL,
-            chunk_no    NUMBER        NOT NULL,   -- 0부터, 문서 내 순서
-            text        CLOB          NOT NULL,   -- title 접두 + 본문 슬라이스
-            char_start  NUMBER,                   -- 본문 내 위치 (뷰 하이라이트용)
-            char_end    NUMBER,
-            embedding   BLOB,                     -- float32[] (백필 배치가 채움)
-            embed_model VARCHAR2(200),            -- 이 벡터를 만든 모델 (모델 버저닝)
-            created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
-            CONSTRAINT corpus_chunks_pk PRIMARY KEY (source_name, src_id, chunk_no),
-            CONSTRAINT corpus_chunks_doc_fk FOREIGN KEY (source_name, src_id)
-              REFERENCES corpus_docs(source_name, src_id) ON DELETE CASCADE)""")
-    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
-                   WHERE table_name = 'CORPUS_DOCS' AND column_name = 'UPDATED_AT'""")
-    if not cur.fetchone()[0]:
-        cur.execute("ALTER TABLE corpus_docs ADD (updated_at TIMESTAMP)")
-        cur.execute("UPDATE corpus_docs SET updated_at = created_at")
 
 
 def spans(length: int, size: int, overlap: int):
@@ -61,7 +37,7 @@ def spans(length: int, size: int, overlap: int):
 def main():
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
-    ensure_ddl(cur)
+    source_registry.ensure_corpus_chunks(cur)
     st = settings.get_all(cur)
     size = max(200, settings.get_int(st, "chunk_chars", config.CHUNK_CHARS))
     overlap = min(max(0, settings.get_int(st, "chunk_overlap", config.CHUNK_OVERLAP)),

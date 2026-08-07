@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from agent.agent import build_agent
 from app import auth
-from tools import config, model_registry
+from tools import config, model_registry, source_registry
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 from tools.session_ctx import current_session
 
@@ -59,11 +59,17 @@ def db():
 @app.on_event("startup")
 async def startup():
     global _saver
+    con = db()
+    cur = con.cursor()
+    # 코퍼스 DDL을 배치보다 먼저 보장 — 새 DB에서 야간 적재 전에
+    # 검색·드라이런이 먼저 와도 ORA-00942가 나지 않도록 (멱등)
+    source_registry.ensure(cur)
+    source_registry.ensure_corpus(cur)
+    source_registry.ensure_corpus_chunks(cur)
+    con.commit()
     load_matrix()  # 임베딩 행렬 메모리 적재 (하이브리드 검색)
     _saver = OracleSaver()  # 멀티턴 기억 — Oracle 외부화 (복제본 공유·재시작 생존)
     await get_agent(None)   # 기본 LLM 예열
-    con = db()
-    cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'SESSIONS'")
     if not cur.fetchone()[0]:
         cur.execute("""

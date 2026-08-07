@@ -10,6 +10,7 @@
 - 적재 배치(scripts/ingest_sources.py)가 이 레지스트리를 읽어 corpus_docs로 조립한다.
 """
 import json
+import re
 
 from tools import config
 
@@ -184,3 +185,72 @@ def upsert(cur, source_name: str, table_name: str, id_column: str, ts_column: st
                                  ensure_ascii=False),
                  "k": content_kind or None, "dm": domain or None,
                  "e": "Y" if enabled else "N", "ue": "Y" if url_enabled else "N"})
+
+def ensure_corpus(cur):
+    """통합 코퍼스 테이블 + Oracle Text 인덱스 (멱등). 렉서는 blog_lexer를 공유.
+
+    적재 배치뿐 아니라 서버 기동 시에도 호출된다 — 새 DB에서 배치 전에
+    드라이런·검색이 먼저 와도 ORA-00942가 나지 않도록.
+    """
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
+    if cur.fetchone()[0]:
+        return
+    cur.execute("""CREATE TABLE corpus_docs (
+        source_name VARCHAR2(100) NOT NULL,   -- source_registry.source_name
+        src_id      VARCHAR2(200) NOT NULL,   -- 원천 테이블의 고유 id 값
+        title       VARCHAR2(1000),
+        body        CLOB,                     -- 역할 매핑으로 조립된 검색 문서
+        kind        VARCHAR2(100),            -- content_kind (검색 라벨·프롬프트 힌트)
+        url         VARCHAR2(1000),           -- 원문 참조 (url 역할, 있으면)
+        embedding   BLOB,
+        src_ts      TIMESTAMP,                -- 원천 ts_column 값 (있으면)
+        created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+        updated_at  TIMESTAMP DEFAULT SYSTIMESTAMP,  -- 재청킹·재임베딩 신호
+        graph_status VARCHAR2(20),            -- 구조화 상태 (doc_pipeline)
+        graph_note   VARCHAR2(1000),
+        PRIMARY KEY (source_name, src_id),
+        CONSTRAINT corpus_docs_src_fk FOREIGN KEY (source_name)
+          REFERENCES source_registry(source_name)
+    )""")
+    cur.execute("CREATE INDEX corpus_docs_status_ix ON corpus_docs (graph_status)")
+    # 렉서 프리퍼런스: load_oracle.py가 만든 blog_lexer 재사용, 없으면 생성
+    lexer = config.ORACLE_TEXT_LEXER
+    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
+        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
+    cur.execute(f"""
+        BEGIN
+          BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
+          EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
+          END;
+        END;
+    """)
+    cur.execute("""
+        CREATE INDEX corpus_docs_body_idx ON corpus_docs(body)
+        INDEXTYPE IS CTXSYS.CONTEXT
+        PARAMETERS ('LEXER blog_lexer SYNC (ON COMMIT)')
+    """)
+    print("corpus_docs 테이블 + Text 인덱스 생성")
+
+
+def ensure_corpus_chunks(cur):
+    """corpus_chunks 테이블 + corpus_docs.updated_at (멱등)."""
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_CHUNKS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE corpus_chunks (
+            source_name VARCHAR2(100) NOT NULL,
+            src_id      VARCHAR2(200) NOT NULL,
+            chunk_no    NUMBER        NOT NULL,   -- 0부터, 문서 내 순서
+            text        CLOB          NOT NULL,   -- title 접두 + 본문 슬라이스
+            char_start  NUMBER,                   -- 본문 내 위치 (뷰 하이라이트용)
+            char_end    NUMBER,
+            embedding   BLOB,                     -- float32[] (백필 배치가 채움)
+            embed_model VARCHAR2(200),            -- 이 벡터를 만든 모델 (모델 버저닝)
+            created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT corpus_chunks_pk PRIMARY KEY (source_name, src_id, chunk_no),
+            CONSTRAINT corpus_chunks_doc_fk FOREIGN KEY (source_name, src_id)
+              REFERENCES corpus_docs(source_name, src_id) ON DELETE CASCADE)""")
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'CORPUS_DOCS' AND column_name = 'UPDATED_AT'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE corpus_docs ADD (updated_at TIMESTAMP)")
+        cur.execute("UPDATE corpus_docs SET updated_at = created_at")
