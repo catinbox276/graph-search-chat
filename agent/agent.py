@@ -54,13 +54,8 @@ def load_agent_settings() -> dict:
     DB를 못 읽으면 코드 기본값으로 동작 (CLI 단독 실행 등)."""
     out = {"system_prompt": "", "disabled_tools": set(), "mcp_enabled": True}
     try:
-        import oracledb
-
         from tools import settings
-        con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD,
-                               dsn=config.ORACLE_DSN)
-        st = settings.get_all(con.cursor())
-        con.close()
+        st = settings.get_all()  # ORM — 접속·반납은 db.session()이 관리
         out["system_prompt"] = (st.get("agent_system_prompt") or "").strip()
         out["disabled_tools"] = {t.strip() for t in
                                  (st.get("agent_disabled_tools") or "").split(",")

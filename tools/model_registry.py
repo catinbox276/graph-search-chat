@@ -1,49 +1,17 @@
-"""모델 레지스트리 — Oracle model_registry 테이블.
+"""모델 레지스트리 — model_registry 테이블 (ORM).
 
 - 등록: LM Studio /v1/models 동기화 (이름 휴리스틱으로 llm/embedding/reranker 분류)
 - LLM 기본값: 사용자가 UI에서 세션별 선택 (레지스트리의 default는 초기값)
 - embedding/reranker 기본값: 관리자 API로만 변경 (임베딩 교체 = 전체 재백필 필요)
+- 테이블 생성은 db.init_schema(). DB 미기동 시 get_default/embedding_endpoint는
+  .env 폴백으로 동작 (import 시 접속하지 않음).
 """
 import httpx
-import oracledb
 
-from tools import config
+from tools import config, db
+from tools.models import ModelRegistry
 
-DSN = config.ORACLE_DSN
-USER = config.ORACLE_USER
-PASSWORD = config.ORACLE_PASSWORD
-MODEL_URL = config.CHAT_URL  # sync는 LLM 호스트의 /v1/models만 조회 (임베딩·리랭커는 별도 호스트)
-
-
-_pool = None
-
-
-def _con():
-    """풀에서 커넥션을 빌려준다(재사용). `with _con() as con:`로 써서 예외에도 반납 보장.
-    풀은 첫 사용 시 지연 생성 — DB 미기동 시 import는 실패하지 않고, get_default가 fallback으로 동작."""
-    global _pool
-    if _pool is None:
-        _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
-                                     min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
-                                     increment=config.ORACLE_POOL_INCREMENT)
-    return _pool.acquire()
-
-
-def _ensure(cur):
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name='MODEL_REGISTRY'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE model_registry (
-            kind VARCHAR2(20), name VARCHAR2(200),
-            enabled CHAR(1) DEFAULT 'Y', is_default CHAR(1) DEFAULT 'N',
-            base_url VARCHAR2(500),
-            registered TIMESTAMP DEFAULT SYSTIMESTAMP,
-            PRIMARY KEY (kind, name))""")
-        return
-    # 모델별 서빙 주소 (사내 vLLM은 모델마다 호스트가 다름 — 빈값은 역할별 env 폴백)
-    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
-                   WHERE table_name='MODEL_REGISTRY' AND column_name='BASE_URL'""")
-    if not cur.fetchone()[0]:
-        cur.execute("ALTER TABLE model_registry ADD (base_url VARCHAR2(500))")
+MODEL_URL = config.CHAT_URL  # sync는 LLM 호스트의 /v1/models만 조회
 
 
 def _classify(name: str) -> str:
@@ -55,81 +23,67 @@ def _classify(name: str) -> str:
     return "llm"
 
 
+def _ensure_default(s, kind: str):
+    """그 종류에 기본값이 없으면 이름순 첫 모델을 기본값으로."""
+    has = s.query(ModelRegistry).filter_by(kind=kind, is_default="Y").first()
+    if not has:
+        first = (s.query(ModelRegistry).filter_by(kind=kind)
+                 .order_by(ModelRegistry.name).first())
+        if first:
+            first.is_default = "Y"
+
+
 def sync_from_serving() -> dict:
     """모델 서빙(/v1/models)에서 목록을 받아 레지스트리에 등록(업서트)."""
     models = httpx.get(f"{MODEL_URL}/models", timeout=10).json()["data"]
     added = []
-    with _con() as con:
-        cur = con.cursor()
-        _ensure(cur)
+    with db.session() as s:
         for m in models:
             kind = _classify(m["id"])
-            cur.execute("""MERGE INTO model_registry r USING dual
-                           ON (r.kind=:k AND r.name=:n)
-                           WHEN NOT MATCHED THEN INSERT (kind, name) VALUES (:k, :n)""",
-                        {"k": kind, "n": m["id"]})
-            if cur.rowcount:
+            if not s.get(ModelRegistry, (kind, m["id"])):
+                s.add(ModelRegistry(kind=kind, name=m["id"]))
                 added.append(f"{kind}:{m['id']}")
-        # 종류별 default 없으면 첫 모델을 default로
+        s.flush()
         for kind in ("llm", "embedding", "reranker"):
-            cur.execute("SELECT COUNT(*) FROM model_registry WHERE kind=:1 AND is_default='Y'", [kind])
-            if not cur.fetchone()[0]:
-                cur.execute("""UPDATE model_registry SET is_default='Y'
-                               WHERE kind=:k AND name=(SELECT MIN(name) FROM model_registry WHERE kind=:k)""",
-                            {"k": kind})
-        con.commit()
+            _ensure_default(s, kind)
     return {"registered": added, "total": len(models)}
 
 
 def list_models(kind: str | None = None) -> list:
-    with _con() as con:
-        cur = con.cursor()
-        _ensure(cur)
-        q = "SELECT kind, name, enabled, is_default, base_url FROM model_registry"
-        if kind:
-            cur.execute(q + " WHERE kind=:1 ORDER BY name", [kind])
-        else:
-            cur.execute(q + " ORDER BY kind, name")
-        return [{"kind": r[0], "name": r[1], "enabled": r[2] == "Y",
-                 "default": r[3] == "Y", "base_url": r[4] or ""}
-                for r in cur.fetchall()]
+    with db.session() as s:
+        q = s.query(ModelRegistry)
+        q = q.filter_by(kind=kind).order_by(ModelRegistry.name) if kind \
+            else q.order_by(ModelRegistry.kind, ModelRegistry.name)
+        return [{"kind": r.kind, "name": r.name, "enabled": r.enabled == "Y",
+                 "default": r.is_default == "Y", "base_url": r.base_url or ""}
+                for r in q.all()]
 
 
 def add_model(kind: str, name: str, base_url: str = "", enabled: bool = True):
     """수동 등록/수정 (사내 vLLM처럼 sync 못 하는 호스트의 모델)."""
     if kind not in ("llm", "embedding", "reranker"):
         raise ValueError(f"kind는 llm/embedding/reranker 중 하나: {kind}")
-    with _con() as con:
-        cur = con.cursor()
-        _ensure(cur)
-        cur.execute("""MERGE INTO model_registry r USING dual ON (r.kind=:k AND r.name=:n)
-                       WHEN MATCHED THEN UPDATE SET base_url=:u, enabled=:e
-                       WHEN NOT MATCHED THEN INSERT (kind, name, base_url, enabled)
-                       VALUES (:k, :n, :u, :e)""",
-                    {"k": kind, "n": name, "u": base_url or None,
-                     "e": "Y" if enabled else "N"})
-        # 그 종류의 첫 모델이면 기본값으로
-        cur.execute("SELECT COUNT(*) FROM model_registry WHERE kind=:1 AND is_default='Y'",
-                    [kind])
-        if not cur.fetchone()[0]:
-            cur.execute("""UPDATE model_registry SET is_default='Y'
-                           WHERE kind=:1 AND name=:2""", [kind, name])
-        con.commit()
+    with db.session() as s:
+        row = s.get(ModelRegistry, (kind, name))
+        if row:
+            row.base_url = base_url or None
+            row.enabled = "Y" if enabled else "N"
+        else:
+            s.add(ModelRegistry(kind=kind, name=name, base_url=base_url or None,
+                                enabled="Y" if enabled else "N"))
+            s.flush()
+        _ensure_default(s, kind)
 
 
 def embedding_endpoint() -> tuple:
     """임베딩 (base_url, 모델명) — 레지스트리 기본값 우선, 없으면 .env 폴백.
-    검색·청크 백필·dedup·경로 진입점이 전부 이걸 쓴다 (한 곳에서 해석).
-    모델 교체 시 청크는 embed_model 버저닝으로 자동 재백필, nodes는 별도 재백필."""
+    검색·청크 백필·dedup·경로 진입점이 전부 이걸 쓴다 (한 곳에서 해석)."""
     try:
-        with _con() as con:
-            cur = con.cursor()
-            _ensure(cur)
-            cur.execute("""SELECT name, base_url FROM model_registry
-                           WHERE kind='embedding' AND is_default='Y' AND enabled='Y'""")
-            r = cur.fetchone()
-        if r:
-            return (r[1] or config.EMBED_URL), r[0]
+        with db.session() as s:
+            r = s.query(ModelRegistry).filter_by(
+                kind="embedding", is_default="Y", enabled="Y").first()
+            if r:
+                return (r.base_url or config.EMBED_URL), r.name
     except Exception:
         pass  # DB 미기동 시에도 동작
     return config.EMBED_URL, config.EMBED_MODEL
@@ -148,37 +102,28 @@ def embedding_client() -> tuple:
 
 
 def set_enabled(kind: str, name: str, enabled: bool):
-    with _con() as con:
-        cur = con.cursor()
-        cur.execute("""UPDATE model_registry SET enabled=:1
-                       WHERE kind=:2 AND name=:3""",
-                    ["Y" if enabled else "N", kind, name])
-        con.commit()
+    with db.session() as s:
+        row = s.get(ModelRegistry, (kind, name))
+        if row:
+            row.enabled = "Y" if enabled else "N"
 
 
 def get_default(kind: str, fallback: str) -> str:
     try:
-        with _con() as con:
-            cur = con.cursor()
-            _ensure(cur)
-            cur.execute("SELECT name FROM model_registry WHERE kind=:1 AND is_default='Y'", [kind])
-            r = cur.fetchone()
-        return r[0] if r else fallback
+        with db.session() as s:
+            r = s.query(ModelRegistry).filter_by(kind=kind, is_default="Y").first()
+            return r.name if r else fallback
     except Exception:
-        return fallback  # DB 미기동 시에도 동작 (fallback = 기존 하드코딩 값)
+        return fallback  # DB 미기동 시에도 동작
 
 
 def set_default(kind: str, name: str) -> None:
-    with _con() as con:
-        cur = con.cursor()
-        cur.execute("SELECT COUNT(*) FROM model_registry WHERE kind=:1 AND name=:2",
-                    [kind, name])
-        if not cur.fetchone()[0]:
+    with db.session() as s:
+        if not s.get(ModelRegistry, (kind, name)):
             raise ValueError(f"미등록 모델: {kind}/{name} (먼저 sync 하세요)")
-        cur.execute("UPDATE model_registry SET is_default='N' WHERE kind=:1", [kind])
-        cur.execute("UPDATE model_registry SET is_default='Y' WHERE kind=:1 AND name=:2",
-                    [kind, name])
-        con.commit()
+        s.query(ModelRegistry).filter_by(kind=kind).update({"is_default": "N"})
+        s.query(ModelRegistry).filter_by(kind=kind, name=name).update(
+            {"is_default": "Y"})
 
 
 if __name__ == "__main__":

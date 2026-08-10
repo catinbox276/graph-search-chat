@@ -3,6 +3,7 @@ uvicorn
 itsdangerous
 python-dotenv
 oracledb
+sqlalchemy>=2.0.41   # ORM (Oracle 18c/19c — 23ai VECTOR는 2.0.41+ 네이티브)
 numpy
 openai
 httpx

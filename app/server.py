@@ -24,7 +24,8 @@ from pydantic import BaseModel
 
 from agent.agent import build_agent
 from app import auth
-from tools import config, model_registry, source_registry
+from tools import config, db as orm_db, model_registry, source_registry
+from tools.models import AppUser
 from tools.blog_search import DSN, PASSWORD, USER, load_matrix
 from tools.session_ctx import current_session
 
@@ -59,33 +60,18 @@ def db():
 @app.on_event("startup")
 async def startup():
     global _saver
+    # 전 테이블 생성(models.py 선언 기준, 멱등) + Oracle Text 인덱스 + 시드.
+    # 새 DB에서 배치 전에 검색·드라이런이 먼저 와도 ORA-00942가 나지 않는 보장 포함
+    orm_db.init_schema()
     con = db()
     cur = con.cursor()
-    # 코퍼스 DDL을 배치보다 먼저 보장 — 새 DB에서 야간 적재 전에
-    # 검색·드라이런이 먼저 와도 ORA-00942가 나지 않도록 (멱등)
+    # 구버전 DB 컬럼 추가(ALTER) 마이그레이션은 기존 ensure가 계속 담당
     source_registry.ensure(cur)
-    source_registry.ensure_corpus(cur)
-    source_registry.ensure_corpus_chunks(cur)
     con.commit()
     load_matrix()  # 임베딩 행렬 메모리 적재 (하이브리드 검색)
     _saver = OracleSaver()  # 멀티턴 기억 — Oracle 외부화 (복제본 공유·재시작 생존)
     await get_agent(None)   # 기본 LLM 예열
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'SESSIONS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""
-            CREATE TABLE sessions (
-              id         VARCHAR2(36),
-              turn       NUMBER,
-              ts         TIMESTAMP DEFAULT SYSTIMESTAMP,
-              question   CLOB,
-              tool_calls CLOB,
-              answer     CLOB,
-              verdict    VARCHAR2(20),   -- 세션 게이트 판정 (success/fail/unknown)
-              user_id    VARCHAR2(64),   -- SSO 로그인 사용자 (재발 판정을 사용자 단위로)
-              PRIMARY KEY (id, turn)
-            )
-        """)
-        con.commit()
+    # sessions 생성은 models.py(create_all) 소관 — 구버전 DB의 user_id 컬럼만 보강
     cur.execute("""SELECT COUNT(*) FROM user_tab_columns
                    WHERE table_name = 'SESSIONS' AND column_name = 'USER_ID'""")
     if not cur.fetchone()[0]:
@@ -102,16 +88,14 @@ class ChatIn(BaseModel):
 
 def log_turn(sid: str, question: str, calls: list, answer: str,
              user: str | None = None):
-    con = db()
-    cur = con.cursor()
-    cur.execute("SELECT NVL(MAX(turn),0)+1 FROM sessions WHERE id = :1", [sid])
-    turn = cur.fetchone()[0]
-    cur.execute(
-        "INSERT INTO sessions (id, turn, question, tool_calls, answer, user_id) "
-        "VALUES (:1, :2, :3, :4, :5, :6)",
-        [sid, turn, question, json.dumps(calls, ensure_ascii=False), answer, user])
-    con.commit()
-    con.close()
+    from sqlalchemy import func
+    from tools.models import Session_
+    with orm_db.session() as s:
+        turn = s.query(func.coalesce(func.max(Session_.turn), 0) + 1) \
+                .filter(Session_.id == sid).scalar()
+        s.add(Session_(id=sid, turn=turn, question=question,
+                       tool_calls=json.dumps(calls, ensure_ascii=False),
+                       answer=answer, user_id=user))
 
 
 class TopicCheckIn(BaseModel):
@@ -587,15 +571,13 @@ def login_page():
 def admin_users(request: Request):
     """관리자: 계정 목록 (승인 대기 + 활성, 권한 표시)."""
     check_admin(request)
-    con = db()
-    cur = con.cursor()
-    auth.ensure_users(cur)
-    cur.execute("""SELECT user_id, approved, NVL(is_admin, 'N'), created_at
-                   FROM app_users ORDER BY approved, created_at DESC""")
-    rows = [{"user_id": r[0], "approved": r[1] == "Y", "is_admin": r[2] == "Y",
-             "created_at": r[3].isoformat() if r[3] else None}
-            for r in cur.fetchall()]
-    con.close()
+    with orm_db.session() as s:
+        users = s.query(AppUser).order_by(AppUser.approved,
+                                          AppUser.created_at.desc()).all()
+        rows = [{"user_id": u.user_id, "approved": u.approved == "Y",
+                 "is_admin": (u.is_admin or "N") == "Y",
+                 "created_at": u.created_at.isoformat() if u.created_at else None}
+                for u in users]
     return {"users": rows}
 
 
@@ -608,27 +590,23 @@ class UserActIn(BaseModel):
 def admin_user_act(inp: UserActIn, request: Request):
     """관리자: 계정 승인 / 관리자 권한 부여·해제 / 삭제. 권한 변경은 재로그인 시 반영."""
     check_admin(request)
-    con = db()
-    cur = con.cursor()
-    auth.ensure_users(cur)
     uid = inp.user_id.strip()
-    if inp.action == "approve":
-        cur.execute("""UPDATE app_users SET approved = 'Y', approved_at = SYSTIMESTAMP
-                       WHERE user_id = :1""", [uid])
-    elif inp.action == "admin_on":
-        cur.execute("UPDATE app_users SET is_admin = 'Y' WHERE user_id = :1", [uid])
-    elif inp.action == "admin_off":
-        cur.execute("UPDATE app_users SET is_admin = 'N' WHERE user_id = :1", [uid])
-    elif inp.action == "delete":
-        cur.execute("DELETE FROM app_users WHERE user_id = :1", [uid])
-    else:
-        con.close()
+    if inp.action not in ("approve", "admin_on", "admin_off", "delete"):
         raise HTTPException(400, "action은 approve/admin_on/admin_off/delete 중 하나")
-    n = cur.rowcount
-    con.commit()
-    con.close()
-    if not n:
-        raise HTTPException(404, f"계정이 없습니다: {uid}")
+    from sqlalchemy import func
+    with orm_db.session() as s:
+        u = s.get(AppUser, uid)
+        if not u:
+            raise HTTPException(404, f"계정이 없습니다: {uid}")
+        if inp.action == "approve":
+            # SYSTIMESTAMP는 func로 쓰면 빈 괄호가 붙어 ORA-30088 — ANSI 함수 사용
+            u.approved, u.approved_at = "Y", func.current_timestamp()
+        elif inp.action == "admin_on":
+            u.is_admin = "Y"
+        elif inp.action == "admin_off":
+            u.is_admin = "N"
+        else:
+            s.delete(u)
     return {"ok": True}
 
 
@@ -905,7 +883,7 @@ def admin_pipeline_settings(request: Request):
     from tools import settings
     con = db()
     cur = con.cursor()
-    st = settings.get_all(cur)
+    st = settings.get_all()
     con.commit()
     con.close()
     return {"doc_extract_limit": settings.get_int(st, "doc_extract_limit",
@@ -959,7 +937,7 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn, request: Request):
     vals["doc_extract_model"] = inp.doc_extract_model.strip()
     con = db()
     cur = con.cursor()
-    settings.set_many(cur, vals)
+    settings.set_many(vals)
     con.commit()
     con.close()
     return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
@@ -1003,7 +981,7 @@ async def admin_agent_settings_get(request: Request):
     from agent.agent import SYSTEM_PROMPT, discover_tools
     from tools import settings
     con = db()
-    st = settings.get_all(con.cursor())
+    st = settings.get_all()
     con.commit()
     con.close()
     return {"system_prompt": (st.get("agent_system_prompt") or ""),
@@ -1030,7 +1008,7 @@ def admin_agent_settings_set(inp: AgentSettingsIn, request: Request):
         raise HTTPException(400, "시스템 프롬프트는 8000자 이내여야 합니다")
     con = db()
     cur = con.cursor()
-    settings.set_many(cur, {
+    settings.set_many({
         "agent_system_prompt": inp.system_prompt.strip(),
         "agent_mcp_enabled": "" if inp.mcp_enabled else "0",
         "agent_disabled_tools": ",".join(
@@ -1170,7 +1148,7 @@ def admin_source_dryrun(sname: str, inp: DryrunIn, request: Request):
              row[3].read() if hasattr(row[3], "read") else (row[3] or ""))
             for row in cur.fetchall()]
     from tools import settings
-    st = settings.get_all(cur)
+    st = settings.get_all()
     con.close()
     if not docs:
         return {"domain": domain, "results": [], "note": "미처리 문서가 없습니다"}

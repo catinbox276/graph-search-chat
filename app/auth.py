@@ -16,7 +16,8 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
-from tools import config
+from tools import config, db
+from tools.models import AppUser
 
 COOKIE = "gsc_auth"
 _signer = URLSafeTimedSerializer(config.SESSION_SECRET, salt="gsc-local-auth")
@@ -40,24 +41,6 @@ def _verify_pw(password: str, stored: str) -> bool:
         return secrets.compare_digest(dk.hex(), hexhash)
     except Exception:
         return False
-
-
-# ── 사용자 테이블 ─────────────────────────────────────────────
-def ensure_users(cur):
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'APP_USERS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE app_users (
-            user_id     VARCHAR2(64) PRIMARY KEY,
-            pw_hash     VARCHAR2(200) NOT NULL,
-            approved    CHAR(1) DEFAULT 'N',
-            is_admin    CHAR(1) DEFAULT 'N',   -- 관리자가 부여/해제 (2권한: 일반/관리자)
-            created_at  TIMESTAMP DEFAULT SYSTIMESTAMP,
-            approved_at TIMESTAMP)""")
-
-
-def _db():
-    from app.server import db  # 서버 커넥션 풀 재사용 (지연 임포트 — 순환 방지)
-    return db()
 
 
 # ── 세션 (서명 토큰 — 쿠키 또는 Authorization Bearer 이중 전달) ──
@@ -123,15 +106,9 @@ def login(inp: CredIn):
         _set_login_cookie(resp, token)
         return resp
     # 2) 일반 계정 (가입 + 승인 필요)
-    con = _db()
-    try:
-        cur = con.cursor()
-        ensure_users(cur)
-        cur.execute("""SELECT pw_hash, approved, NVL(is_admin, 'N')
-                       FROM app_users WHERE user_id = :1""", [uid])
-        row = cur.fetchone()
-    finally:
-        con.close()
+    with db.session() as s:
+        u = s.get(AppUser, uid)
+        row = (u.pw_hash, u.approved, u.is_admin or "N") if u else None
     if not row or not _verify_pw(pw, row[0]):
         raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다")
     if row[1] != "Y":
@@ -152,18 +129,10 @@ def signup(inp: CredIn):
         raise HTTPException(409, "사용할 수 없는 아이디입니다")
     if len(pw) < 4:
         raise HTTPException(400, "비밀번호는 4자 이상이어야 합니다")
-    con = _db()
-    try:
-        cur = con.cursor()
-        ensure_users(cur)
-        cur.execute("SELECT COUNT(*) FROM app_users WHERE user_id = :1", [uid])
-        if cur.fetchone()[0]:
+    with db.session() as s:
+        if s.get(AppUser, uid):
             raise HTTPException(409, "이미 존재하는 아이디입니다")
-        cur.execute("INSERT INTO app_users (user_id, pw_hash) VALUES (:1, :2)",
-                    [uid, _hash_pw(pw)])
-        con.commit()
-    finally:
-        con.close()
+        s.add(AppUser(user_id=uid, pw_hash=_hash_pw(pw)))
     return {"ok": True, "note": "가입 완료 — 관리자 승인 후 로그인할 수 있습니다"}
 
 

@@ -172,7 +172,7 @@ def main():
     cur = con.cursor()
     ddl(cur)      # nodes/edges/node_evidence/domain_registry 보장
     doc_ddl(cur)
-    st = settings.get_all(cur)
+    st = settings.get_all()
     con.commit()
     limit = args.limit or settings.get_int(st, "doc_extract_limit", config.DOC_EXTRACT_LIMIT)
     conc = max(1, settings.get_int(st, "doc_concurrency", config.DOC_CONCURRENCY))

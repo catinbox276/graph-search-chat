@@ -38,7 +38,7 @@ def main():
     con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
     cur = con.cursor()
     source_registry.ensure_corpus_chunks(cur)
-    st = settings.get_all(cur)
+    st = settings.get_all()
     size = max(200, settings.get_int(st, "chunk_chars", config.CHUNK_CHARS))
     overlap = min(max(0, settings.get_int(st, "chunk_overlap", config.CHUNK_OVERLAP)),
                   size - 1)
