@@ -32,7 +32,7 @@ flowchart LR
     MCP["B: mcp-server-datahub<br/>(공식 MCP, stdio)"]
     UI & GV --> API
     API --> AG
-    AG -->|"함수: blog_search·path_suggest"| ora
+    AG -->|"함수: corpus_search·path_suggest"| ora
     AG -->|MCP| MCP --> DH
     AG --> LMS
     MTX -.-> ora
@@ -66,7 +66,7 @@ flowchart LR
 | 파일 | 역할 | 핵심 결정 |
 |---|---|---|
 | `agent/agent.py` | DeepAgents 에이전트. 툴 = suggest_paths + 블로그 검색 2종 + DataHub MCP | 새 문제 → suggest_paths 먼저 (시스템 프롬프트) |
-| `tools/blog_search.py` | 하이브리드 검색: Oracle Text(lexical) + 인메모리 행렬 코사인(semantic) → RRF | 검색당 임베딩 계산은 질의 1건뿐 |
+| `tools/corpus_search.py` | 하이브리드 검색: Oracle Text(lexical) + 인메모리 행렬 코사인(semantic) → RRF | 검색당 임베딩 계산은 질의 1건뿐 |
 | `tools/path_suggest.py` | 그래프 방향 제안 + 실패 이력 경고. 3단 서열: ✅검증(세션 성공) > 📄문서 근거(미검증 명시) > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지 — 실증됨). 문서 유래 경로를 "검증"으로 표시 금지 |
 | `tools/model_registry.py` | 모델 등록/기본값. 서빙 동기화 | 임베딩 교체 시 재백필 경고 |
 | `tools/source_registry.py` `settings.py` | 원천 테이블 등록(역할 매핑)·조립 / 운영 설정 KV | 원천 테이블은 SELECT만 |

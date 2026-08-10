@@ -13,10 +13,11 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import oracledb
+
+from tools import config
 import yaml
 
 from agent.agent import build_agent
-from tools.blog_search import DSN, PASSWORD, USER
 
 
 def all_runs(only=None):
@@ -34,7 +35,7 @@ async def main():
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     agent = await build_agent()
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     done = {r[0] for r in cur.execute("SELECT id FROM sessions")}
     runs = [r for r in all_runs(only) if r[0] not in done]  # 재실행 시 이어하기

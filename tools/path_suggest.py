@@ -11,12 +11,11 @@ import re
 import numpy as np
 import oracledb
 from tools import config, model_registry
-from tools.blog_search import DSN, PASSWORD, USER
 from tools.session_ctx import current_session
 
 SIM_ENTRY = config.PATH_SIM_ENTRY  # 진입점 매칭 임계값 (dedup보다 완화 — 원질문 vs 정규화 문구)
 
-_pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
+_pool = oracledb.create_pool(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN,
                              min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                              increment=config.ORACLE_POOL_INCREMENT)
 

@@ -32,7 +32,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tools import config, settings  # noqa: E402
-from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 from poc.graph_pipeline import CHAT_MODEL, ddl, get_or_create, llm  # noqa: E402
 
 import json  # noqa: E402
@@ -168,7 +167,7 @@ def main():
                     help="이번 실행 처리 문서 수 (0=설정값 doc_extract_limit)")
     args = ap.parse_args()
 
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     ddl(cur)      # nodes/edges/node_evidence/domain_registry 보장
     doc_ddl(cur)

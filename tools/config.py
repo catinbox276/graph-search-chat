@@ -107,7 +107,7 @@ SOURCE_TABLE_ALLOWLIST = frozenset(
 CHUNK_CHARS = _geti("CHUNK_CHARS", 1200)    # 청크 크기(자) — 이하면 청크 1개
 CHUNK_OVERLAP = _geti("CHUNK_OVERLAP", 150)  # 인접 청크 겹침(자)
 
-# --- 하이브리드 검색 (tools/blog_search.py) ---
+# --- 하이브리드 검색 (tools/corpus_search.py) ---
 RRF_K = _geti("RRF_K", 60)                        # RRF 융합 상수
 SEARCH_TOP_LEXICAL = _geti("SEARCH_TOP_LEXICAL", 30)   # Oracle Text 후보 수
 SEARCH_TOP_SEMANTIC = _geti("SEARCH_TOP_SEMANTIC", 30)  # 임베딩 코사인 후보 수

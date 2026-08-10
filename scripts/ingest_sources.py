@@ -17,7 +17,6 @@ import oracledb
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import config, source_registry  # noqa: E402
-from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 
 oracledb.defaults.fetch_lobs = False  # CLOB을 str로 바로 받는다
 BATCH = 500
@@ -110,7 +109,7 @@ def ingest_source(cur, src) -> int:
 
 
 def main():
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     source_registry.ensure(cur)
     source_registry.ensure_corpus(cur)

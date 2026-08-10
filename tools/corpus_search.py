@@ -17,9 +17,8 @@ import numpy as np
 import oracledb
 from tools import config, model_registry
 
-DSN = config.ORACLE_DSN            # 접속 상수는 관례상 이 모듈에서 import
-USER = config.ORACLE_USER
-PASSWORD = config.ORACLE_PASSWORD
+DSN, USER, PASSWORD = (config.ORACLE_DSN, config.ORACLE_USER,
+                       config.ORACLE_PASSWORD)  # 모듈 내부용 — 외부는 config 직접 참조
 RRF_K = config.RRF_K
 
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
@@ -58,7 +57,7 @@ def load_matrix():
             m = np.stack(vecs)
             m /= np.linalg.norm(m, axis=1, keepdims=True)
             _matrix, _ids, _chunk_nos = m, ids, nos
-        print(f"[blog_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {emb_name})")
+        print(f"[corpus_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {emb_name})")
     return len(ids)
 
 

@@ -16,7 +16,6 @@ sys.path.insert(0, str(ROOT))
 import oracledb
 
 from tools import config, settings, source_registry
-from tools.blog_search import DSN, PASSWORD, USER
 
 
 def spans(length: int, size: int, overlap: int):
@@ -35,7 +34,7 @@ def spans(length: int, size: int, overlap: int):
 
 
 def main():
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     source_registry.ensure_corpus_chunks(cur)
     st = settings.get_all()

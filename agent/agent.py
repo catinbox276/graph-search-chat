@@ -19,7 +19,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
 from tools import config
-from tools.blog_search import read_doc, search_docs
+from tools.corpus_search import read_doc, search_docs
 from tools.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
@@ -118,7 +118,7 @@ async def _mcp_tools():
 def _source_tools() -> list:
     """등록 소스마다 소스 한정 검색 도구 자동 생성 (search_{소스명})."""
     try:
-        from tools.blog_search import source_search_tools
+        from tools.corpus_search import source_search_tools
         return source_search_tools()
     except Exception as e:
         print(f"[경고] 소스 검색 도구 생성 실패: {e}", file=sys.stderr)

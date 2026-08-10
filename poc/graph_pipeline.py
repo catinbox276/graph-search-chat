@@ -34,7 +34,6 @@ import yaml
 from openai import OpenAI
 
 from tools import config
-from tools.blog_search import DSN, PASSWORD, USER
 
 llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY)
 # 임베딩 클라이언트는 model_registry.embedding_client()가 해석 (레지스트리 우선)
@@ -521,7 +520,7 @@ def retract_recurrences(cur, task_ids):
 
 def main():
     exp = expects()
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     ddl(cur)
     cur.execute("""SELECT id, question, tool_calls, answer FROM sessions

@@ -25,7 +25,6 @@ import oracledb
 
 from poc.graph_pipeline import LAYER_KIND, SIM_THRESHOLD, cosine, llm_same
 from tools import config
-from tools.blog_search import DSN, PASSWORD, USER
 
 LOW_COUNT = config.MAINT_LOW_COUNT       # 패스1: 이 이하 통행이면 흡수 후보
 ABSORB_COUNT = config.MAINT_ABSORB_COUNT  # 패스2: 이 이하 통행인 잎만 흡수
@@ -200,7 +199,7 @@ def main():
     age = MIN_AGE_DAYS
     if "--age-days" in sys.argv:
         age = int(sys.argv[sys.argv.index("--age-days") + 1])
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM nodes")
     before = cur.fetchone()[0]

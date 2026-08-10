@@ -19,7 +19,6 @@ sys.path.insert(0, str(ROOT))
 import oracledb
 
 from tools import config
-from tools.blog_search import DSN, PASSWORD, USER
 
 
 def has_constraint(cur, name):
@@ -40,7 +39,7 @@ def has_column(cur, table, col):
 
 
 def main():
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
 
     # 1) node_evidence 재구축 (다형 참조 -> kind/ref)

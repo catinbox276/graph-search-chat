@@ -18,7 +18,6 @@ from openai import AsyncOpenAI
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from tools import config  # noqa: E402
-from tools.blog_search import DSN, PASSWORD, USER  # noqa: E402
 from tools import model_registry  # noqa: E402
 
 EMBED_URL_RESOLVED, EMB_MODEL = model_registry.embedding_endpoint()  # 레지스트리 우선
@@ -30,7 +29,7 @@ llm = AsyncOpenAI(base_url=EMBED_URL_RESOLVED, api_key=config.MODEL_API_KEY)
 
 
 async def main():
-    con = oracledb.connect(user=USER, password=PASSWORD, dsn=DSN)
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_CHUNKS'")
     if not cur.fetchone()[0]:

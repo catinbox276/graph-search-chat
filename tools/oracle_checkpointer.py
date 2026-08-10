@@ -22,13 +22,12 @@ from langgraph.checkpoint.base import (
 )
 
 from tools import config
-from tools.blog_search import DSN, PASSWORD, USER
 
 
 class OracleSaver(BaseCheckpointSaver):
     def __init__(self):
         super().__init__()
-        self._pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
+        self._pool = oracledb.create_pool(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN,
                                           min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                                           increment=config.ORACLE_POOL_INCREMENT)
         self._ensure_tables()
