@@ -147,11 +147,26 @@ def doc_view(pid: str, request: Request):
         con.close()
 
 
+
+def _check_session_owner(sid: str | None, uid: str | None):
+    """이어하기 세션의 소유 검사 — 남의 session_id로 기억·기록에 올라타는 것(IDOR) 차단."""
+    if not sid:
+        return
+    con = db()
+    cur = con.cursor()
+    cur.execute("SELECT user_id FROM sessions WHERE id = :1 AND turn = 1", [sid])
+    row = cur.fetchone()
+    con.close()
+    if row and row[0] != uid:
+        raise HTTPException(403, "본인 세션만 이어할 수 있습니다")
+
+
 @router.post("/chat/stream")
 async def chat_stream(inp: ChatIn, request: Request):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""
     u = auth.require_user(request)
     uid = (u or {}).get("user")
+    _check_session_owner(inp.session_id, uid)
     sid = inp.session_id or str(uuid.uuid4())
 
     async def gen():
@@ -222,6 +237,7 @@ async def chat_stream(inp: ChatIn, request: Request):
 async def chat(inp: ChatIn, request: Request):
     """비스트리밍 API (스크립트용). 멀티턴 기억 동일 적용."""
     u = auth.require_user(request)
+    _check_session_owner(inp.session_id, (u or {}).get("user"))
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
     current_session.set(sid)

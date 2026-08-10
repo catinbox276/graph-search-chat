@@ -8,7 +8,8 @@ router = APIRouter()
 
 
 @router.get("/graph/data")
-def graph_data():
+def graph_data(request: Request):
+    auth.require_user(request)
     con = db()
     cur = con.cursor()
     cur.execute("""

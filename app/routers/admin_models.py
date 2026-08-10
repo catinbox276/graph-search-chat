@@ -4,13 +4,15 @@ from pydantic import BaseModel
 
 from app.deps import check_admin, clear_agents
 from tools import mcp_registry, model_registry, settings
+from tools.corpus_search import load_matrix
 
 router = APIRouter()
 
 
 @router.get("/reload")
-def reload_embeddings():
-    """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요)."""
+def reload_embeddings(request: Request):
+    """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요) — 관리자 전용."""
+    check_admin(request)
     return {"loaded": load_matrix()}
 
 
