@@ -139,6 +139,7 @@ MAINT_DECAY_FLOOR = _getf("MAINT_DECAY_FLOOR", 0.1)  # 감쇠 하한 배수 (0�
 # --- 실서비스 게이트 행동 신호 (poc/graph_pipeline.py) — design §3 보강 ---
 SIG_REPEAT_SIM = _getf("SIG_REPEAT_SIM", 0.85)      # 재질문·재발 판정 질문 유사도
 SIG_TOPIC_MOVE_SIM = _getf("SIG_TOPIC_MOVE_SIM", 0.50)  # 이보다 멀어지면 화제 전진
+SEG_SPLIT_SIM = _getf("SEG_SPLIT_SIM", 0.35)        # 인접 질문이 이보다 멀면 태스크 경계로 분할
 SIG_HASTY_RATIO = _getf("SIG_HASTY_RATIO", 0.3)     # 턴 간격이 중앙값의 이 배수 미만이면 조급함
 RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) — design §7 미해결 값의 초기치
 

@@ -38,6 +38,7 @@
   <nav class="pathnav">
     <a href="/">채팅</a><span class="edge"></span>
     <a class="on" href="/graph">지식그래프</a><span class="edge"></span>
+    <a href="/contrib">내 기여</a><span class="edge"></span>
     <a href="/admin">관리</a><span class="edge"></span>
     <a href="http://localhost:9002" target="_blank">DataHub ↗</a>
   </nav>
@@ -149,8 +150,39 @@ function showPanel(id) {
     <div style="font-weight:600;margin-top:10px">연결 (${nb.length})</div>
     <ul>${nb.sort((a, b) => b.c - a.c).map(x =>
       `<li onclick="focusNode('${x.t.id}')">${x.dir} ${x.t.name.slice(0, 40)} <span style="color:var(--mut)">(${x.c})</span></li>`).join("")}
-    </ul>`;
+    </ul>
+    <div style="font-weight:600;margin-top:10px">출처 증거</div>
+    <ul id="evList"><li style="color:var(--mut)">불러오는 중…</li></ul>`;
   p.classList.add("show");
+  loadEvidence(id);
+}
+
+// 출처 증거 — 이 노드가 어느 세션/문서에서 왔는지 (provenance)
+const VERDICT_MARK = {success: "✅", fail: "❌", retracted: "↩", unknown: "―"};
+async function loadEvidence(id) {
+  const ul = document.getElementById("evList");
+  try {
+    const r = await fetch(`/graph/node/${encodeURIComponent(id)}/evidence`);
+    if (!r.ok) { ul.innerHTML = "<li style='color:var(--mut)'>조회 실패</li>"; return; }
+    const {evidence, total} = await r.json();
+    ul.innerHTML = "";
+    evidence.forEach(ev => {
+      const li = document.createElement("li");
+      li.style.cursor = "default";
+      li.textContent = ev.kind === "doc"
+        ? `📄 ${(ev.title || ev.ref).slice(0, 40)}`
+        : `💬 세션 ${ev.ref.slice(0, 8)}… ${VERDICT_MARK[ev.verdict] || "―"}`;
+      li.title = ev.ref;
+      ul.appendChild(li);
+    });
+    if (total > evidence.length) {
+      const li = document.createElement("li");
+      li.style.cssText = "color:var(--mut);cursor:default";
+      li.textContent = `… 외 ${total - evidence.length}건`;
+      ul.appendChild(li);
+    }
+    if (!evidence.length) ul.innerHTML = "<li style='color:var(--mut)'>증거 없음</li>";
+  } catch { ul.innerHTML = "<li style='color:var(--mut)'>조회 실패</li>"; }
 }
 function hidePanel() { document.getElementById("panel").classList.remove("show"); }
 function focusNode(id) {

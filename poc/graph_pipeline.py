@@ -64,16 +64,29 @@ JUDGE_PROMPT = """세션을 판정하고 지식을 추출하라. JSON만 출력.
   (기준이 '실패 인정'이면 인정했을 때 fail)
 - unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우"""
 
-# UI 세션용: 판정은 행동 신호(코드)가 이미 끝냈고, LLM은 지식 표현만 뽑는다
-EXTRACT_PROMPT = """대화에서 지식을 추출하라. JSON만 출력.
+# UI 세션용: 판정은 행동 신호(코드)가 이미 끝냈고, LLM은 적합성 판정 + 지식 표현 추출.
+# fits: 문서 파이프라인과 대칭인 도메인 게이트 — 잡담·일반 상식(요리법 등)이
+#       도구 매칭만으로 사내 그래프에 유입되는 것을 입구에서 차단.
+# grounded: 공로 귀속 — 도구가 기여 없이 모델 일반 지식으로 답한 세션은
+#       "검색으로 해결"이라는 거짓 경로를 만들지 않도록 기여 보류.
+EXTRACT_PROMPT = """대화가 도메인 범위의 업무 지식인지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
+
+도메인: {domain}
 
 [첫 질문] {question}
 [사용한 도구] {tools}
 [최종 답변] {answer}
 
 출력 형식:
-{{"goal": "사용자 목표 (10단어 이내, 일반화된 표현)",
-  "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')"}}"""
+{{"fits": true|false,
+  "grounded": true|false,
+  "goal": "사용자 목표 (10단어 이내, 일반화된 표현, fits=true일 때만)",
+  "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')"}}
+
+fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
+조직 지식으로 축적할 가치가 없는 대화.
+grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
+모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함)."""
 
 # 정정 언어 — 사용자 턴 앞머리의 부정·정정 표현 (design §3: 사용자 턴만 본다)
 CORRECTION_RE = re.compile(
@@ -375,6 +388,26 @@ def session_turns(cur, sid):
             for t, ts, q, c, a in cur.fetchall()]
 
 
+def split_segments(turns):
+    """세션을 태스크 단위 세그먼트로 분할 — 인접 질문 임베딩이 SEG_SPLIT_SIM보다
+    멀면 화제가 꺾인 것으로 보고 자른다. 게이트·추출은 세그먼트마다 독립 적용.
+
+    "세션 1개 = 문제 1개" 가정의 보강: 한 세션에서 A를 풀고 B로 넘어가면
+    A·B가 따로 판정·추출된다 (첫 질문/마지막 답변 짝짝이 방지 + 자산 회수).
+    1턴이거나 경계가 없으면 세그먼트 1개(기존 동작과 동일)."""
+    if len(turns) < 2:
+        return [turns]
+    vecs = [embed(t["q"][:500]) for t in turns]
+    segs, cur_seg = [], [turns[0]]
+    for prev, nxt, va, vb in zip(turns, turns[1:], vecs, vecs[1:]):
+        if cosine(va, vb) < config.SEG_SPLIT_SIM:
+            segs.append(cur_seg)
+            cur_seg = []
+        cur_seg.append(nxt)
+    segs.append(cur_seg)
+    return segs
+
+
 def judge_by_signals(turns):
     """실사용(UI) 세션 판정 — 감정·말투가 아니라 행동 신호를 코드로 센다 (design §3 보강).
 
@@ -512,31 +545,65 @@ def main():
             verdict = j.get("verdict", "unknown")
             if verdict not in ("success", "fail"):
                 verdict = "unknown"
+            contribs = [(domain, j, verdict, tool_names)] if verdict != "unknown" else []
         else:
-            # 실사용(UI) 세션 — 판단은 코드(행동 신호), LLM은 표현 추출만 (design §3 보강)
+            # 실사용(UI) 세션 — 판단은 코드(행동 신호), LLM은 표현 추출만 (design §3 보강).
+            # 세션을 태스크 세그먼트로 분할해 세그먼트마다 게이트·추출 독립 적용 —
+            # "세션 1개 = 문제 1개" 가정 보강 (A 풀고 B로 넘어간 세션의 자산 회수).
             turns = session_turns(cur, sid)
-            verdict, sig_detail = judge_by_signals(turns)
-            calls = [c for t in turns for c in t["calls"]]  # 4층 추출에 전 턴 반영
-            tool_names = {c["name"] for c in calls}
-            domain, hint = classify_domain(cur, tool_names)
-            j = {}
-            if verdict != "unknown":
+            segs = split_segments(turns)
+            contribs, details = [], []
+            for seg in segs:
+                v, det = judge_by_signals(seg)
+                details.append(f"{v}" + (f":{det}" if det else ""))
+                if v == "unknown":
+                    continue
+                calls = [c for t in seg for c in t["calls"]]
+                tool_names = {c["name"] for c in calls}
+                domain, hint = classify_domain(cur, tool_names)
                 prompt = EXTRACT_PROMPT.format(
-                    question=q[:2000],
+                    domain=domain,
+                    question=seg[0]["q"][:2000],
                     tools=json.dumps(calls, ensure_ascii=False)[:2000],
-                    answer=(turns[-1]["a"] if turns else answer)[:3000])
+                    answer=seg[-1]["a"][:3000])
                 if hint:
                     prompt += f"\n\n[도메인 추출 지침 — {domain}] {hint}"
                 j = _llm_json(prompt)
-                if verdict == "fail":
-                    j["fail_reason"] = f"행동 신호: {sig_detail}"
+                # 도메인 게이트(문서와 대칭): 잡담·일반 상식은 그래프 기여 없음
+                if not j.get("fits"):
+                    details[-1] += "→도메인 밖(기여 제외)"
+                    continue
+                # 공로 귀속: 도구가 기여하지 않은 답변은 경로로 기록하지 않음
+                # ("검색으로 해결" 거짓 경로 방지 — 성공 판정 자체는 유지)
+                if not j.get("grounded"):
+                    details[-1] += "→도구 기여 없음(기여 보류)"
+                    continue
+                if v == "fail":
+                    j["fail_reason"] = f"행동 신호: {det}"
+                contribs.append((domain, j, v, tool_names))
+            # 세션 대표 판정: 세그먼트 판정이 한 방향일 때만 채택.
+            # 성공·실패 혼합은 unknown + 기여 없음 — 카운트 조인(ref=세션id ↔
+            # turn=1 verdict) 계약을 지키는 안전 폴백 (혼합을 세그먼트별로 세려면
+            # 증거-세그먼트 연결이 필요해 스키마가 커진다. 필요해지면 그때).
+            seg_verdicts = {v for (_d, _j, v, _t) in contribs}
+            if seg_verdicts == {"success"}:
+                verdict = "success"
+            elif seg_verdicts == {"fail"}:
+                verdict = "fail"
+            else:
+                verdict = "unknown"
+                contribs = []
+            sig_detail = " | ".join(details) + \
+                (f" [{len(segs)}세그먼트]" if len(segs) > 1 else "")
         cur.execute("UPDATE sessions SET verdict = :1 WHERE id = :2 AND turn = 1",
                     [verdict, sid])
-        if verdict != "unknown" and j.get("goal") and j.get("approach"):
+        for domain, j, v, tool_names in contribs:
+            if not (j.get("goal") and j.get("approach")):
+                continue
             d = get_or_create(cur, 1, domain, None, "session", sid, use_embedding=False)
             g = get_or_create(cur, 2, j["goal"], d, "session", sid)
             a = get_or_create(cur, 3, j["approach"], g, "session", sid)
-            if verdict == "fail":
+            if v == "fail":
                 cur.execute("""UPDATE nodes SET fail_flag='Y', fail_reason=:1
                                WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], a])
             for tool in sorted(tool_names):

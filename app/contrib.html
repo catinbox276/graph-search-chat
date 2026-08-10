@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>지식그래프 챗 — 내 기여</title>
+<link rel="stylesheet" href="/static/shell.css">
+<style>
+  main { max-width: 860px; margin: 0 auto; padding: 16px 16px 48px; }
+  .intro { font-size: .82rem; color: var(--mut); line-height: 1.6; margin-bottom: 18px; }
+  .sess { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 14px 18px; margin-bottom: 14px; }
+  .sess .head { font-size: .78rem; color: var(--mut); margin-bottom: 4px; }
+  .sess .head b { color: var(--ink); font-weight: 600; }
+  .sess .head .vbadge { display: inline-block; border-radius: 5px; padding: 0 6px;
+                        font-weight: 600; margin-right: 4px; }
+  .vbadge.success { background: color-mix(in srgb, var(--ok) 15%, canvas); color: var(--ok); }
+  .vbadge.fail { background: color-mix(in srgb, var(--fail) 12%, canvas); color: var(--fail); }
+  .vbadge.retracted { background: #0001; color: var(--mut); }
+  /* 트리: 질문 → 목표 → 접근법 — 세로선·가지로 계층(분기점)을 그린다 */
+  .tree { margin: 8px 0 2px 6px; }
+  .branch { position: relative; margin-left: 18px; padding-left: 16px;
+            border-left: 2px solid var(--line); }
+  .branch:last-child { border-left-color: transparent; }
+  .node { position: relative; display: flex; gap: 8px; align-items: baseline;
+          flex-wrap: wrap; padding: 6px 0; }
+  .node::before { content: ""; position: absolute; left: -16px; top: 1.05em;
+                  width: 12px; height: 2px; background: var(--line); }
+  .branch:last-child > .node::before { left: -18px; width: 14px; }
+  .branch:last-child > .node::after { content: ""; position: absolute; left: -18px;
+                  top: 0; height: 1.05em; width: 2px; background: var(--line); }
+  .node .tag { font-size: .68rem; border: 1px solid var(--line); border-radius: 4px;
+               padding: 0 5px; color: var(--mut); white-space: nowrap; }
+  .node .tag.goal { border-color: #0891b2; color: #0891b2; }
+  .node .tag.appr { border-color: var(--ok); color: var(--ok); }
+  .node .tag.appr.failed { border-color: var(--fail); color: var(--fail); }
+  .node .name { flex: 1; min-width: 180px; font-size: .87rem; }
+  .node .meta { font-size: .72rem; color: var(--mut); white-space: nowrap; }
+  .node .warn { font-size: .74rem; color: var(--fail); flex-basis: 100%; }
+  .node button { padding: 2px 9px; border-radius: 6px; cursor: pointer; font-size: .74rem;
+                 background: #fff; border: 1px solid var(--line); color: var(--ink); }
+  .node button.danger { border-color: var(--fail); color: var(--fail); }
+  .node button:disabled { opacity: .45; cursor: not-allowed; }
+  .fork { font-size: .72rem; color: var(--mut); margin: 2px 0 0 6px; }
+  .empty { text-align: center; color: var(--mut); font-size: .85rem; padding: 40px 0; }
+  #msg { font-size: .78rem; min-height: 1.2em; margin: 6px 0; }
+  #msg.err { color: var(--fail); } #msg.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header class="shell">
+  <span class="brand">지식그래프 챗<small>내 기여</small></span>
+  <nav class="pathnav">
+    <a href="/">채팅</a><span class="edge"></span>
+    <a href="/graph">지식그래프</a><span class="edge"></span>
+    <a class="on" href="/contrib">내 기여</a><span class="edge"></span>
+    <a href="/admin">관리</a>
+  </nav>
+  <span class="spacer"></span>
+  <span id="who" style="display:none;font-size:12px;color:#8892a6;align-items:center;gap:8px"></span>
+</header>
+
+<main>
+  <p class="intro">
+    내 대화에서 추출되어 <b>지식그래프에 등록된 지식</b>입니다. 잘못 요약됐으면 문구를
+    고치고, 아니다 싶으면 철회하세요 — 여기서의 교정이 다른 사람이 받을 경로 제안의
+    품질이 됩니다. 아무것도 안 해도 시스템은 정상 동작합니다 (교정은 선택).
+    문구 수정은 나 혼자 기여한 노드만 가능합니다 — 여럿이 기여한 노드는 남의 기여까지
+    바뀌기 때문입니다.
+  </p>
+  <p id="msg"></p>
+  <div id="list"><p class="empty">불러오는 중…</p></div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// 로그인 사용자 표시
+fetch("/me").then(r => r.json()).then(m => {
+  if (!m.user) return;
+  const w = $("who");
+  const name = document.createElement("b");
+  name.textContent = m.user + (m.admin ? " (관리자)" : "");
+  const out = document.createElement("a");
+  out.href = "/auth/logout"; out.textContent = "로그아웃";
+  out.style.color = "inherit";
+  w.append(name, out);
+  w.style.display = "inline-flex";
+});
+
+const LAYER = {2: "목표", 3: "접근법"};
+const VERDICT = {success: "✅ 성공", fail: "❌ 실패", retracted: "↩ 취소됨"};
+const note = (t, ok) => { const m = $("msg"); m.textContent = t; m.className = ok ? "ok" : "err"; };
+
+async function act(nodeId, action, name) {
+  const r = await fetch("/me/contributions/act", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({node_id: nodeId, action, name})});
+  if (!r.ok) {
+    let d = `실패 (${r.status})`;
+    try { d = (await r.json()).detail || d; } catch {}
+    note(d); return false;
+  }
+  note("반영됐습니다", true);
+  load();
+  return true;
+}
+
+async function load() {
+  const r = await fetch("/me/contributions");
+  const box = $("list");
+  if (!r.ok) { box.innerHTML = "<p class='empty'>조회 실패</p>"; return; }
+  const {items} = await r.json();
+  if (!items.length) {
+    box.innerHTML = "<p class='empty'>아직 그래프에 등록된 기여가 없습니다.<br>" +
+      "대화가 야간 자산화(성공/실패 판정)를 통과하면 여기 나타납니다.</p>";
+    return;
+  }
+  // 세션 단위로 묶기
+  const bySess = new Map();
+  items.forEach(it => {
+    if (!bySess.has(it.session_id)) bySess.set(it.session_id, {ts: it.ts, q: it.question, verdict: it.verdict, nodes: []});
+    bySess.get(it.session_id).nodes.push(it);
+  });
+  box.innerHTML = "";
+  bySess.forEach((s, sid) => {
+    const card = document.createElement("div");
+    card.className = "sess";
+    const head = document.createElement("div");
+    head.className = "head";
+    const vb = document.createElement("span");
+    vb.className = `vbadge ${s.verdict}`;
+    vb.textContent = VERDICT[s.verdict] || s.verdict;
+    const qb = document.createElement("b");
+    qb.textContent = `"${s.q}"`;
+    head.append(vb, ` ${s.ts} · `, qb);
+    card.appendChild(head);
+
+    // 노드 1행 렌더 (버튼 포함)
+    const nodeRow = (n) => {
+      const row = document.createElement("div");
+      row.className = "node";
+      const tag = document.createElement("span");
+      if (n.layer === 2) { tag.className = "tag goal"; tag.textContent = "🎯 목표"; }
+      else { tag.className = "tag appr" + (n.fail ? " failed" : ""); tag.textContent = "🛠 접근법"; }
+      const name = document.createElement("span");
+      name.className = "name"; name.textContent = n.name;
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = (n.layer === 3 && n.tool_cnt ? `도구 ${n.tool_cnt}개 · ` : "")
+        + `제안 ${n.exposures}회`;
+      row.append(tag, name, meta);
+      const mk = (label, fn, danger, disabled, tip) => {
+        const b = document.createElement("button");
+        b.textContent = label; b.type = "button";
+        if (danger) b.className = "danger";
+        if (disabled) { b.disabled = true; b.title = tip || ""; }
+        else b.onclick = fn;
+        row.appendChild(b);
+      };
+      mk("문구 수정", () => {
+        const nn = prompt("이 지식의 문구를 교정하세요:", n.name);
+        if (nn && nn.trim() && nn.trim() !== n.name) act(n.node_id, "rename", nn.trim());
+      }, false, !n.editable, "여럿이 기여한 노드는 수정할 수 없습니다");
+      if (n.fail)
+        mk("실패 표식 해제", () => {
+          if (confirm("이 접근법의 실패 경고를 해제할까요? 다시 시도해 해결된 경우에만.")) act(n.node_id, "clear_fail");
+        });
+      mk("철회", () => {
+        if (confirm("이 노드에 대한 내 기여를 회수할까요? 성공/실패 카운트에서 빠집니다.")) act(n.node_id, "retract");
+      }, true);
+      if (n.fail && n.fail_reason) {
+        const w = document.createElement("span");
+        w.className = "warn"; w.textContent = `⚠ ${n.fail_reason}`;
+        row.appendChild(w);
+      }
+      return row;
+    };
+
+    // 트리 조립: 질문 → 목표(들) → 그 밑 접근법(들) — 목표가 여럿이면 분기점
+    const goals = s.nodes.filter(n => n.layer === 2);
+    const apprs = s.nodes.filter(n => n.layer === 3);
+    const tree = document.createElement("div");
+    tree.className = "tree";
+    if (goals.length > 1) {
+      const fk = document.createElement("div");
+      fk.className = "fork";
+      fk.textContent = `⑂ 이 대화는 ${goals.length}개 문제로 갈라졌습니다 (분기점)`;
+      tree.appendChild(fk);
+    }
+    const claimed = new Set();
+    goals.forEach(g => {
+      const gb = document.createElement("div");
+      gb.className = "branch";
+      gb.appendChild(nodeRow(g));
+      apprs.filter(a => a.parent_goal === g.name).forEach(a => {
+        claimed.add(a.node_id);
+        const ab = document.createElement("div");
+        ab.className = "branch";
+        ab.appendChild(nodeRow(a));
+        gb.appendChild(ab);
+      });
+      tree.appendChild(gb);
+    });
+    // 부모 목표가 내 목록에 없는 접근법 (병합으로 남의 목표 밑에 흡수된 경우)
+    apprs.filter(a => !claimed.has(a.node_id)).forEach(a => {
+      const gb = document.createElement("div");
+      gb.className = "branch";
+      if (a.parent_goal) {
+        const p = document.createElement("div");
+        p.className = "node";
+        const t = document.createElement("span");
+        t.className = "tag goal"; t.textContent = "🎯 목표";
+        const nm = document.createElement("span");
+        nm.className = "name"; nm.style.color = "var(--mut)";
+        nm.textContent = `${a.parent_goal} (기존 지식에 병합됨)`;
+        p.append(t, nm);
+        gb.appendChild(p);
+      }
+      const ab = document.createElement("div");
+      ab.className = "branch";
+      ab.appendChild(nodeRow(a));
+      gb.appendChild(ab);
+      tree.appendChild(gb);
+    });
+    card.appendChild(tree);
+    box.appendChild(card);
+  });
+}
+load();
+</script>
+</body>
+</html>

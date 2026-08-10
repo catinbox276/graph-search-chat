@@ -5,6 +5,7 @@ metadata:
   name: graph-pipeline
 spec:
   schedule: "0 3 * * *"   # 매일 03:00 — 미판정 세션 게이트→추출→그래프 반영
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -31,6 +32,7 @@ metadata:
   name: ingest-sources
 spec:
   schedule: "10 3 * * *"   # 매일 03:10 — 등록 원천 테이블 증분 적재 → corpus_docs
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -57,6 +59,7 @@ metadata:
   name: chunk-corpus
 spec:
   schedule: "15 3 * * *"   # 매일 03:15 — 신규·갱신 문서 청킹 → corpus_chunks (03:30 백필 전)
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -83,6 +86,7 @@ metadata:
   name: doc-pipeline
 spec:
   schedule: "40 3 * * *"   # 매일 03:40 — 도메인 지정 소스의 문서를 LLM 판정·그래프화 (실행당 DOC_EXTRACT_LIMIT건)
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -109,6 +113,7 @@ metadata:
   name: embed-backfill
 spec:
   schedule: "30 3 * * *"   # 매일 03:30 — 새 문서 임베딩 (없으면 즉시 종료)
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -135,6 +140,7 @@ metadata:
   name: graph-maintenance
 spec:
   schedule: "20 3 * * *"   # 매일 03:20 — 파이프라인(03:00) 직후 형제 통합·잎 흡수
+  timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:

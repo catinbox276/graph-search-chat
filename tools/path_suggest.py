@@ -116,6 +116,25 @@ def suggest_paths(problem: str) -> str:
                 cur.execute("INSERT INTO suggestions (problem, node_id, weight, session_id) "
                             "VALUES (:1, :2, :3, :4)",
                             [problem[:2000], aid, cnt, current_session.get()])
+        # 탐색 노출 — 상위 3개 목표에 못 든 다음 순위 목표의 대표 접근법 1개를
+        # 라벨을 달아 노출. 노출 기회가 없는 경로는 채택률 보정으로도 교정 불가
+        # (피드백 루프 퇴행 완화 — docs/references 2026-08-10 조사, DeepMind 2019 처방).
+        # 몰래 섞지 않고 탐색임을 명시하는 게 신뢰 조건.
+        if len(goals) > 3:
+            _, xgid, xgname = goals[3]
+            cur.execute("""SELECT n.id, n.name, e.raw_count FROM edges e
+                           JOIN nodes n ON n.id = e.dst
+                           WHERE e.src = :1 AND n.layer = 3
+                             AND NVL(n.fail_flag, 'N') = 'N'
+                           ORDER BY e.weight DESC FETCH FIRST 1 ROWS ONLY""", [xgid])
+            r = cur.fetchone()
+            if r:
+                out.append(f"\n🔍 탐색 제안 (유사도 컷 바깥 — 관련성 낮을 수 있음): "
+                           f"목표 '{xgname}'의 접근법: {r[1]}"
+                           f"\n     아직 노출 기회가 적었던 경로입니다. 문제와 맞을 때만 참고.")
+                cur.execute("INSERT INTO suggestions (problem, node_id, weight, session_id) "
+                            "VALUES (:1, :2, :3, :4)",
+                            [problem[:2000], r[0], r[2], current_session.get()])
         con.commit()
     return "\n".join(out)
 
