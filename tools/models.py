@@ -195,3 +195,25 @@ class AppUser(Base):
     is_admin = Column(CHAR(1), server_default=text("'N'"))
     created_at = Column(TIMESTAMP, server_default=_NOW)
     approved_at = Column(TIMESTAMP)
+
+
+class AppEvent(Base):
+    """활동 로그 — 정상·비정상 전부 (tools/events.py). 보관 기간 회전으로 무한 증가 방지.
+
+    kind: request(웹 요청) · tool(에이전트 도구) · batch(야간 배치) · admin(관리 행동)
+          · model(모델 호출) · error(미처리 예외). level: info | warn | error.
+    """
+    __tablename__ = "app_events"
+    id = Column(Numeric, Identity(always=True), primary_key=True)
+    ts = Column(TIMESTAMP, server_default=_NOW)
+    kind = Column(String(20))
+    level = Column("lvl", String(10), server_default=text("'info'"))
+    source = Column(String(200))      # 경로 / 배치명 / 도구명
+    actor = Column(String(64))        # 사용자 id
+    ref = Column(String(200))         # 세션 id / 문서 id
+    status = Column(String(20))       # HTTP 코드 / ok / fail
+    duration_ms = Column(Numeric)
+    summary = Column(String(1000))
+    detail = Column(CLOB)             # 스택트레이스 / 인자 / 컨텍스트
+    __table_args__ = (Index("app_events_ts_ix", "ts"),
+                      Index("app_events_kind_ix", "kind", "lvl"))

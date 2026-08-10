@@ -213,7 +213,24 @@ def main():
     print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d), 감쇠 {d}건, "
           f"무결성 위반 {bad}건 — 노드 {before} -> {cur.fetchone()[0]}")
     con.close()
+    # 활동 로그 보관 회전 — "전부 쌓기"의 무한 증가 방지 (config.EVENTS_RETAIN_DAYS)
+    from tools import events
+    purged = events.purge_old()
+    print(f"활동 로그 회전: {purged}건 삭제 (보관 {config.EVENTS_RETAIN_DAYS}일)")
 
 
 if __name__ == "__main__":
-    main()
+    import time as _t
+    from tools import events as _ev
+    _t0 = _t.time()
+    try:
+        main()
+        _ev.log("batch", source="graph-maintenance", level="info", status="ok",
+                duration_ms=int((_t.time() - _t0) * 1000), summary="graph-maintenance 완료")
+    except Exception as _e:
+        import traceback as _tb
+        _ev.log("batch", source="graph-maintenance", level="error", status="fail",
+                duration_ms=int((_t.time() - _t0) * 1000),
+                summary=f"{type(_e).__name__}: {str(_e)[:200]}",
+                detail=_tb.format_exc())
+        raise

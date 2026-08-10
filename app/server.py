@@ -11,13 +11,17 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+import time
+import traceback
+
 import oracledb
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app import auth, deps
-from app.routers import (accounts, admin_models, admin_sources, chat, contrib,
-                         graph, pages)
-from tools import db as orm_db, source_registry
+from app.routers import (accounts, admin_events, admin_models, admin_sources,
+                         chat, contrib, graph, pages)
+from tools import db as orm_db, events, source_registry
 from tools.corpus_search import load_matrix
 from tools.oracle_checkpointer import OracleSaver
 
@@ -30,10 +34,87 @@ app.include_router(contrib.router)        # 내 기여
 app.include_router(accounts.router)       # 계정 관리
 app.include_router(admin_models.router)   # 모델·MCP·에이전트 설정
 app.include_router(admin_sources.router)  # 도메인·소스·전처리 운영
+app.include_router(admin_events.router)   # 활동 로그 조회
 
 # 하위 호환: 일부 모듈이 server.db / server.log_turn을 참조
 db = deps.db
 log_turn = deps.log_turn
+
+import json as _json
+import re as _re
+
+# 활동 로그에서 제외 — 정적 파일·readiness 프로브(15초마다 노이즈)
+_LOG_SKIP = ("/static", "/favicon.ico", "/stats")
+# 요청 본문(detail)을 통째로 남기지 않을 경로 — 자격증명 계열 (대소문자 무관)
+_BODY_SKIP = ("/auth", "/login", "/register", "/password", "/token", "/oauth", "/apikey")
+_BODY_MAX = 2000  # 본문은 이 길이까지만 (로그 비대·민감정보 노출 제한)
+# 이 이름의 JSON 키는 값을 가린다 — 진짜 비밀값만 (message/content 등 사용자 데이터는 유지)
+_SECRET_KEY = _re.compile(
+    r"(?i)(pass|pw|secret|token|api[_-]?key|authorization|bearer|pin|otp|ssn|"
+    r"credit|card|private[_-]?key)")
+
+
+def _redact(text: str) -> str:
+    """요청 본문에서 비밀 키의 값만 [REDACTED]로. JSON 아니면 길이만 잘라 반환.
+    절대 예외를 던지지 않는다(로깅이 앱을 못 죽이게)."""
+    try:
+        def walk(v):
+            if isinstance(v, dict):
+                return {k: ("[REDACTED]" if _SECRET_KEY.search(k) else walk(x))
+                        for k, x in v.items()}
+            if isinstance(v, list):
+                return [walk(x) for x in v]
+            return v
+        return _json.dumps(walk(_json.loads(text)), ensure_ascii=False)[:_BODY_MAX]
+    except Exception:
+        return text[:_BODY_MAX]
+
+
+@app.middleware("http")
+async def activity_log(request: Request, call_next):
+    """모든 요청(정상·비정상)을 app_events에 기록 + JSON 요청 본문을 detail에.
+    SSE는 스트리밍 시작만 잡힌다. 민감 경로(_BODY_SKIP)는 본문 제외."""
+    t0 = time.time()
+    p = request.url.path
+    body_text = ""
+    pl = p.lower()
+    want_body = (request.method in ("POST", "PUT", "PATCH")
+                 and "application/json" in request.headers.get("content-type", "")
+                 and not any(x in pl for x in _BODY_SKIP)
+                 and not any(p.startswith(x) for x in _LOG_SKIP))
+    if want_body:
+        raw = await request.body()  # 읽은 뒤 재주입 — 다운스트림 핸들러가 다시 읽게
+
+        async def _receive():
+            return {"type": "http.request", "body": raw, "more_body": False}
+        request._receive = _receive
+        body_text = _redact(raw.decode("utf-8", "replace"))
+
+    resp = await call_next(request)
+    if not any(p.startswith(x) for x in _LOG_SKIP):
+        try:
+            actor = (auth.current_user(request) or {}).get("user")
+        except Exception:
+            actor = None
+        events.log("request", source=p, actor=actor, status=resp.status_code,
+                   level=("error" if resp.status_code >= 500 else
+                          "warn" if resp.status_code >= 400 else "info"),
+                   duration_ms=int((time.time() - t0) * 1000),
+                   summary=f"{request.method} {p}", detail=(body_text or None))
+    return resp
+
+
+@app.exception_handler(Exception)
+async def log_unhandled(request: Request, exc: Exception):
+    """미처리 예외 → error 이벤트(스택트레이스 포함) 기록 후 500 반환."""
+    try:
+        actor = (auth.current_user(request) or {}).get("user")
+    except Exception:
+        actor = None
+    events.log("error", source=request.url.path, actor=actor, level="error",
+               status=500, summary=f"{type(exc).__name__}: {str(exc)[:200]}",
+               detail=traceback.format_exc())
+    return JSONResponse({"detail": "서버 오류가 발생했습니다"}, status_code=500)
 
 
 @app.on_event("startup")

@@ -68,4 +68,17 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import time as _t
+    from tools import events as _ev
+    _t0 = _t.time()
+    try:
+        asyncio.run(main())
+        _ev.log("batch", source="embed-backfill", level="info", status="ok",
+                duration_ms=int((_t.time() - _t0) * 1000), summary="embed-backfill 완료")
+    except Exception as _e:
+        import traceback as _tb
+        _ev.log("batch", source="embed-backfill", level="error", status="fail",
+                duration_ms=int((_t.time() - _t0) * 1000),
+                summary=f"{type(_e).__name__}: {str(_e)[:200]}",
+                detail=_tb.format_exc())
+        raise

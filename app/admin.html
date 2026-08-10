@@ -219,6 +219,33 @@
   <p class="hint">suggest_paths를 끄면 경로 제안(그래프 순환)이 멈춥니다 — 시연·비교 실험용으로만.
      MCP 서버 주소(DATAHUB_GMS_URL)는 인프라 값이라 .env/ConfigMap에서 관리합니다.</p>
 </section>
+
+<section class="card">
+  <h3>활동 로그 <small>정상·비정상 전부 (요청·도구·배치·오류) — 최신순, 보관 180일</small></h3>
+  <form id="evform" style="margin-bottom:10px">
+    <select id="evkind">
+      <option value="">전체 종류</option>
+      <option value="request">요청</option>
+      <option value="tool">도구</option>
+      <option value="batch">배치</option>
+      <option value="error">오류</option>
+      <option value="model">모델</option>
+    </select>
+    <select id="evlevel">
+      <option value="">전체 수준</option>
+      <option value="info">info</option>
+      <option value="warn">warn</option>
+      <option value="error">error</option>
+    </select>
+    <input id="evq" type="search" placeholder="source·요약 검색" style="flex:1;min-width:160px">
+    <button type="button" id="evsearch">조회</button>
+    <span class="hint" id="evmsg" style="margin:0"></span>
+  </form>
+  <table id="evlist"><thead><tr><th>시각</th><th>종류</th><th>수준</th><th>source</th>
+    <th>사용자</th><th>상태</th><th>ms</th><th>요약</th></tr></thead><tbody></tbody></table>
+  <div id="evpager" style="display:flex;gap:6px;justify-content:center;align-items:center;font-size:.82rem"></div>
+  <p class="hint">행 클릭 = 상세(스택트레이스·인자). 오류(error)는 빨강으로 표시됩니다.</p>
+</section>
 </main>
 
 <script>
@@ -728,9 +755,59 @@ $("agForm").onsubmit = async (e) => {
   $("agmsg").textContent = "✓ 저장됨 — 다음 질문부터 반영 (에이전트 재조립)";
 };
 
+// ── 활동 로그 ────────────────────────────────────────────────
+let evPage = 1;
+const EV_LVL_COLOR = {error: "var(--fail)", warn: "#b45309", info: "inherit"};
+async function loadEvents() {
+  const p = new URLSearchParams({kind: $("evkind").value, level: $("evlevel").value,
+                                 q: $("evq").value.trim(), page: evPage, page_size: 50});
+  const r = await fetch("/admin/events?" + p);
+  if (!r.ok) { $("evmsg").textContent = `조회 실패 (${r.status})`; return; }
+  $("evmsg").textContent = "";
+  const {events, total, page, pages} = await r.json();
+  const tb = $("evlist").querySelector("tbody");
+  tb.innerHTML = "";
+  if (!events.length) { tb.innerHTML = "<tr><td colspan=8 style='color:var(--mut)'>이벤트 없음</td></tr>"; }
+  events.forEach(e => {
+    const tr = document.createElement("tr");
+    [e.ts, e.kind, e.level, e.source, e.actor || "", e.status || "",
+     e.duration_ms ?? "", e.summary || ""].forEach((v, i) => {
+      const td = document.createElement("td");
+      td.textContent = v;
+      if (i === 2) td.style.color = EV_LVL_COLOR[e.level] || "inherit";
+      tr.appendChild(td);
+    });
+    if (e.level === "error") tr.style.background = "color-mix(in srgb, var(--fail) 8%, transparent)";
+    tr.onclick = () => showEvent(e.id);
+    tb.appendChild(tr);
+  });
+  const pg = $("evpager"); pg.innerHTML = "";
+  if (pages > 1) {
+    const mk = (t, to, dis) => { const b = document.createElement("button");
+      b.type = "button"; b.textContent = t; b.disabled = dis;
+      b.onclick = () => { evPage = to; loadEvents(); }; return b; };
+    pg.append(mk("← 이전", page - 1, page <= 1),
+              Object.assign(document.createElement("span"), {textContent: `${page} / ${pages} (총 ${total})`, style: "color:var(--mut)"}),
+              mk("다음 →", page + 1, page >= pages));
+  }
+}
+async function showEvent(id) {
+  const r = await fetch("/admin/events/" + id);
+  if (!r.ok) return;
+  const e = await r.json();
+  alert(`[${e.ts}] ${e.kind}/${e.level} · ${e.source}\n`
+        + `사용자: ${e.actor || "-"} · ref: ${e.ref || "-"} · 상태: ${e.status || "-"}`
+        + (e.duration_ms != null ? ` · ${e.duration_ms}ms` : "")
+        + `\n\n${e.summary || ""}\n\n${e.detail || "(상세 없음)"}`);
+}
+$("evsearch").onclick = () => { evPage = 1; loadEvents(); };
+$("evq").addEventListener("keydown", e => { if (e.key === "Enter") { evPage = 1; loadEvents(); } });
+$("evkind").onchange = $("evlevel").onchange = () => { evPage = 1; loadEvents(); };
+
 // 페이지 초기 로드 + 현황 폴링
 loadDomains(); loadSources(); loadTables(); loadDomainOptions();
 loadPipelineSettings(); loadDocStatus(); loadModels(); loadMcp(); loadAgentSettings();
+loadEvents();
 setInterval(loadDocStatus, 5000);
 </script>
 </body>

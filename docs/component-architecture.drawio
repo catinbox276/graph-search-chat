@@ -10,13 +10,13 @@
                 <mxCell id="user" value="사용자" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="70" y="195" width="40" height="70" as="geometry"/>
                 </mxCell>
-                <mxCell id="srv" value="app/server.py&#10;/chat/stream (SSE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
+                <mxCell id="srv" value="routers/chat.py&#10;/chat/stream (SSE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="190" y="200" width="170" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="agent" value="DeepAgents 에이전트&#10;(모델별 캐시 _agents)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="450" y="190" width="220" height="80" as="geometry"/>
                 </mxCell>
-                <mxCell id="sp" value="SYSTEM_PROMPT (코드 고정)&#10;① 새 문제 → suggest_paths 최우선&#10;② 실패 이력은 차단 말고 고지&#10;③ 데이터=DataHub / 노하우=블로그&#10;④ 근거(글 id·urn) 제시" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="sp" value="SYSTEM_PROMPT (코드 고정)&#10;① 새 문제 → suggest_paths 최우선&#10;② 실패 이력은 차단 말고 고지&#10;③ 데이터=DataHub / 노하우=문서검색&#10;④ 근거(문서 id) 제시" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="800" y="170" width="280" height="110" as="geometry"/>
                 </mxCell>
                 <mxCell id="llm" value="사내 vLLM (채팅)&#10;CHAT_URL / SAMANDA-V2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
@@ -25,16 +25,16 @@
                 <mxCell id="t1" value="suggest_paths&#10;(함수 툴 — 경로 제안)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="230" y="395" width="200" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="t2" value="search_blog / read_blog_post&#10;(함수 툴 — 하이브리드 검색)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
+                <mxCell id="t2" value="search_docs / read_doc + search_{소스}&#10;(함수 툴 — 통합 코퍼스 검색)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="450" y="400" width="220" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="t3" value="DataHub 공식 MCP&#10;(stdio — 유일한 MCP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" parent="1" vertex="1">
+                <mxCell id="t3" value="mcp_registry 등록 도구 서버&#10;(streamable_http/sse/stdio/rest — 사내는 REST 어댑터)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="690" y="400" width="200" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="ckpt" value="OracleSaver 체크포인터&#10;thread_id = 세션 id&#10;(복제본 공유 · 재시작 생존)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="950" y="395" width="200" height="70" as="geometry"/>
                 </mxCell>
-                <mxCell id="ora" value="Oracle 19c/23&#10;nodes·edges·suggestions·blog_posts&#10;lg_checkpoints·lg_writes" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="ora" value="Oracle 18c/19c&#10;nodes·edges·corpus_docs/chunks·suggestions&#10;lg_checkpoints·lg_writes" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="380" y="560" width="300" height="110" as="geometry"/>
                 </mxCell>
                 <mxCell id="gms" value="DataHub GMS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
@@ -88,31 +88,31 @@
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
-                <mxCell id="t" value="앱 서버 — FastAPI 모놀리스 (app/server.py)" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
+                <mxCell id="t" value="앱 서버 — server.py(조립) + routers/ 기능별 분리" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
                     <mxGeometry x="325" y="20" width="600" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="boot" value="기동 시 1회&lt;br&gt;① 임베딩 행렬 메모리 로드 (load_matrix)&lt;br&gt;② OracleSaver 체크포인터 생성&lt;br&gt;③ 기본 LLM 에이전트 예열&lt;br&gt;④ sessions 테이블 보장 (ts·verdict 포함)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="boot" value="기동 시 1회 (server.py startup)&lt;br&gt;① db.init_schema — 전 테이블 create_all + Text 인덱스 + 시드&lt;br&gt;② 임베딩 행렬 메모리 로드 (load_matrix)&lt;br&gt;③ OracleSaver 체크포인터 생성&lt;br&gt;④ 기본 LLM 에이전트 예열" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="80" y="80" width="340" height="110" as="geometry"/>
                 </mxCell>
-                <mxCell id="chat" value="채팅&#10;POST /chat/stream — SSE: token·tool·tool_end·answer&#10;POST /chat — 비스트리밍 (스크립트용)&#10;턴마다 sessions에 기록 (증거 계층)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="chat" value="routers/chat.py&#10;POST /chat/stream — SSE: token·tool·tool_end·answer&#10;POST /chat · /session/topic-check(화제 확인)&#10;세션 목록·복원(본인만·소유검사) · 문서 뷰" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="250" y="240" width="380" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="graph" value="그래프·상태&#10;GET /graph/data — 노드(성공·실패 카운트)·엣지&#10;GET /stats — 상태칩 · GET /reload — 행렬 갱신" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="graph" value="routers/graph.py · contrib.py&#10;GET /graph/data · /graph/node/{id}/evidence(출처)&#10;GET/POST /me/contributions — 내 기여(검색·페이지)&#10;/stats · /reload(관리자)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="20" y="400" width="380" height="80" as="geometry"/>
                 </mxCell>
-                <mxCell id="madmin" value="모델 관리 (X-Admin-Token)&#10;GET /models — 사용자용 LLM 목록&#10;POST /admin/models/sync — 서빙에서 동기화&#10;POST /admin/models/select — 종류별 기본값" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="madmin" value="routers/admin_models.py (관리자 세션)&#10;GET /models · /admin/models/{all,add,sync,select}&#10;GET/POST /admin/mcp — 도구 서버 등록&#10;/admin/agent-settings — 프롬프트·도구 on/off" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="850" y="540" width="360" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="dadmin" value="도메인 시드 관리 (X-Admin-Token)&#10;GET /admin/domains — 닫힌 목록 조회&#10;POST /admin/domains — 추가/수정 (upsert)&#10;이름·도구 csv·우선순위·추출 지침(extract_hint)&#10;삭제 API는 의도적으로 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="dadmin" value="routers/admin_sources.py · accounts.py (관리자)&#10;GET/POST /admin/domains(닫힌목록)·/admin/sources&#10;드라이런·재시도·초기화 · /admin/pipeline-settings&#10;/admin/users·act — 가입 승인·권한·삭제&#10;삭제 API(도메인)는 의도적으로 없음" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="565" y="345" width="360" height="110" as="geometry"/>
                 </mxCell>
-                <mxCell id="ui" value="UI 셸 (정적)&#10;/ 채팅 (예시 칩·접이식 단계·⚙관리 모달)&#10;/graph force-directed 그래프+상세 패널&#10;색=의미: 파랑 경로 · 초록 검증 · 빨강 실패우세" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="ui" value="UI 셸 (정적)&#10;/ 채팅(궤적 타임라인·[n]각주) · /graph(증거 패널)&#10;/contrib 내 기여(트리·수정·철회) · /admin 관리&#10;색=의미: 파랑 경로 · 초록 검증 · 빨강 실패우세" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="950" y="360" width="270" height="110" as="geometry"/>
                 </mxCell>
                 <mxCell id="ora" value="Oracle 단일 DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
                     <mxGeometry x="280" y="540" width="220" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="agent" value="에이전트 (1페이지)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="agent" value="에이전트 (1페이지)&#10;deps.py: DB풀·권한·캐시" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="665" y="260" width="160" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="e1" style="endArrow=block;html=1;strokeWidth=1;" parent="1" source="chat" target="ora" edge="1">
@@ -136,33 +136,33 @@
             </root>
         </mxGraphModel>
     </diagram>
-    <diagram id="comp-search" name="3 하이브리드 검색 (blog_search.py)">
+    <diagram id="comp-search" name="3 하이브리드 검색 (corpus_search.py)">
         <mxGraphModel dx="1765" dy="686" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1250" pageHeight="700" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
-                <mxCell id="t" value="하이브리드 검색 — Oracle Text + 인메모리 코사인 → RRF (tools/blog_search.py)" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
+                <mxCell id="t" value="하이브리드 검색 — Oracle Text + 청크 임베딩 코사인 → RRF (tools/corpus_search.py)" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
                     <mxGeometry x="225" y="20" width="800" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="q" value="질의 (search_blog)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="q" value="질의 (search_docs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="40" y="200" width="160" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="emb" value="질의 임베딩 1건 계산&#10;(EMBED_URL — 검색당 유일한 임베딩 호출)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="300" y="100" width="260" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="lex" value="lexical: Oracle Text CONTAINS&#10;top-30 (WORLD_LEXER)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="lex" value="lexical: Oracle Text CONTAINS&#10;corpus_docs.body top-30 (WORLD_LEXER)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="300" y="280" width="260" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="sem" value="semantic: 인메모리 행렬 코사인&lt;br&gt;top-30 (기동 시 로드, 정규화 → dot)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="sem" value="semantic: 청크 임베딩 행렬 코사인&lt;br&gt;top-30 → 문서 best-chunk 집계 (embed_model 필터)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="300" y="190" width="260" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="rrf" value="RRF 융합&#10;score = Σ 1/(k+rank), k=60" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="640" y="190" width="200" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="out" value="검색 결과 (id·제목·요약)&#10;→ read_blog_post로 전문" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="out" value="검색 결과 (소스명:id·제목·스니펫)&#10;→ read_doc로 전문 (url_enabled 소스만 링크)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="920" y="190" width="220" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="ora" value="Oracle blog_posts&#10;(본문 CLOB + embedding BLOB)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
+                <mxCell id="ora" value="Oracle corpus_docs (본문 CLOB)&#10;+ corpus_chunks (청크 + embedding BLOB·embed_model)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="440" y="440" width="220" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="note" value="임베딩이 아직 없으면 lexical 단독으로 동작 (백필 진행 중에도 사용 가능)&#10;임베딩 모델 교체 시 전체 재백필 필요 (scripts/embed_corpus.py)" style="text;html=1;fontSize=11;align=left;fontColor=#666666;" parent="1" vertex="1">
@@ -262,7 +262,7 @@
                 <mxCell id="t" value="그래프 파이프라인 — 게이트 2갈래 · 추출 · 재발 소급 취소 (야간 03:00)" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
                     <mxGeometry x="225" y="20" width="800" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="src" value="sessions (verdict IS NULL)&#10;UI 세션 포함 미판정분" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="src" value="sessions (verdict IS NULL)&#10;UI 세션은 SEG_SPLIT_SIM으로 태스크 분할" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="490" y="70" width="270" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="branch" value="태스크 세션?&#10;(tasks.yaml에 id 있음)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
@@ -271,7 +271,7 @@
                 <mxCell id="taskj" value="LLM 게이트 판정 (JUDGE_PROMPT)&#10;expect 기준 success / fail / unknown&#10;+ 도메인 추출 지침 주입" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="210" y="320" width="280" height="80" as="geometry"/>
                 </mxCell>
-                <mxCell id="sigj" value="행동 신호 게이트 (코드 판정 — judge_by_signals)&#10;즉시 fail: 명시적 실패 인정 (&quot;찾지 못했습니다&quot; 등)&#10;후퇴: 재질문·정정 언어·문서 재방문·조급함&#10;전진: 구체화·화제 전진·조용한 종료&#10;후퇴≥2 → fail / 전진만 → success / 나머지 → 미판정&#10;금지: 감정 분석 · &quot;그만 물음=성공&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="sigj" value="행동 신호 게이트 (코드 판정 — judge_by_signals)&#10;세션을 태스크 세그먼트로 분할 후 세그먼트별 판정&#10;즉시 fail: 명시적 실패 인정 / 후퇴≥2 → fail&#10;전진만 → success / 나머지 → 미판정&#10;추출 시 fits(도메인 적합)·grounded(도구 근거) 판정&#10;— 잡담·일반지식 답변은 기여 제외/보류 (문서와 대칭)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="640" y="290" width="400" height="130" as="geometry"/>
                 </mxCell>
                 <mxCell id="verdict" value="verdict?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" parent="1" vertex="1">
@@ -368,7 +368,7 @@
                 <mxCell id="t" value="저장소 — Oracle 단일 DB 테이블 맵 (만든 곳 → 쓰는 곳)" style="text;html=1;fontSize=20;fontStyle=1;align=center;" parent="1" vertex="1">
                     <mxGeometry x="225" y="20" width="800" height="30" as="geometry"/>
                 </mxCell>
-                <mxCell id="blog" value="blog_posts&#10;노하우 코퍼스 + embedding BLOB&#10;생산: load_oracle·embed_corpus / 소비: 검색" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="blog" value="corpus_docs / corpus_chunks&#10;통합 코퍼스(조립본) + 청크 임베딩(embed_model 버저닝)&#10;생산: ingest_sources·chunk_corpus·embed_corpus / 소비: 검색" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="80" y="90" width="330" height="80" as="geometry"/>
                 </mxCell>
                 <mxCell id="sess" value="sessions (id, turn, ts, 질문·툴호출·답변, verdict)&#10;verdict: success / fail / unknown / retracted&#10;생산: server(턴 기록)·selfplay / 소비: 파이프라인·경로제안" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
@@ -383,13 +383,13 @@
                 <mxCell id="dreg" value="domain_registry (name, tools, priority, extract_hint)&#10;1층 닫힌 목록 + 도메인별 추출 지침&#10;생산: 관리자 API·UI(사람 전용) / 소비: 파이프라인 분류" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="80" y="350" width="360" height="90" as="geometry"/>
                 </mxCell>
-                <mxCell id="mreg" value="model_registry (kind, name, enabled, is_default)&#10;LLM=사용자 선택 / 임베딩·리랭커=관리자&#10;생산: 관리자 API / 소비: server·검색" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="mreg" value="레지스트리: model_registry·mcp_registry·source_registry&#10;+ app_settings(운영 KV) + app_users(가입·승인·is_admin)&#10;생산: 관리자 API / 소비: server·에이전트·검색" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="490" y="350" width="340" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="lg" value="lg_checkpoints / lg_writes&#10;LangGraph 멀티턴 기억 외부화 (thread=세션)&#10;생산·소비: OracleSaver (복제본 공유·재시작 생존)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="880" y="210" width="330" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="rule" value="원칙 (design §5): Oracle 19c 단독 — 별도 벡터DB·검색엔진 금지.&#10;벡터 검색 대체 = 진입점 LLM/임베딩 분류(닫힌 상위층) + 애플리케이션 브루트포스 dedup.&#10;그래프는 원본(sessions)에서 재생성 가능한 파생 데이터 — 접속 상수는 tools/blog_search.py에서 import가 관례." style="text;html=1;fontSize=11;align=left;fontColor=#666666;" parent="1" vertex="1">
+                <mxCell id="rule" value="원칙 (design §5): Oracle 18c/19c 단독 — 별도 벡터DB·검색엔진 금지.&#10;ORM 경계: 전 테이블 tools/models.py 선언 · db.init_schema 생성 · 단순 CRUD는 ORM / 검색·MERGE·PL/SQL은 raw SQL.&#10;그래프는 원본(sessions)에서 재생성 가능한 파생 데이터 — 23ai 전환 시 VECTOR 컬럼만 models.py에 추가." style="text;html=1;fontSize=11;align=left;fontColor=#666666;" parent="1" vertex="1">
                     <mxGeometry x="80" y="490" width="900" height="60" as="geometry"/>
                 </mxCell>
                 <mxCell id="e1" value="추출" style="endArrow=block;html=1;strokeWidth=1;fontSize=10;" parent="1" source="sess" target="graphT" edge="1">
@@ -418,13 +418,13 @@
                 <mxCell id="ns" value="user-dalgo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;verticalAlign=top;dashed=1;" parent="1" vertex="1">
                     <mxGeometry x="80" y="170" width="740" height="470" as="geometry"/>
                 </mxCell>
-                <mxCell id="app" value="gsc-app (Deployment, :8500)&#10;모놀리스 이미지: 앱+에이전트+배치 공용&#10;harbor.quantumcns.ai/user-dalgo/graph-search-chat&#10;envFrom: gsc-env ConfigMap (gsc.env 1파일)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="app" value="gsc-app (Deployment, :8500)&#10;모놀리스: server.py+routers/+에이전트+배치 공용&#10;harbor.quantumcns.ai/user-dalgo/graph-search-chat&#10;인증: 자체 계정(env 관리자+가입·승인) · envFrom gsc-env" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="120" y="210" width="340" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="oraP" value="oracle-0 (StatefulSet + PVC, :1521)&#10;gvenzl/oracle-free:23 — 사내 전환 시 19c EE로&#10;단일 DB (FREEPDB1)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="1" vertex="1">
                     <mxGeometry x="510" y="485" width="270" height="120" as="geometry"/>
                 </mxCell>
-                <mxCell id="cron" value="CronJob (앱과 같은 이미지, Forbid)&#10;03:00 graph-pipeline — 게이트·추출·소급취소&#10;03:20 graph-maintenance — 통합·흡수·감쇠&#10;03:30 embed-backfill — 새 문서 임베딩" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="cron" value="CronJob 6종 (앱과 같은 이미지, Forbid, Asia/Seoul)&#10;03:00 graph-pipeline / 03:10 ingest-sources&#10;03:15 chunk-corpus / 03:20 graph-maintenance&#10;03:30 embed-backfill / 03:40 doc-pipeline" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="120" y="360" width="340" height="100" as="geometry"/>
                 </mxCell>
                 <mxCell id="seed" value="시드 Job (완료됨)&#10;gsc-seed · blog-seed · dh-ingest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" parent="1" vertex="1">
@@ -436,7 +436,7 @@
                 <mxCell id="vllm" value="사내 vLLM (KServe predictor, ai-kosmosai ns)&#10;채팅: thinkingcap-qwen3.6-27b (SAMANDA-V2)&#10;임베딩: Qwen3-Embedding-0.6B&#10;리랭커: Qwen3-Reranker-8B (슬롯만)&#10;클러스터 내부 = predictor DNS / 외부 = 인그레스 호스트" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="480" y="210" width="330" height="120" as="geometry"/>
                 </mxCell>
-                <mxCell id="dh" value="DataHub (datahub ns, helm)&#10;GMS·frontend·OpenSearch·Kafka·MySQL&#10;접근은 공식 MCP로만 (책임 경계)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
+                <mxCell id="dh" value="DataHub (datahub ns, helm)&#10;GMS·frontend·OpenSearch·Kafka·MySQL&#10;접근은 공식 MCP(REST 어댑터)로만 (책임 경계)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=8;" parent="1" vertex="1">
                     <mxGeometry x="130" y="60" width="330" height="90" as="geometry"/>
                 </mxCell>
                 <mxCell id="e1" style="endArrow=block;html=1;strokeWidth=2;" parent="1" source="ing" target="app" edge="1">
@@ -454,7 +454,7 @@
                 <mxCell id="e5" style="endArrow=block;html=1;strokeWidth=1;" parent="1" source="cron" target="vllm" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e6" value="MCP (stdio→GMS)" style="endArrow=block;html=1;strokeWidth=1;fontSize=10;" parent="1" source="app" target="dh" edge="1">
+                <mxCell id="e6" value="MCP/REST 어댑터" style="endArrow=block;html=1;strokeWidth=1;fontSize=10;" parent="1" source="app" target="dh" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
             </root>

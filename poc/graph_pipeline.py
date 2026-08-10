@@ -644,4 +644,17 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import time as _t
+    from tools import events as _ev
+    _t0 = _t.time()
+    try:
+        main()
+        _ev.log("batch", source="graph-pipeline", level="info", status="ok",
+                duration_ms=int((_t.time() - _t0) * 1000), summary="graph-pipeline 완료")
+    except Exception as _e:
+        import traceback as _tb
+        _ev.log("batch", source="graph-pipeline", level="error", status="fail",
+                duration_ms=int((_t.time() - _t0) * 1000),
+                summary=f"{type(_e).__name__}: {str(_e)[:200]}",
+                detail=_tb.format_exc())
+        raise

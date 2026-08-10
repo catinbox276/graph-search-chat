@@ -202,6 +202,9 @@ async def chat_stream(inp: ChatIn, request: Request):
                             calls.append({"name": c["name"], "args": c["args"]})
                             if c["name"] in ("read_doc", "read_blog_post") and c["args"].get("post_id"):
                                 refs[str(c["args"]["post_id"])] = "열람"
+                            from tools import events
+                            events.log("tool", source=c["name"], actor=uid, ref=sid,
+                                       summary=json.dumps(c["args"], ensure_ascii=False)[:300])
                             yield sse({"type": "tool", "name": c["name"],
                                        "args": c["args"]})
                         if getattr(m, "type", "") == "tool":

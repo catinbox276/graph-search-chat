@@ -41,7 +41,7 @@ flowchart LR
         P2["03:00 graph-pipeline (세그먼트 분할→게이트→추출→병합)"]
         P5["03:10 ingest-sources (원천 증분 적재)"]
         P7["03:15 chunk-corpus (신규·갱신 문서 청킹)"]
-        P4["03:20 graph-maintenance (형제 통합·잎 흡수·시간 감쇠)"]
+        P4["03:20 graph-maintenance (형제 통합·잎 흡수·시간 감쇠·로그 회전)"]
         P3["03:30 embed-backfill (청크 임베딩·모델 버저닝)"]
         P6["03:40 doc-pipeline (문서 LLM 판정→그래프 구조화)"]
     end
@@ -67,6 +67,7 @@ ORM(`db.session()`), 복잡한 검색(CONTAINS·RRF)·MERGE·대량 배치·PL/S
 | `mcp_registry` | 도구 서버 등록 (transport: streamable_http/sse/stdio/rest) — 등록 = 도구 자동 조립 | mcp_registry.py / agent |
 | `app_settings` | 운영 설정 KV (전처리 건수·동시성·에이전트 프롬프트/도구 등 — 재배포 없이 변경) | settings.py |
 | `app_users` | 자체 계정 (가입·승인·is_admin) — 관리자는 env 계정 1개 별도 | auth.py / routers/accounts |
+| `app_events` | 활동 로그(요청·도구·배치·오류 전부, level=lvl) — 180일 회전 | events.py / routers/admin_events / graph_maintenance(purge) |
 | `blog_posts` | 구 노하우 코퍼스 — corpus_docs에 '소스 1호'로 흡수됨 | (읽기 원천으로만) |
 | `lg_checkpoints` / `lg_writes` | LangGraph 체크포인터 외부화 (모델 선언 없음 — 체크포인터 소유) | oracle_checkpointer.py |
 
@@ -77,13 +78,14 @@ DB(tools/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당
 
 | 파일 | 역할 | 핵심 결정 |
 |---|---|---|
-| `app/server.py` (74줄) | 앱 조립·기동(init_schema→행렬 로드→에이전트 예열)·/stats | 엔드포인트 추가 금지 (라우터로) |
+| `app/server.py` | 앱 조립·기동 + **활동 로그 미들웨어**(전 요청)·전역 예외 핸들러·/stats | 엔드포인트 추가 금지 (라우터로) |
 | `app/deps.py` | 공용: raw DB 풀·check_admin·에이전트 캐시·log_turn·sse | |
 | `app/routers/chat.py` | SSE 스트리밍·세션 목록/복원·화제 분기 확인(topic-check)·문서 뷰·모델 목록 | 화제 확인은 fail-open (판정 실패가 답변을 막지 않음) |
 | `app/routers/admin_sources.py` | 도메인·소스 등록·전처리 설정·드라이런/재시도/초기화·처리 현황 | 원천 테이블은 SELECT만 |
 | `app/routers/admin_models.py` | 모델·MCP 레지스트리·에이전트 설정(프롬프트·도구 on/off) | 저장 시 에이전트 캐시 무효화 |
 | `app/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan.md §6) |
 | `app/routers/graph.py` `accounts.py` `pages.py` | 그래프 데이터·출처 증거 / 계정 승인·권한 / 페이지 서빙 | HTML no-store |
+| `app/routers/admin_events.py` `tools/events.py` | 활동 로그 조회(kind/level·검색·페이지) / log()·purge_old() | log()은 예외를 삼킴 — 로깅이 앱을 못 죽임 |
 | `app/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = login.html — integration.md |
 | `app/index.html` `graph.html` `contrib.html` `admin.html` `login.html` `shell.css` | 채팅(궤적 타임라인·[n] 각주·화제 확인 바)·그래프(증거 패널)·내 기여(트리·분기점 ⑂)·관리 콘솔·로그인 | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
 | `tools/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
@@ -117,6 +119,7 @@ DB(tools/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당
 - `GET/POST /admin/agent-settings` — 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 캐시 무효화)
 - `GET /models` · `GET /admin/models/all` · `POST /admin/models/{add,sync,select}` — 모델 레지스트리
 - `GET/POST /admin/mcp` — 도구 서버 등록 (transport: streamable_http/sse/stdio/**rest**)
+- `GET /admin/events[/{id}]` — 활동 로그 조회 (kind/level 필터·검색·페이지·상세)
 - `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 
 ## 실행 방법 (전부 파드)

@@ -169,6 +169,9 @@ ORACLE_POOL_MIN = _geti("ORACLE_POOL_MIN", 1)
 ORACLE_POOL_MAX = _geti("ORACLE_POOL_MAX", 4)
 ORACLE_POOL_INCREMENT = _geti("ORACLE_POOL_INCREMENT", 1)
 
+# --- 활동 로그 보관 (tools/events.py) — 전부 쌓되 이 일수 지난 건 야간 회전 삭제 ---
+EVENTS_RETAIN_DAYS = _geti("EVENTS_RETAIN_DAYS", 180)
+
 # --- Oracle Text (scripts/load_oracle.py) ---
 # WORLD_LEXER=한국어/영어 혼합 자동. 사내 19c 한국어 정밀도는 KOREAN_MORPH_LEXER.
 ORACLE_TEXT_LEXER = _get("ORACLE_TEXT_LEXER", "WORLD_LEXER")
