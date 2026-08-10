@@ -43,6 +43,18 @@
   .node button:disabled { opacity: .45; cursor: not-allowed; }
   .fork { font-size: .72rem; color: var(--mut); margin: 2px 0 0 6px; }
   .empty { text-align: center; color: var(--mut); font-size: .85rem; padding: 40px 0; }
+  #controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+  #controls input, #controls select { padding: 7px 10px; border-radius: 8px;
+      border: 1px solid var(--line); background: #fff; color: var(--ink); font-size: .85rem; }
+  #controls #q { flex: 1; min-width: 180px; }
+  #controls .spacer { flex: 1; }
+  #controls .cnt { font-size: .78rem; color: var(--mut); white-space: nowrap; }
+  #pager { display: flex; gap: 6px; justify-content: center; align-items: center;
+           margin-top: 16px; font-size: .82rem; }
+  #pager button { padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line);
+                  background: #fff; color: var(--ink); cursor: pointer; }
+  #pager button:disabled { opacity: .4; cursor: not-allowed; }
+  #pager .cur { color: var(--mut); }
   #msg { font-size: .78rem; min-height: 1.2em; margin: 6px 0; }
   #msg.err { color: var(--fail); } #msg.ok { color: var(--ok); }
 </style>
@@ -68,8 +80,24 @@
     문구 수정은 나 혼자 기여한 노드만 가능합니다 — 여럿이 기여한 노드는 남의 기여까지
     바뀌기 때문입니다.
   </p>
+  <div id="controls">
+    <input type="search" id="q" placeholder="질문·지식 검색 (Enter)">
+    <select id="verdict">
+      <option value="">전체 판정</option>
+      <option value="success">✅ 성공</option>
+      <option value="fail">❌ 실패</option>
+      <option value="retracted">↩ 취소됨</option>
+    </select>
+    <select id="sort">
+      <option value="recent">최신순</option>
+      <option value="oldest">오래된순</option>
+    </select>
+    <span class="spacer"></span>
+    <span id="count" class="cnt"></span>
+  </div>
   <p id="msg"></p>
   <div id="list"><p class="empty">불러오는 중…</p></div>
+  <div id="pager"></div>
 </main>
 
 <script>
@@ -105,22 +133,36 @@ async function act(nodeId, action, name) {
   return true;
 }
 
+let curPage = 1;
+function params() {
+  const p = new URLSearchParams();
+  const q = $("q").value.trim();
+  if (q) p.set("q", q);
+  if ($("verdict").value) p.set("verdict", $("verdict").value);
+  p.set("sort", $("sort").value);
+  p.set("page", curPage);
+  return p.toString();
+}
+
 async function load() {
-  const r = await fetch("/me/contributions");
+  const r = await fetch("/me/contributions?" + params());
   const box = $("list");
-  if (!r.ok) { box.innerHTML = "<p class='empty'>조회 실패</p>"; return; }
-  const {items} = await r.json();
-  if (!items.length) {
-    box.innerHTML = "<p class='empty'>아직 그래프에 등록된 기여가 없습니다.<br>" +
-      "대화가 야간 자산화(성공/실패 판정)를 통과하면 여기 나타납니다.</p>";
+  if (!r.ok) { box.innerHTML = "<p class='empty'>조회 실패</p>"; $("pager").innerHTML = ""; return; }
+  const {sessions, items, total, page, pages} = await r.json();
+  curPage = page;
+  $("count").textContent = total ? `총 ${total}개 대화` : "";
+  if (!sessions.length) {
+    box.innerHTML = "<p class='empty'>" + ($("q").value || $("verdict").value
+      ? "조건에 맞는 기여가 없습니다."
+      : "아직 그래프에 등록된 기여가 없습니다.<br>대화가 야간 자산화(성공/실패 판정)를 통과하면 여기 나타납니다.") + "</p>";
+    renderPager(page, pages);
     return;
   }
-  // 세션 단위로 묶기
+  // 세션 순서(서버 정렬) 유지하며 노드를 붙인다
   const bySess = new Map();
-  items.forEach(it => {
-    if (!bySess.has(it.session_id)) bySess.set(it.session_id, {ts: it.ts, q: it.question, verdict: it.verdict, nodes: []});
-    bySess.get(it.session_id).nodes.push(it);
-  });
+  sessions.forEach(s => bySess.set(s.session_id,
+    {ts: s.ts, q: s.question, verdict: s.verdict, why: s.why, nodes: []}));
+  items.forEach(it => bySess.get(it.session_id)?.nodes.push(it));
   box.innerHTML = "";
   bySess.forEach((s, sid) => {
     const card = document.createElement("div");
@@ -130,10 +172,24 @@ async function load() {
     const vb = document.createElement("span");
     vb.className = `vbadge ${s.verdict}`;
     vb.textContent = VERDICT[s.verdict] || s.verdict;
-    const qb = document.createElement("b");
+    // 질문 = 원본 대화로 가는 링크 — 무엇을 대화했고 무엇이 반영됐는지 확인
+    const qb = document.createElement("a");
+    qb.href = "/?session=" + encodeURIComponent(sid);
     qb.textContent = `"${s.q}"`;
-    head.append(vb, ` ${s.ts} · `, qb);
+    qb.title = "이 대화 열어보기 — 질문·도구 호출·답변 재생";
+    qb.style.cssText = "color:var(--path);font-weight:600;text-decoration:none";
+    const open = document.createElement("span");
+    open.textContent = " 💬 대화 열기";
+    open.style.cssText = "font-size:.72rem;color:var(--mut)";
+    head.append(vb, ` ${s.ts} · `, qb, open);
     card.appendChild(head);
+    // 판정 근거 — 왜 이 배지가 붙었는지 사람 말로
+    if (s.why) {
+      const why = document.createElement("div");
+      why.style.cssText = "font-size:.74rem;color:var(--mut);margin:2px 0 4px";
+      why.textContent = "판정 근거: " + s.why;
+      card.appendChild(why);
+    }
 
     // 노드 1행 렌더 (버튼 포함)
     const nodeRow = (n) => {
@@ -226,6 +282,27 @@ async function load() {
     box.appendChild(card);
   });
 }
+function renderPager(page, pages) {
+  const p = $("pager");
+  p.innerHTML = "";
+  if (pages <= 1) return;
+  const btn = (label, to, disabled) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.disabled = disabled;
+    b.onclick = () => { curPage = to; load(); window.scrollTo(0, 0); };
+    return b;
+  };
+  p.append(btn("← 이전", page - 1, page <= 1));
+  const cur = document.createElement("span");
+  cur.className = "cur"; cur.textContent = `${page} / ${pages}`;
+  p.append(cur, btn("다음 →", page + 1, page >= pages));
+}
+
+// 컨트롤: 검색은 Enter, 필터·정렬은 변경 즉시 — 조건 바뀌면 1페이지로
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") { curPage = 1; load(); } });
+$("verdict").onchange = () => { curPage = 1; load(); };
+$("sort").onchange = () => { curPage = 1; load(); };
+
 load();
 </script>
 </body>

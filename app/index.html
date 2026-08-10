@@ -162,6 +162,11 @@ fetch("/stats").then(r => r.json()).then(s => {
     `<span>그래프 노드 <b>${s.nodes.toLocaleString()}</b></span>` +
     `<span>축적 세션 <b>${s.sessions.toLocaleString()}</b></span>`;
 });
+// "내 기여" 등에서 ?session=<id>로 들어오면 그 대화를 바로 복원해 보여준다
+{
+  const sp = new URLSearchParams(location.search).get("session");
+  if (sp) openSession(sp);
+}
 $("newchat").onclick = () => { sid = null; log.innerHTML = ""; hello.style.display = ""; turnCount = 0; splitHinted = false; topicSuppress = false; loadSessions(); q.focus(); };
 
 // 대화 목록 — 내 세션만 조회, 클릭하면 복원 + 같은 세션으로 이어하기
