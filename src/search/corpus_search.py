@@ -1,105 +1,33 @@
-"""코퍼스 검색 함수 툴 — Oracle 19c 하이브리드 (Oracle Text + 인메모리 임베딩 행렬).
+"""코퍼스 검색 함수 툴 — SQLite 인메모리 하이브리드 (FTS5 BM25 + sqlite-vec).
 
 - 검색 대상은 통합 코퍼스 corpus_docs 단일 (등록 소스들을 ingestion/ingest_sources.py가
   조립). 특정 원천 테이블 직조회 없음 — 소스 추가는 코드가 아니라 source_registry 등록.
-- 원본 임베딩은 Oracle(embedding BLOB)에 저장 (ingestion/embed_corpus.py가 백필)
-- 서버/프로세스 기동 시 임베딩을 numpy 행렬로 메모리 로드 (정규화 -> dot = cosine)
-- 검색: Oracle Text(lexical) top-30 + 행렬 코사인(semantic) top-30 -> RRF 융합
-- 임베딩이 아직 없으면 lexical 단독으로 동작 (백필 진행 중에도 사용 가능)
-- 문서 id: "소스명:원천id" 단일 형식
+- 원본·임베딩은 Oracle이 진실 소스(corpus_docs·corpus_chunks). 검색 인덱스는
+  기동 시 Oracle → SQLite :memory:로 빌드(search/inmemory_index.py) — Oracle Text 권한 불필요.
+- 검색: FTS5(lexical) top-30 + sqlite-vec 코사인(semantic) top-30 → 문서 best-chunk 집계 → RRF.
+- 임베딩이 아직 없으면 lexical(FTS5) 단독으로 동작 (백필 진행 중에도 사용 가능).
+- 문서 id: "소스명:원천id" 단일 형식.
 
 에이전트에 함수 툴로 직접 등록해서 쓴다 (MCP 아님 — MCP는 DataHub 공식만 사용).
 """
-import re
-import threading
-
-import numpy as np
 import oracledb
-from core import config, model_registry
+from core import config
 
 DSN, USER, PASSWORD = (config.ORACLE_DSN, config.ORACLE_USER,
                        config.ORACLE_PASSWORD)  # 모듈 내부용 — 외부는 config 직접 참조
 RRF_K = config.RRF_K
 
+# 원본·스니펫 조회용 Oracle 풀 (검색 랭킹은 SQLite 인메모리 인덱스가 담당)
 _pool = oracledb.create_pool(user=USER, password=PASSWORD, dsn=DSN,
                              min=config.ORACLE_POOL_MIN, max=config.ORACLE_POOL_MAX,
                              increment=config.ORACLE_POOL_INCREMENT)
-_matrix, _ids, _chunk_nos, _lock = None, None, None, threading.Lock()
 
 
-def _corpus_ready(cur) -> bool:
-    """corpus_docs가 존재하는가 (최초 적재 전 빈 환경 가드)."""
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
-    return bool(cur.fetchone()[0])
-
-
-def load_matrix():
-    """청크 임베딩을 메모리 행렬로 로드 (현재 모델 벡터만 — 모델 교체 중엔
-    백필된 만큼 커버리지 점증, lexical이 나머지를 받침). 서버 기동 시 1회."""
-    global _matrix, _ids, _chunk_nos
-    with _lock:
-        with _pool.acquire() as con:
-            cur = con.cursor()
-            ids, nos, vecs = [], [], []
-            _, emb_name = model_registry.embedding_endpoint()
-            cur.execute("""SELECT COUNT(*) FROM user_tables
-                           WHERE table_name = 'CORPUS_CHUNKS'""")
-            if cur.fetchone()[0]:
-                cur.execute("""SELECT source_name || ':' || src_id, chunk_no, embedding
-                               FROM corpus_chunks
-                               WHERE embedding IS NOT NULL AND embed_model = :m""",
-                            m=emb_name)
-                for pid, no, blob in cur:
-                    ids.append(pid)
-                    nos.append(no)
-                    vecs.append(np.frombuffer(blob.read(), dtype=np.float32))
-        if vecs:
-            m = np.stack(vecs)
-            m /= np.linalg.norm(m, axis=1, keepdims=True)
-            _matrix, _ids, _chunk_nos = m, ids, nos
-        print(f"[corpus_search] 청크 임베딩 행렬 로드: {len(ids)}건 (모델 {emb_name})")
-    return len(ids)
-
-
-def _lexical(cur, query: str, n: int, source: str = ""):
-    terms = [t for t in re.findall(r"[\w가-힣]+", query) if len(t) >= 2]
-    if not terms:
-        return []
-    if not _corpus_ready(cur):
-        return []
-    cur.execute(
-        f"""SELECT source_name || ':' || src_id FROM corpus_docs
-           WHERE CONTAINS(body, :q, 1) > 0
-           {"AND source_name = :src" if source else ""}
-           ORDER BY SCORE(1) DESC FETCH FIRST :n ROWS ONLY""",
-        # {{}} 이스케이프 — 예약어(AND/OR 등)가 검색어에 섞여도 구문 오류 없게
-        **({"src": source} if source else {}),
-        q=" ACCUM ".join("{" + t + "}" for t in terms), n=n)
-    return [r[0] for r in cur.fetchall()]
-
-
-def _semantic(query: str, n: int, source: str = ""):
-    """청크 코사인 → 문서 단위 집계(best-chunk). 반환: (문서 pid 목록, {pid: 최고 청크 no})."""
-    if _matrix is None:
-        return [], {}
-    cli, emb_name = model_registry.embedding_client()
-    q = np.asarray(
-        cli.embeddings.create(model=emb_name, input=query).data[0].embedding,
-        dtype=np.float32)
-    q /= np.linalg.norm(q)
-    scores = _matrix @ q
-    prefix = f"{source}:" if source else ""
-    best = {}  # pid -> (score, chunk_no)
-    for i in np.argsort(scores)[::-1]:
-        pid = _ids[i]
-        if prefix and not pid.startswith(prefix):
-            continue
-        if pid not in best:
-            best[pid] = (float(scores[i]), _chunk_nos[i])
-            if len(best) >= n:
-                break
-    ordered = sorted(best, key=lambda p: best[p][0], reverse=True)
-    return ordered, {p: best[p][1] for p in ordered}
+def reload_index():
+    """인메모리 검색 인덱스를 Oracle에서 재빌드 (기동 시·임베딩 모델 교체·/reload).
+    반환: 인덱싱된 청크 수."""
+    from search import inmemory_index as ix
+    return ix.build_index()
 
 
 def search_docs(query: str, limit: int = 5) -> str:
@@ -113,26 +41,20 @@ def search_docs(query: str, limit: int = 5) -> str:
 
 
 def _search(query: str, limit: int = 5, source: str = "") -> str:
+    from search import inmemory_index as ix
+    ix.ensure_fresh()
+    lex = ix.lexical(query, config.SEARCH_TOP_LEXICAL, source)
+    sem, best_chunk = ix.semantic(query, config.SEARCH_TOP_SEMANTIC, source)
+    scores = {}
+    for rank_list in (lex, sem):
+        for r, pid in enumerate(rank_list):
+            scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + r + 1)
+    top = sorted(scores, key=scores.get, reverse=True)[:limit]
+    if not top:
+        return "검색 결과가 없습니다."
+    out = []
     with _pool.acquire() as con:
         cur = con.cursor()
-        # 검색 백엔드 A/B: oracle(Oracle Text + numpy 행렬) | inmemory(SQLite FTS5 + sqlite-vec)
-        # 인터페이스(pid 목록/best_chunk)는 동일 — RRF·출력 로직은 아래 공용.
-        if config.SEARCH_ENGINE == "inmemory":
-            from search import inmemory_index as ix
-            ix.ensure_fresh()
-            lex = ix.lexical(query, config.SEARCH_TOP_LEXICAL, source)
-            sem, best_chunk = ix.semantic(query, config.SEARCH_TOP_SEMANTIC, source)
-        else:
-            lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL, source)
-            sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC, source)
-        scores = {}
-        for rank_list in (lex, sem):
-            for r, pid in enumerate(rank_list):
-                scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + r + 1)
-        top = sorted(scores, key=scores.get, reverse=True)[:limit]
-        if not top:
-            return "검색 결과가 없습니다."
-        out = []
         for pid in top:
             tag = ("L+S" if pid in lex and pid in sem
                    else "L" if pid in lex else "S")
@@ -202,5 +124,5 @@ def read_doc(post_id: str) -> str:
 
 
 if __name__ == "__main__":
-    load_matrix()
+    reload_index()
     print(search_docs("파이썬 패키지 설치가 사내망에서 안 됨", 5))

@@ -4,16 +4,16 @@ from pydantic import BaseModel
 
 from web.deps import check_admin, clear_agents
 from core import mcp_registry, model_registry, settings
-from search.corpus_search import load_matrix
+from search.corpus_search import reload_index
 
 router = APIRouter()
 
 
 @router.get("/reload")
 def reload_embeddings(request: Request):
-    """임베딩 백필 진행 중 행렬 갱신용 (서버 재시작 불필요) — 관리자 전용."""
+    """임베딩 백필 진행 중 인덱스 갱신용 (서버 재시작 불필요) — 관리자 전용."""
     check_admin(request)
-    return {"loaded": load_matrix()}
+    return {"loaded": reload_index()}
 
 
 @router.get("/admin/models/all")
@@ -68,7 +68,7 @@ def admin_select(inp: SelectIn, request: Request):
         raise HTTPException(400, str(e))
     warn = None
     if inp.kind == "embedding":
-        n = load_matrix()  # 새 모델 벡터만 로드 — 백필 전이면 0건 (lexical이 받침)
+        n = reload_index()  # 새 모델 벡터로 인덱스 재빌드 — 백필 전이면 lexical이 받침
         warn = (f"임베딩 기본값 변경됨 — 검색·dedup·경로 진입점이 즉시 이 모델을 씁니다. "
                 f"현재 이 모델의 청크 벡터 {n}건 로드 (백필 배치가 불일치분을 자동 재임베딩, "
                 "재백필 중엔 lexical이 받침). nodes.embedding 재백필과 dedup 임계값 "

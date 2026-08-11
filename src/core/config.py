@@ -112,7 +112,6 @@ CHUNK_OVERLAP = _geti("CHUNK_OVERLAP", 150)  # 인접 청크 겹침(자)
 RRF_K = _geti("RRF_K", 60)                        # RRF 융합 상수
 SEARCH_TOP_LEXICAL = _geti("SEARCH_TOP_LEXICAL", 30)   # Oracle Text 후보 수
 SEARCH_TOP_SEMANTIC = _geti("SEARCH_TOP_SEMANTIC", 30)  # 임베딩 코사인 후보 수
-SEARCH_ENGINE = _get("SEARCH_ENGINE", "oracle")    # oracle | inmemory (A/B 스위치, docs/inmemory-search-graph.md)
 INMEM_RELOAD_SECS = _geti("INMEM_RELOAD_SECS", 60)  # 인메모리 인덱스 버전 확인 주기(초)
 
 # --- 경로 제안 진입점 매칭 (search/path_suggest.py) ---
@@ -177,7 +176,6 @@ EVENTS_RETAIN_DAYS = _geti("EVENTS_RETAIN_DAYS", 180)
 
 # --- Oracle Text (ingestion/load_oracle.py) ---
 # WORLD_LEXER=한국어/영어 혼합 자동. 사내 19c 한국어 정밀도는 KOREAN_MORPH_LEXER.
-ORACLE_TEXT_LEXER = _get("ORACLE_TEXT_LEXER", "WORLD_LEXER")
 
 # --- Oracle 드라이버 모드 ---
 # thin = 순수 파이썬(기본, Instant Client 불필요) / thick = Oracle Instant Client 사용

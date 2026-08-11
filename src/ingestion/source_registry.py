@@ -10,7 +10,6 @@
 - 적재 배치(ingestion/ingest_sources.py)가 이 레지스트리를 읽어 corpus_docs로 조립한다.
 """
 import json
-import re
 
 from core import config
 
@@ -187,7 +186,7 @@ def upsert(cur, source_name: str, table_name: str, id_column: str, ts_column: st
                  "e": "Y" if enabled else "N", "ue": "Y" if url_enabled else "N"})
 
 def ensure_corpus(cur):
-    """통합 코퍼스 테이블 + Oracle Text 인덱스 (멱등). 렉서는 blog_lexer를 공유.
+    """통합 코퍼스 테이블 (멱등). 검색은 SQLite 인메모리 인덱스라 Oracle Text 인덱스 없음.
 
     적재 배치뿐 아니라 서버 기동 시에도 호출된다 — 새 DB에서 배치 전에
     드라이런·검색이 먼저 와도 ORA-00942가 나지 않도록.
@@ -195,27 +194,7 @@ def ensure_corpus(cur):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_DOCS'")
     if cur.fetchone()[0]:
         return
-    # 렉서 프리퍼런스를 테이블보다 먼저 — 권한이 없으면 테이블도 안 만들어
-    # 어중간한 상태(테이블만 있고 Text 인덱스 없음)를 남기지 않는다
-    lexer = config.ORACLE_TEXT_LEXER
-    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
-        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
-    try:
-        cur.execute(f"""
-            BEGIN
-              BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
-              EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
-              END;
-            END;
-        """)
-    except Exception as e:
-        if "PLS-00201" in str(e) or "06550" in str(e):
-            raise RuntimeError(
-                "Oracle Text 권한이 없습니다 — 검색 인덱스 생성에 필요합니다.\n"
-                "DBA 권한 계정에서 1회 실행하세요:\n"
-                "  GRANT CTXAPP TO <앱 계정>;\n"
-                "  GRANT EXECUTE ON CTXSYS.CTX_DDL TO <앱 계정>;") from e
-        raise
+    # 검색은 SQLite 인메모리 인덱스(FTS5+sqlite-vec)라 Oracle Text CONTEXT 인덱스는 안 만든다.
     cur.execute("""CREATE TABLE corpus_docs (
         source_name VARCHAR2(100) NOT NULL,   -- source_registry.source_name
         src_id      VARCHAR2(200) NOT NULL,   -- 원천 테이블의 고유 id 값
@@ -234,12 +213,7 @@ def ensure_corpus(cur):
           REFERENCES source_registry(source_name)
     )""")
     cur.execute("CREATE INDEX corpus_docs_status_ix ON corpus_docs (graph_status)")
-    cur.execute("""
-        CREATE INDEX corpus_docs_body_idx ON corpus_docs(body)
-        INDEXTYPE IS CTXSYS.CONTEXT
-        PARAMETERS ('LEXER blog_lexer SYNC (ON COMMIT)')
-    """)
-    print("corpus_docs 테이블 + Text 인덱스 생성")
+    print("corpus_docs 테이블 생성")
 
 
 def ensure_corpus_chunks(cur):

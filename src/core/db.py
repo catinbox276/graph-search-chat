@@ -47,43 +47,11 @@ def session():
 
 
 def init_schema():
-    """전 테이블 생성(멱등) + ORM 표현 밖 후처리. 서버 기동 시 1회."""
+    """전 테이블 생성(멱등) + ORM 표현 밖 후처리(소스 시드). 서버 기동 시 1회.
+    검색은 SQLite 인메모리 인덱스(search/inmemory_index.py)라 Oracle Text 권한 불필요."""
     Base.metadata.create_all(engine())
     with engine().begin() as con:
-        _ensure_text_index(con)
         _seed_sources(con)
-
-
-def _ensure_text_index(con):
-    """corpus_docs.body의 Oracle Text CONTEXT 인덱스 — CREATE INDEX ... INDEXTYPE는
-    ORM 표현 밖이라 여기서. 렉서 프리퍼런스가 먼저(권한 없으면 명확히 실패)."""
-    n = con.execute(text("""SELECT COUNT(*) FROM user_indexes
-                            WHERE index_name = 'CORPUS_DOCS_BODY_IDX'""")).scalar()
-    if n:
-        return
-    lexer = config.ORACLE_TEXT_LEXER
-    if not re.fullmatch(r"[A-Za-z0-9_]+", lexer):
-        raise ValueError(f"잘못된 ORACLE_TEXT_LEXER: {lexer!r}")
-    try:
-        con.execute(text(f"""
-            BEGIN
-              BEGIN ctx_ddl.create_preference('blog_lexer', '{lexer}');
-              EXCEPTION WHEN OTHERS THEN NULL;  -- 이미 있으면 그대로 사용
-              END;
-            END;"""))
-    except Exception as e:
-        if "PLS-00201" in str(e) or "06550" in str(e):
-            raise RuntimeError(
-                "Oracle Text 권한이 없습니다 — 검색 인덱스 생성에 필요합니다.\n"
-                "DBA 권한 계정에서 1회 실행하세요:\n"
-                "  GRANT CTXAPP TO <앱 계정>;\n"
-                "  GRANT EXECUTE ON CTXSYS.CTX_DDL TO <앱 계정>;") from e
-        raise
-    con.execute(text("""
-        CREATE INDEX corpus_docs_body_idx ON corpus_docs(body)
-        INDEXTYPE IS CTXSYS.CONTEXT
-        PARAMETERS ('LEXER blog_lexer SYNC (ON COMMIT)')"""))
-    print("corpus_docs Oracle Text 인덱스 생성")
 
 
 def _seed_sources(con):

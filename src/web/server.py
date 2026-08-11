@@ -23,7 +23,7 @@ from web.routers import (accounts, admin_events, admin_models, admin_sources,
                          chat, contrib, graph, pages)
 from core import db as orm_db, events
 from ingestion import source_registry
-from search.corpus_search import load_matrix
+from search.corpus_search import reload_index
 from core.oracle_checkpointer import OracleSaver
 
 app = FastAPI()
@@ -138,7 +138,7 @@ async def startup():
         cur.execute("ALTER TABLE sessions ADD (user_id VARCHAR2(64))")
     con.commit()
     con.close()
-    load_matrix()                # 임베딩 행렬 메모리 적재 (하이브리드 검색)
+    reload_index()               # SQLite 인메모리 검색 인덱스 빌드 (Oracle→:memory:)
     deps.set_saver(OracleSaver())  # 멀티턴 기억 — Oracle 외부화
     await deps.get_agent(None)   # 기본 LLM 예열
 

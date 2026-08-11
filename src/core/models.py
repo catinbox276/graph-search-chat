@@ -2,8 +2,7 @@
 
 규약 (CLAUDE.md):
 - 새 테이블·컬럼은 여기 선언 → `db.init_schema()`(create_all)가 생성한다.
-- 단순 CRUD(레지스트리·계정·설정·기록)는 ORM으로, 복잡한 검색(Oracle Text CONTAINS·
-  RRF)·MERGE 업서트·대량 배치·PL/SQL은 raw SQL 유지 — 같은 엔진에서 text()로 실행.
+- 단순 CRUD(레지스트리·계정·설정·기록)는 ORM으로, 복잡한 검색(RRF 융합은 SQLite 인메모리 인덱스)·MERGE 업서트·대량 배치·PL/SQL은 raw SQL 유지.
 - 23ai/23.6 전환 시 VECTOR 컬럼은 여기 추가 (SQLAlchemy 2.0.41+ 네이티브 지원) —
   그때까지 임베딩은 BLOB + 인메모리 검색 (docs/schema.md §5.5).
 - lg_checkpoints/lg_writes는 LangGraph 체크포인터 소유 — 모델로 선언하지 않는다.
@@ -60,8 +59,7 @@ class CorpusDoc(Base):
                          primary_key=True)
     src_id = Column(String(200), primary_key=True)
     title = Column(String(1000))
-    body = Column(CLOB)          # 역할 매핑으로 조립된 검색 문서 — Oracle Text 인덱스는
-    #                              init_schema() 후처리 (CONTEXT 인덱스는 ORM 표현 밖)
+    body = Column(CLOB)          # 역할 매핑으로 조립된 검색 문서 (검색은 SQLite 인메모리 인덱스)
     kind = Column(String(100))
     url = Column(String(1000))
     embedding = Column(BLOB)     # 구버전 문서 단위 벡터 (검색은 청크 벡터 사용)
