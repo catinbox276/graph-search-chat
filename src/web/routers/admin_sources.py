@@ -287,6 +287,43 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request):
                     "(고아 노드는 야간 유지보수가 정리)"}
 
 
+@router.post("/admin/sources/{sname}/ingest")
+def admin_source_ingest(sname: str, request: Request):
+    """관리자: 지금 적재 — 원천 테이블 → corpus_docs 즉시 적재 + 청킹.
+
+    야간 배치(03:10 적재·03:15 청킹)를 기다리지 않고 소스 등록 직후 테스트하려는 용도.
+    이걸 돌려야 corpus_docs가 채워지고, 그 뒤 드라이런·구조화가 처리할 문서가 생긴다.
+    임베딩(03:30)·문서 그래프 구조화(03:40)는 여전히 배치나 CLI로."""
+    check_admin(request)
+    from ingestion import source_registry, ingest_sources, chunk_corpus
+    con = db()
+    cur = con.cursor()
+    source_registry.ensure(cur)
+    source_registry.ensure_corpus(cur)
+    src = next((s for s in source_registry.list_sources(cur)
+                if s["source_name"] == sname), None)
+    if not src:
+        con.close()
+        raise HTTPException(404, f"소스가 없습니다: {sname}")
+    if not source_registry.table_allowed(src["table_name"]):
+        con.close()
+        raise HTTPException(403, f"허용되지 않은 테이블: {src['table_name']}")
+    try:
+        if src["source_name"] == "blog_posts" and not src["last_ingest_ts"]:
+            n = ingest_sources.migrate_blog_posts(cur, src)
+            cur.execute("""UPDATE source_registry SET last_ingest_ts = SYSTIMESTAMP
+                           WHERE source_name = :1""", [sname])
+        else:
+            n = ingest_sources.ingest_source(cur, src)
+        con.commit()
+    finally:
+        con.close()
+    chunk_corpus.main()  # 미청킹 신규분 청킹 (멱등 — 전체 대상이나 신규분만 처리)
+    return {"ok": True, "ingested": n,
+            "note": f"적재 {n}건 + 청킹 완료 — 이제 드라이런·구조화 가능. "
+                    "임베딩(검색 시맨틱)·그래프 구조화는 배치나 CLI로."}
+
+
 def _reset_source(cur, sname: str):
     """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1

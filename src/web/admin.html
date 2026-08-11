@@ -126,6 +126,7 @@
     <select id="r_meta"><option value="">meta 컬럼…</option></select>
     <select id="r_url"><option value="">url 컬럼…</option></select>
     <button id="ssave">추가/수정</button>
+    <button type="button" class="ghost" id="singest" title="원천 테이블 → corpus_docs 즉시 적재 + 청킹 (야간 배치를 안 기다림). 등록 직후 이걸 눌러야 드라이런·구조화할 문서가 생깁니다">지금 적재</button>
     <button type="button" class="ghost" id="sdry" title="선택한 소스의 미처리 문서 3건을 판정만 해봄 — 그래프에 반영 안 됨. 지침 튜닝용">드라이런</button>
     <button type="button" class="ghost" id="sretry" title="error 상태 문서를 미처리로 되돌림 — 다음 배치가 재시도">실패 재시도</button>
     <button type="button" class="warn" id="sreset" title="이 소스가 그래프에 올린 기여를 회수하고 전부 처음부터 재구조화 — 지침·모델 변경 후 사용">⚠ 초기화 재처리</button>
@@ -469,6 +470,21 @@ $("sform").onsubmit = async (e) => {
   }
   await loadSources(name);  // 폼은 유지 — 이어서 수정 가능
   smsg(`✓ 저장 완료 — "${name}" (다음 적재 배치부터 반영)`, true);
+};
+$("singest").onclick = async () => {
+  const name = $("sname").value.trim();
+  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const out = $("dryout");
+  out.textContent = "⏳ 적재 중… (원천 → corpus_docs + 청킹 — 데이터 양에 따라 수십 초~분)";
+  const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/ingest`, {method: "POST"});
+  if (!r.ok) {
+    let msg = `적재 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    out.textContent = msg; return;
+  }
+  const j = await r.json();
+  out.textContent = `✓ ${j.note}`;
+  loadSources(); loadDocStatus();  // 처리 현황·사용 카운트 갱신
 };
 $("sdry").onclick = async () => {
   const name = $("sname").value.trim();
