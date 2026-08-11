@@ -24,7 +24,7 @@ flowchart LR
         AG["suggest_paths → 도구 선택<br/>search_docs·read_doc·search_{소스}·MCP 도구"]
     end
     LMS["모델 서빙 (LM Studio / vLLM)<br/>LLM·임베딩·리랭커"]
-    subgraph ora["Oracle 파드 (:1521 — 스키마는 tools/models.py 선언)"]
+    subgraph ora["Oracle 파드 (:1521 — 스키마는 core/models.py 선언)"]
         T1["corpus_docs / corpus_chunks (검색)"]
         T2["sessions (증거·판정)"]
         T3["nodes/edges/node_evidence (그래프)"]
@@ -50,7 +50,7 @@ flowchart LR
 
 ## 저장소 (Oracle 단일 DB — design §5 원칙 유지)
 
-**전 테이블은 `tools/models.py`(SQLAlchemy)에 선언**되고 `tools/db.py`의 `init_schema()`가
+**전 테이블은 `core/models.py`(SQLAlchemy)에 선언**되고 `core/db.py`의 `init_schema()`가
 서버 기동 시 생성한다(create_all + Oracle Text 인덱스 + 시드, 멱등). 규약: 단순 CRUD는
 ORM(`db.session()`), 복잡한 검색(CONTAINS·RRF)·MERGE·대량 배치·PL/SQL·체크포인터는 raw SQL.
 
@@ -73,31 +73,31 @@ ORM(`db.session()`), 복잡한 검색(CONTAINS·RRF)·MERGE·대량 배치·PL/S
 
 ## 주요 컴포넌트와 파일
 
-**앱 계층 규약**: Router(app/routers/ — HTTP 입출력·권한 검사) → Service/Repository(tools/) →
-DB(tools/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 라우터에.
+**앱 계층 규약**: Router(web/routers/ — HTTP 입출력·권한 검사) → Service/Repository(core/·search/·ingestion/) →
+DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 라우터에.
 
 | 파일 | 역할 | 핵심 결정 |
 |---|---|---|
-| `app/server.py` | 앱 조립·기동 + **활동 로그 미들웨어**(전 요청)·전역 예외 핸들러·/stats | 엔드포인트 추가 금지 (라우터로) |
-| `app/deps.py` | 공용: raw DB 풀·check_admin·에이전트 캐시·log_turn·sse | |
-| `app/routers/chat.py` | SSE 스트리밍·세션 목록/복원·화제 분기 확인(topic-check)·문서 뷰·모델 목록 | 화제 확인은 fail-open (판정 실패가 답변을 막지 않음) |
-| `app/routers/admin_sources.py` | 도메인·소스 등록·전처리 설정·드라이런/재시도/초기화·처리 현황 | 원천 테이블은 SELECT만 |
-| `app/routers/admin_models.py` | 모델·MCP 레지스트리·에이전트 설정(프롬프트·도구 on/off) | 저장 시 에이전트 캐시 무효화 |
-| `app/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan.md §6) |
-| `app/routers/graph.py` `accounts.py` `pages.py` | 그래프 데이터·출처 증거 / 계정 승인·권한 / 페이지 서빙 | HTML no-store |
-| `app/routers/admin_events.py` `tools/events.py` | 활동 로그 조회(kind/level·검색·페이지) / log()·purge_old() | log()은 예외를 삼킴 — 로깅이 앱을 못 죽임 |
-| `app/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = login.html — integration.md |
+| `web/server.py` | 앱 조립·기동 + **활동 로그 미들웨어**(전 요청)·전역 예외 핸들러·/stats | 엔드포인트 추가 금지 (라우터로) |
+| `web/deps.py` | 공용: raw DB 풀·check_admin·에이전트 캐시·log_turn·sse | |
+| `web/routers/chat.py` | SSE 스트리밍·세션 목록/복원·화제 분기 확인(topic-check)·문서 뷰·모델 목록 | 화제 확인은 fail-open (판정 실패가 답변을 막지 않음) |
+| `web/routers/admin_sources.py` | 도메인·소스 등록·전처리 설정·드라이런/재시도/초기화·처리 현황 | 원천 테이블은 SELECT만 |
+| `web/routers/admin_models.py` | 모델·MCP 레지스트리·에이전트 설정(프롬프트·도구 on/off) | 저장 시 에이전트 캐시 무효화 |
+| `web/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan.md §6) |
+| `web/routers/graph.py` `accounts.py` `pages.py` | 그래프 데이터·출처 증거 / 계정 승인·권한 / 페이지 서빙 | HTML no-store |
+| `web/routers/admin_events.py` `core/events.py` | 활동 로그 조회(kind/level·검색·페이지) / log()·purge_old() | log()은 예외를 삼킴 — 로깅이 앱을 못 죽임 |
+| `web/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = login.html — integration.md |
 | `app/index.html` `graph.html` `contrib.html` `admin.html` `login.html` `shell.css` | 채팅(궤적 타임라인·[n] 각주·화제 확인 바)·그래프(증거 패널)·내 기여(트리·분기점 ⑂)·관리 콘솔·로그인 | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
-| `tools/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
-| `tools/corpus_search.py` | 하이브리드 검색: Oracle Text(lexical) + 청크 행렬 코사인(semantic) → 문서 best-chunk 집계 → RRF. search_docs·read_doc·소스별 도구 생성 | 검색당 임베딩 계산은 질의 1건뿐 |
-| `tools/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
-| `tools/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
-| `tools/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
+| `core/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
+| `search/corpus_search.py` | 하이브리드 검색: Oracle Text(lexical) + 청크 행렬 코사인(semantic) → 문서 best-chunk 집계 → RRF. search_docs·read_doc·소스별 도구 생성 | 검색당 임베딩 계산은 질의 1건뿐 |
+| `search/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
+| `core/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
+| `core/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
 | `agent/agent.py` | DeepAgents 조립: suggest_paths + search_docs/read_doc + search_{소스} + MCP/REST 도구 | 새 문제 → suggest_paths 먼저 (시스템 프롬프트) |
-| `poc/graph_pipeline.py` | 세그먼트 분할→게이트(행동 신호)→fits·grounded 판정→추출→병합→재발 소급 취소 | dedup 3단: ≥0.92+문자 가드 / ≥0.70 LLM 선택 / 신규 |
-| `poc/doc_pipeline.py` | 도메인 지정 소스 문서를 LLM 판정(fits)→같은 그래프에 병합, 미달 excluded | 판정 동시(연속 파이프라인)·병합 직렬. 생각 끄기로 ~15,000건/h |
-| `poc/graph_maintenance.py` | 형제 통합·잎 흡수·시간 감쇠 — 멱등 | |
-| `scripts/` | 코퍼스 빌드·적재·청킹(executemany)·임베딩 백필(64건×동시4)·원천 증분 적재 | |
+| `graph/graph_pipeline.py` | 세그먼트 분할→게이트(행동 신호)→fits·grounded 판정→추출→병합→재발 소급 취소 | dedup 3단: ≥0.92+문자 가드 / ≥0.70 LLM 선택 / 신규 |
+| `graph/doc_pipeline.py` | 도메인 지정 소스 문서를 LLM 판정(fits)→같은 그래프에 병합, 미달 excluded | 판정 동시(연속 파이프라인)·병합 직렬. 생각 끄기로 ~15,000건/h |
+| `graph/graph_maintenance.py` | 형제 통합·잎 흡수·시간 감쇠 — 멱등 | |
+| `ingestion/` | 코퍼스 빌드·적재·청킹(executemany)·임베딩 백필(64건×동시4)·원천 증분 적재·토큰화 | |
 | `deploy/k8s/` | 앱 Deployment·CronJob 6종(timeZone Asia/Seoul)·Oracle StatefulSet·ingress | env는 deploy/k8s/base/gsc.env → ConfigMap |
 
 ## API 요약 (:8500)

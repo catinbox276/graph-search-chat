@@ -4,7 +4,7 @@
   → 임베딩 모델 교체 시 이 배치가 자동으로 점진 재백필한다 (검색은 현재 모델
   벡터만 로드 — 재백필 중 커버리지가 점증하고 lexical이 나머지를 받침).
 - 대상 텍스트: 청크 text 전체 (title 접두 포함 — 청킹 때 이미 조립됨)
-usage: .venv/bin/python scripts/embed_corpus.py   (야간 CronJob 03:30과 동일)
+usage: .venv/bin/python ingestion/embed_corpus.py   (야간 CronJob 03:30과 동일)
 """
 import asyncio
 import sys
@@ -33,7 +33,7 @@ async def main():
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CORPUS_CHUNKS'")
     if not cur.fetchone()[0]:
-        print("corpus_chunks 없음 — 먼저 scripts/chunk_corpus.py로 청킹하세요", flush=True)
+        print("corpus_chunks 없음 — 먼저 ingestion/chunk_corpus.py로 청킹하세요", flush=True)
         return
     cur.execute("""SELECT source_name, src_id, chunk_no, text FROM corpus_chunks
                    WHERE embedding IS NULL OR embed_model IS NULL

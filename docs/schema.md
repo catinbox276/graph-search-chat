@@ -173,7 +173,7 @@ nodes.embedding(노드 이름 벡터)은 청킹과 무관 — 그대로. 단 **�
 
 | 단계 | 작업 | 되돌림 |
 |---|---|---|
-| 1 | ~~`corpus_chunks` DDL + 청킹 배치~~ **완료** (scripts/chunk_corpus.py, cron 03:15) | — |
+| 1 | ~~`corpus_chunks` DDL + 청킹 배치~~ **완료** (ingestion/chunk_corpus.py, cron 03:15) | — |
 | 2 | ~~임베딩 백필 청크 전환~~ **완료** (embed_model 기록, 모델 불일치 자동 재백필) | — |
 | 3 | ~~검색 청크 전환~~ **완료** (best-chunk 집계, 매칭 청크가 스니펫) | — |
 | 4 | ~~doc 임베딩 백필 중단~~ **완료** (corpus_docs.embedding은 잔존 컬럼 — 추후 정리) | — |

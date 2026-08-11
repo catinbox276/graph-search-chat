@@ -8,7 +8,7 @@
 - 인덱스: corpus_docs(graph_status), sessions(user_id)
 
 멱등: 이미 적용된 항목은 건너뜀.
-usage: python scripts/migrate_schema_v2.py
+usage: python core/migrate_schema_v2.py
 """
 import sys
 from pathlib import Path

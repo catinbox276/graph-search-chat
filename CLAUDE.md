@@ -11,12 +11,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 역할이 아니라 **도메인**으로 나눈다 (호출방식·프로젝트단계로 나누지 않음). "새 기능 어디 넣지?"가 3초 안에 결정되는 게 기준.
 
 ```
-web/        FastAPI HTTP 계층 — server.py, routers/*, auth.py, deps.py, *.html, shell.css
-agent/      에이전트 조립 — agent.py (DeepAgents, 툴 와이어링)
-search/     검색 도메인 — corpus_search, inmemory_index, ko_tokenize, path_suggest
-ingestion/  적재 도메인 — source_registry + 코퍼스 빌드/적재/청킹/임베딩/토큰화 배치
-graph/      지식그래프 도메인 — graph_pipeline, doc_pipeline, graph_maintenance, selfplay, tasks.yaml
-core/       공용 인프라 — config, db, models, events, settings, model_registry, mcp_registry, oracle_checkpointer, session_ctx, rest_tools
+src/        애플리케이션 코드 (파이썬 루트 — PYTHONPATH=src). import는 `from core import config`처럼 src 기준.
+  web/        FastAPI HTTP 계층 — server.py, routers/*, auth.py, deps.py, *.html, shell.css
+  agent/      에이전트 조립 — agent.py (DeepAgents, 툴 와이어링)
+  search/     검색 도메인 — corpus_search, inmemory_index, ko_tokenize, path_suggest
+  ingestion/  적재 도메인 — source_registry + 코퍼스 빌드/적재/청킹/임베딩/토큰화 배치
+  graph/      지식그래프 도메인 — graph_pipeline, doc_pipeline, graph_maintenance, selfplay, tasks.yaml
+  core/       공용 인프라 — config, db, models, events, settings, model_registry, mcp_registry, oracle_checkpointer, session_ctx, rest_tools
+deploy/     인프라 — Dockerfile, k8s/(base·cluster·oracle·ingress)
+docs/       설계·기획·구현 문서 / .env·requirements.txt는 레포 루트
 ```
 
 규칙(불변식): **도메인 외부에서는 패키지 루트만 import**(`from core import config`, 깊은 경로 지양). **`common.py`/`utils.py`/번호 접미사 금지** — 커지면 유스케이스 단위로 쪼갠다(줄 수 아님, 변경 이유 2개 이상이면 분리). 파일이 커지면 `search/corpus_search.py` → `search/corpus_search/` 패키지로 승격하고 `__init__`에서 re-export(외부 import 경로 불변). `core/`는 모든 도메인이 의존하는 공용만 — 도메인 로직 금지.
@@ -27,32 +30,32 @@ core/       공용 인프라 — config, db, models, events, settings, model_reg
 
 ```bash
 # 앱 서버 (채팅 UI :8500, 그래프 뷰 :8500/graph)
-.venv/bin/uvicorn web.server:app --port 8500
+PYTHONPATH=src .venv/bin/uvicorn web.server:app --port 8500
 
 # 에이전트 단발 실행 (서버 없이 CLI로 질문 1건)
-.venv/bin/python agent/agent.py "financial DB에서 계좌 테이블 뭐 있어?"
+PYTHONPATH=src .venv/bin/python -m agent.agent "financial DB에서 계좌 테이블 뭐 있어?"
 
 # self-play 세션 생성 (재실행 시 완료분 스킵하고 이어함)
-.venv/bin/python graph/selfplay.py [--only R1,R2]
+PYTHONPATH=src .venv/bin/python -m graph.selfplay [--only R1,R2]
 
 # 그래프 파이프라인: sessions → 게이트 판정 → 4계층 추출 → nodes/edges 병합
-.venv/bin/python graph/graph_pipeline.py
+PYTHONPATH=src .venv/bin/python -m graph.graph_pipeline
 
 # 그래프 유지보수 (멱등): 저빈도 형제 통합 + 오래된 잎 흡수
-.venv/bin/python -m graph.graph_maintenance [--age-days 14]
+PYTHONPATH=src .venv/bin/python -m graph.graph_maintenance [--age-days 14]
 
 # 데이터 준비 (1회, 순서대로): 코퍼스 빌드 → Oracle 적재 → 임베딩 백필 → BIRD 적재
-python3 ingestion/build_corpus.py && python3 ingestion/load_oracle.py \
-  && python3 ingestion/embed_corpus.py && python3 ingestion/ingest_bird.py
+PYTHONPATH=src python3 -m ingestion.build_corpus && PYTHONPATH=src python3 -m ingestion.load_oracle \
+  && PYTHONPATH=src python3 -m ingestion.embed_corpus && PYTHONPATH=src python3 -m ingestion.ingest_bird
 
 # 원천 테이블 증분 적재: source_registry 등록분 → corpus_docs (야간 03:10과 동일, 멱등)
-python3 ingestion/ingest_sources.py
+PYTHONPATH=src python3 -m ingestion.ingest_sources
 
 # 문서 청킹: 신규·갱신 문서 → corpus_chunks (야간 03:15과 동일, 멱등)
-python3 ingestion/chunk_corpus.py
+PYTHONPATH=src python3 -m ingestion.chunk_corpus
 
 # 문서 그래프 구조화: 도메인 지정 소스의 corpus_docs를 LLM 판정·그래프 병합 (야간 03:40과 동일)
-.venv/bin/python -m graph.doc_pipeline [--limit N]
+PYTHONPATH=src .venv/bin/python -m graph.doc_pipeline [--limit N]
 
 # 배포 (전제: k8s + LM Studio :1234 — 상세 절차는 docs/implementation.md "실행 방법")
 docker build -f deploy/Dockerfile -t graph-search-chat:latest .

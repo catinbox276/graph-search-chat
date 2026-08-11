@@ -36,8 +36,8 @@
 ## 재현 방법
 
 ```bash
-.venv/bin/python poc/selfplay.py          # 47세션 실행 (이어하기 지원)
-.venv/bin/python poc/graph_pipeline.py    # 게이트 + 추출 + 그래프 적재
+.venv/bin/python graph/selfplay.py          # 47세션 실행 (이어하기 지원)
+.venv/bin/python graph/graph_pipeline.py    # 게이트 + 추출 + 그래프 적재
 # 결과는 Oracle: sessions(verdict), nodes/edges(가중치), node_evidence(출처)
 ```
 
@@ -54,7 +54,7 @@
 
 설계 ⑤단계(신규 사용자 안내)를 구현해 **대화 → 추출 → 병합 → 가중치 → 안내 → 새 경험 재축적**의 전체 순환이 완결됐다.
 
-### 구현 (tools/path_suggest.py)
+### 구현 (search/path_suggest.py)
 - 에이전트가 새 문제를 받으면 **suggest_paths를 가장 먼저 호출**하도록 시스템 프롬프트 지시
 - 동작: 문제 문장 임베딩 → 2층(목표) 노드와 브루트포스 코사인 (진입 임계값 0.60 — dedup 0.72보다 완화) → 유사 목표의 3층(접근법)을 엣지 가중치 내림차순 제시 + 4층 도구 목록 동반
 - **성공/실패를 세션 판정 카운트로 집계** — `node_evidence × sessions.verdict` 조인. poc-results 이슈 2(불리언 fail_flag 오염)의 해법을 적용한 것. 실패 우세일 때만 경고, 하드 차단 없음(design §4)
@@ -140,7 +140,7 @@ Milvus·OpenSearch가 standalone/cluster 설치 모드를 제공하는 방식을
 
 ## 추가: 저빈도 잎 흡수 규칙 구현 (2026-08-02) — design §2 운영 규칙 완성
 
-`poc/graph_maintenance.py` — 야간 유지보수 배치 (CronJob 03:20, 파이프라인 직후):
+`graph/graph_maintenance.py` — 야간 유지보수 배치 (CronJob 03:20, 파이프라인 직후):
 
 - **패스 1 (형제 통합)**: 같은 부모 밑 통행 ≤2 노드가 더 인기 있는 형제와 유사(코사인 ≥0.70 + LLM 동일 의도 확인)하면 흡수 — 가중치·출처 합산, 도구 자식 엣지 재연결. 2단계 판정의 과분리를 사후 교정하는 장치
 - **패스 2 (잎 흡수)**: 생성 14일이 지나도 통행 ≤1인 3층 말단을 부모 목표로 흡수 — "오래 지나도 저빈도" 조건이라 신생 노드는 보호
@@ -155,7 +155,7 @@ PoC 원료였던 `data/` 로컬 파일 8GB 전량 삭제 (BIRD SQLite, StackExch
 
 - **가능한 이유**: 운영 데이터의 원본은 전부 Oracle(코퍼스+임베딩, 세션, 그래프, 레지스트리)이고, BIRD 스키마는 DataHub에 이미 등록됨. SQLite는 시스템 저장소가 아니라 벤치마크 배포 포맷이었을 뿐
 - **삭제 후 검증**: 검색·채팅·그래프 전부 정상 (코퍼스 343,045건 유지)
-- **재구축이 필요해지면**: poc-datasets.md의 공개 다운로드 링크에서 재취득 → scripts/ 재실행
+- **재구축이 필요해지면**: poc-datasets.md의 공개 다운로드 링크에서 재취득 → ingestion/ 재실행
 - 남은 로컬 데이터 원본은 Oracle 파드의 PVC 하나 — 백업 대상도 이것 하나다
 
 ## 추가: 클러스터 모드 실전 전환 테스트 (2026-08-02)
@@ -173,7 +173,7 @@ sessionAffinity(ClientIP) 기반 기억 유지가 실측으로 확인됨 — 단
 
 ## 추가: 체크포인터 외부화 — Oracle 기반 멀티턴 기억 (2026-08-02)
 
-책임 경계 원칙(별도 저장소 금지)에 따라 LangGraph `BaseCheckpointSaver`를 Oracle로 직접 구현(`tools/oracle_checkpointer.py`, lg_checkpoints/lg_writes 테이블).
+책임 경계 원칙(별도 저장소 금지)에 따라 LangGraph `BaseCheckpointSaver`를 Oracle로 직접 구현(`core/oracle_checkpointer.py`, lg_checkpoints/lg_writes 테이블).
 
 | 검증 | 결과 |
 |---|---|
@@ -203,7 +203,7 @@ research.md가 최대 구조적 위험으로 꼽은 "인기 가중 피드백 루
 
 ## 추가: 문서 코퍼스 전량 구조화 + dedup 개선 재실행 (2026-08-04~05)
 
-대화가 아닌 **적재 문서**(source_registry에 도메인 지정)를 같은 그래프로 구조화하는 경로(`poc/doc_pipeline.py`)를 blog_posts 2,192건 전량으로 실증. 문서 증거는 `doc:소스:id`라 세션 성공/실패 카운트에 안 섞이고, 경로 제안은 3단 서열(✅검증 > 📄문서 근거 > ⚠실패 우세)로 출처를 구분 표시한다.
+대화가 아닌 **적재 문서**(source_registry에 도메인 지정)를 같은 그래프로 구조화하는 경로(`graph/doc_pipeline.py`)를 blog_posts 2,192건 전량으로 실증. 문서 증거는 `doc:소스:id`라 세션 성공/실패 카운트에 안 섞이고, 경로 제안은 3단 서열(✅검증 > 📄문서 근거 > ⚠실패 우세)로 출처를 구분 표시한다.
 
 ### 판정 분포 (기준 미달 제외 정책이 실데이터에서 동작)
 | 실행 | 반영(done) | 제외(excluded) | 오류 |

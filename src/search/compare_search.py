@@ -2,7 +2,7 @@
 
 전제: tokenize_corpus.py(text_tokenized) + embed_corpus.py(embedding) 백필 완료,
       임베딩 모델 서빙(시맨틱 경로). 렉시컬만이면 임베딩 없이도 비교 가능.
-usage: .venv/bin/python scripts/compare_search.py "질의1" "질의2" ...
+usage: .venv/bin/python search/compare_search.py "질의1" "질의2" ...
 """
 import sys
 from pathlib import Path

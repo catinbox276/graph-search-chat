@@ -84,7 +84,7 @@ class CorpusChunk(Base):
     embedding = Column(BLOB)                      # float32[] — 백필 배치가 채움
     embed_model = Column(String(200))             # 이 벡터를 만든 모델 (모델 버저닝)
     text_tokenized = Column(CLOB)                 # Kiwi 형태소(원형) 공백조인 — FTS5 렉시컬용
-    #                                               scripts/tokenize_corpus.py가 백필
+    #                                               ingestion/tokenize_corpus.py가 백필
     created_at = Column(TIMESTAMP, server_default=_NOW)
     __table_args__ = (
         ForeignKeyConstraint(["source_name", "src_id"],
@@ -200,7 +200,7 @@ class AppUser(Base):
 
 
 class AppEvent(Base):
-    """활동 로그 — 정상·비정상 전부 (tools/events.py). 보관 기간 회전으로 무한 증가 방지.
+    """활동 로그 — 정상·비정상 전부 (core/events.py). 보관 기간 회전으로 무한 증가 방지.
 
     kind: request(웹 요청) · tool(에이전트 도구) · batch(야간 배치) · admin(관리 행동)
           · model(모델 호출) · error(미처리 예외). level: info | warn | error.

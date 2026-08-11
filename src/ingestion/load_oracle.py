@@ -1,7 +1,7 @@
 """blog_corpus.jsonl -> Oracle blog_posts 테이블 + Oracle Text 인덱스.
 
-usage: python3 scripts/load_oracle.py
-전제: Oracle 기동 + .env의 ORACLE_DSN/USER/PASSWORD (tools/config.py)
+usage: python3 ingestion/load_oracle.py
+전제: Oracle 기동 + .env의 ORACLE_DSN/USER/PASSWORD (core/config.py)
 """
 import json
 import re
@@ -14,7 +14,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from core import config  # noqa: E402
 
-CORPUS = ROOT / "data" / "corpus" / "blog_corpus.jsonl"
+CORPUS = ROOT.parent / "data" / "corpus" / "blog_corpus.jsonl"
 DSN = config.ORACLE_DSN
 
 

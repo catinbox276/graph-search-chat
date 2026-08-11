@@ -7,7 +7,7 @@
 - field_map: {역할: 컬럼명} JSON. 역할 어휘는 닫혀 있다(ROLES) — 역할 조합이
   검색 문서 조립 방식을 결정한다. 본문 1컬럼형은 body 하나, QA형은 question+answer.
 - ts_column: 증분 적재 워터마크 기준. 없으면(빈값) 전량 1회 적재 소스.
-- 적재 배치(scripts/ingest_sources.py)가 이 레지스트리를 읽어 corpus_docs로 조립한다.
+- 적재 배치(ingestion/ingest_sources.py)가 이 레지스트리를 읽어 corpus_docs로 조립한다.
 """
 import json
 import re

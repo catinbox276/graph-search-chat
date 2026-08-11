@@ -1,8 +1,8 @@
 """코퍼스 검색 함수 툴 — Oracle 19c 하이브리드 (Oracle Text + 인메모리 임베딩 행렬).
 
-- 검색 대상은 통합 코퍼스 corpus_docs 단일 (등록 소스들을 scripts/ingest_sources.py가
+- 검색 대상은 통합 코퍼스 corpus_docs 단일 (등록 소스들을 ingestion/ingest_sources.py가
   조립). 특정 원천 테이블 직조회 없음 — 소스 추가는 코드가 아니라 source_registry 등록.
-- 원본 임베딩은 Oracle(embedding BLOB)에 저장 (scripts/embed_corpus.py가 백필)
+- 원본 임베딩은 Oracle(embedding BLOB)에 저장 (ingestion/embed_corpus.py가 백필)
 - 서버/프로세스 기동 시 임베딩을 numpy 행렬로 메모리 로드 (정규화 -> dot = cosine)
 - 검색: Oracle Text(lexical) top-30 + 행렬 코사인(semantic) top-30 -> RRF 융합
 - 임베딩이 아직 없으면 lexical 단독으로 동작 (백필 진행 중에도 사용 가능)

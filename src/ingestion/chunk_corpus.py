@@ -5,7 +5,7 @@
 - 임베딩은 여기서 만들지 않는다 — 03:30 embed_corpus.py가 embedding IS NULL 청크를 백필.
 - 파라미터: app_settings(chunk_chars/chunk_overlap) > .env(CHUNK_CHARS/CHUNK_OVERLAP)
 
-usage: python scripts/chunk_corpus.py   (야간 CronJob 03:15과 동일)
+usage: python ingestion/chunk_corpus.py   (야간 CronJob 03:15과 동일)
 """
 import sys
 from pathlib import Path

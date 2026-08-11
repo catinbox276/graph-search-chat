@@ -20,12 +20,7 @@ RUN apt-get update \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY agent agent
-COPY web web
-COPY core core
-COPY search search
-COPY ingestion ingestion
-COPY graph graph
-ENV PYTHONUNBUFFERED=1
+COPY src src
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/srv/src
 EXPOSE 8500
 CMD ["uvicorn", "web.server:app", "--host", "0.0.0.0", "--port", "8500"]

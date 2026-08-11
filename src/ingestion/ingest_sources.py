@@ -5,8 +5,8 @@
 - 원천 테이블은 저쪽 소유 — 이 스크립트는 원천에 SELECT만 날린다 (쓰기 금지).
 - ts_column이 없는 소스는 전량 1회형: 최초 실행에만 적재하고 이후 스킵.
 - blog_posts(소스 1호) 최초 이관은 특례 — 임베딩까지 SQL로 복사해 재계산을 피한다.
-- 신규 문서의 임베딩은 scripts/embed_corpus.py(03:30 배치)가 corpus_docs 기준으로 백필.
-usage: .venv/bin/python scripts/ingest_sources.py   (야간 CronJob 03:10과 동일)
+- 신규 문서의 임베딩은 ingestion/embed_corpus.py(03:30 배치)가 corpus_docs 기준으로 백필.
+usage: .venv/bin/python ingestion/ingest_sources.py   (야간 CronJob 03:10과 동일)
 """
 import re
 import sys

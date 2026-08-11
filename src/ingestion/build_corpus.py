@@ -3,7 +3,7 @@
 채택답변 있는 질문만 골라 질문+답변을 한 문서로 합치고,
 사이트별 점수 상위 TOP_N건을 뽑는다.
 
-usage: python3 scripts/build_corpus.py
+usage: python3 ingestion/build_corpus.py
 output: data/corpus/blog_corpus.jsonl
   {id, title, body, tags, score, source, url}
 """
@@ -17,7 +17,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 from core import config  # noqa: E402
 
-DATA = ROOT / "data"
+DATA = ROOT.parent / "data"
 OUT = DATA / "corpus"
 TOP_N = config.CORPUS_TOP_N  # 0 = 전체(채택답변 전부). .env의 CORPUS_TOP_N(또는 구 TOP_N)
 

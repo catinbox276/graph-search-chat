@@ -29,7 +29,7 @@
 > 차례로 구현·리허설했으나, **기획 변경으로 사용자를 앱이 자체 관리**하는 것으로 확정(2026-08-07).
 > 구 모드는 코드·설정에서 전부 제거됐다.
 
-### 구조 (app/auth.py)
+### 구조 (web/auth.py)
 
 - **관리자 = 환경 설정 계정 1개** (`ADMIN_ID`/`ADMIN_PASSWORD` — DB가 아니라 env,
   잠금 사고 시 env 수정으로 복구 가능).
@@ -63,7 +63,7 @@ SESSION_MAX_AGE=28800         # 토큰 수명(초), 기본 8시간
 
 | 항목 | 상태 |
 |---|---|
-| 가입/승인/로그인/로그아웃 (+ /login UI) | 완료 (app/auth.py + app/login.html) |
+| 가입/승인/로그인/로그아웃 (+ /login UI) | 완료 (web/auth.py + app/login.html) |
 | 계정 관리 UI (승인·권한 부여/해제·삭제) | 완료 (/admin "계정 관리" — GET /admin/users + POST /admin/users/act) |
 | 쿠키 + Bearer 이중 수용 | 완료 (스크립트/API 호출용) |
 | sessions.user_id 기록·본인 세션만 목록 | 완료 (server.py) |
@@ -110,7 +110,7 @@ SESSION_MAX_AGE=28800         # 토큰 수명(초), 기본 8시간
    통합 코퍼스 테이블(`corpus_docs`: source_name, src_id, title, text, embedding, ts)에 넣는다.
    기존 `blog_posts`는 "소스 1호"로 등록되어 같은 흐름에 흡수된다.
 2. **임베딩 백필** — 기존 03:30 CronJob이 corpus_chunks 기준으로 동작 (embed_corpus.py).
-3. **검색** — 하이브리드 검색(blog_search.py)이 corpus_docs/corpus_chunks를 대상으로 동작.
+3. **검색** — 하이브리드 검색(corpus_search.py)이 corpus_docs/corpus_chunks를 대상으로 동작.
    `content_kind`는 검색 결과 라벨과 (도메인 extract_hint처럼) 프롬프트 힌트에 쓴다.
 4. **읽기 도구** — `read_doc`(구 `read_blog_post`)이 문서 id `"소스명:원천id"`를 받는다.
    전체 검색은 `search_docs`(구 `search_blog`) — 개명 시 그래프 4층 행동 노드·도메인 시드도 함께 마이그레이션했다.

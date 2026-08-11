@@ -3,7 +3,7 @@
 sqlalchemy 소스가 SQLite의 이름 없는 FK(name=None)에서 avro 검증 실패하는
 버그를 우회한다: PRAGMA로 직접 읽고 FK 이름을 생성해서 넣는다.
 
-usage: python3 scripts/ingest_bird.py <db_name> [<db_name> ...]
+usage: python3 ingestion/ingest_bird.py <db_name> [<db_name> ...]
 """
 import sqlite3
 import sys

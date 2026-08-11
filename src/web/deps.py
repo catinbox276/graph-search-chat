@@ -1,7 +1,7 @@
 """공용 의존물 — 라우터들이 함께 쓰는 것만 (DB 풀·권한 검사·에이전트 캐시·헬퍼).
 
-규약: 새 엔드포인트는 server.py가 아니라 app/routers/의 해당 기능 라우터에.
-DB를 만지는 로직은 tools/ 모듈로 — 라우터는 HTTP 입출력·권한 검사·호출만.
+규약: 새 엔드포인트는 server.py가 아니라 web/routers/의 해당 기능 라우터에.
+DB를 만지는 로직은 core/·search/·ingestion/ 모듈로 — 라우터는 HTTP 입출력·권한 검사·호출만.
 """
 import json
 from pathlib import Path

@@ -1,9 +1,9 @@
-"""앱 조립·기동 — 엔드포인트는 전부 app/routers/에 (여기 추가 금지).
+"""앱 조립·기동 — 엔드포인트는 전부 web/routers/에 (여기 추가 금지).
 
 - 멀티턴 기억: Oracle 체크포인터(thread_id=세션id) — 복제본 공유·재시작 생존
 - 기동 순서: 스키마 보장(init_schema) → 임베딩 행렬 적재 → 에이전트 예열
 
-usage: .venv/bin/uvicorn app.server:app --port 8500
+usage: .venv/bin/uvicorn web.server:app --port 8500
 """
 import sys
 from pathlib import Path

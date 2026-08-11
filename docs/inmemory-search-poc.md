@@ -148,7 +148,7 @@ def search(con, query, embed_fn, k=10, rk=60):
 ## 9. PoC 진행 순서(제안)
 
 1. `corpus_chunks.text_tokenized` 컬럼 추가 + Kiwi 백필 스크립트(기존 `chunk_corpus`/`embed_corpus` 옆)
-2. `tools/inmemory_index.py` 신규 — `build_index()` / `search()` / 버전 리로드
-3. `tools/corpus_search.py`의 검색 진입점을 인메모리 경로로 스위치(설정 플래그로 A/B)
+2. `search/inmemory_index.py` 신규 — `build_index()` / `search()` / 버전 리로드
+3. `search/corpus_search.py`의 검색 진입점을 인메모리 경로로 스위치(설정 플래그로 A/B)
 4. 검증: 동일 질의로 기존(Oracle Text+numpy) vs 신규(FTS5+sqlite-vec) 결과 비교
 5. 임베딩 모델 서빙되면 벡터 경로 활성화, 렉시컬 단독 폴백 확인

@@ -1,6 +1,6 @@
 """PoC 에이전트 (A) — LangChain DeepAgents + OpenAI 호환 모델 서빙.
 
-- 모델: .env의 CHAT_URL/MODEL_NAME로 지정 (tools/config.py). 로컬은 LM Studio, 사내는 vLLM
+- 모델: .env의 CHAT_URL/MODEL_NAME로 지정 (core/config.py). 로컬은 LM Studio, 사내는 vLLM
 - 툴 1: 블로그 검색 함수 2개 (Oracle 조회, 함수 직접 등록)
 - 툴 2: DataHub 공식 MCP 서버 (langchain-mcp-adapters로 연결)
 
@@ -74,7 +74,7 @@ def _mcp_config(row: dict) -> dict:
     """레지스트리 행 → langchain-mcp-adapters 커넥션 설정."""
     if row["transport"] == "stdio":
         cmd = row["command"] or "mcp-server-datahub"
-        return {"command": shutil.which(cmd) or str(ROOT / f".venv/bin/{cmd}"),
+        return {"command": shutil.which(cmd) or str(ROOT.parent / f".venv/bin/{cmd}"),
                 "args": [], "transport": "stdio",
                 "env": {"DATAHUB_GMS_URL": DATAHUB_GMS}}
     return {"transport": row["transport"], "url": row["url"]}

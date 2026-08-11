@@ -1,7 +1,7 @@
 """self-play 러너 — tasks.yaml의 47세션을 에이전트로 실행해 sessions 테이블에 기록.
 
 세션 id = "<task_id>-<run번호>" (예: R1-2). 게이트 판정(verdict)은 별도 단계에서.
-usage: .venv/bin/python poc/selfplay.py [--only R1,R2]
+usage: .venv/bin/python graph/selfplay.py [--only R1,R2]
 """
 import asyncio
 import json

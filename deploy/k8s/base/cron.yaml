@@ -48,7 +48,7 @@ spec:
             - name: ingest
               image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
               imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
-              command: ["python", "ingestion/ingest_sources.py"]
+              command: ["python", "-m", "ingestion.ingest_sources"]
               envFrom:
                 - configMapRef:
                     name: gsc-env
@@ -75,7 +75,7 @@ spec:
             - name: chunk
               image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
               imagePullPolicy: Always
-              command: ["python", "ingestion/chunk_corpus.py"]
+              command: ["python", "-m", "ingestion.chunk_corpus"]
               envFrom:
                 - configMapRef:
                     name: gsc-env
@@ -129,7 +129,7 @@ spec:
             - name: embed
               image: harbor.quantumcns.ai/user-dalgo/graph-search-chat:latest
               imagePullPolicy: Always   # 로컬 Docker Desktop 개발 시: 로컬 태그 + Never
-              command: ["python", "ingestion/embed_corpus.py"]
+              command: ["python", "-m", "ingestion.embed_corpus"]
               envFrom:
                 - configMapRef:
                     name: gsc-env

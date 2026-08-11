@@ -2,8 +2,8 @@
 
 embed_corpus.py 와 같은 멱등 백필 패턴:
 - 대상: text_tokenized IS NULL 인 행 (재청킹으로 새로 들어온 청크 포함)
-- 적재/쿼리 공용 tools.ko_tokenize.tokenize_for_search() 사용 (설계문서 §6 조건)
-usage: .venv/bin/python scripts/tokenize_corpus.py  (야간 배치 03:15 청킹 직후 권장)
+- 적재/쿼리 공용 search.ko_tokenize.tokenize_for_search() 사용 (설계문서 §6 조건)
+usage: .venv/bin/python ingestion/tokenize_corpus.py  (야간 배치 03:15 청킹 직후 권장)
 
 TODO: 원문 갱신 시 재토큰화가 필요하면 updated_at 비교 조건 추가.
 """
@@ -31,7 +31,7 @@ def main():
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name='CORPUS_CHUNKS'")
     if not cur.fetchone()[0]:
-        print("corpus_chunks 없음 — 먼저 scripts/chunk_corpus.py", flush=True)
+        print("corpus_chunks 없음 — 먼저 ingestion/chunk_corpus.py", flush=True)
         return
     _ensure_column(cur)
     con.commit()

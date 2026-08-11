@@ -16,7 +16,7 @@ design.md §2~§5 구현:
 - 실패 세션: 접근법 노드에 fail_flag + 이유
 - 출처: node_evidence(node_id, kind, ref) — kind=session/doc, PK+FK(캐스케이드)로 무결성 강제
 
-usage: .venv/bin/python poc/graph_pipeline.py
+usage: .venv/bin/python graph/graph_pipeline.py
 """
 import difflib
 import json
