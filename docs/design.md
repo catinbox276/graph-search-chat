@@ -178,7 +178,7 @@ bi-temporal supersession은 양방향으로 쓴다. 재시도 성공이 실패 �
 
 ## 5. 저장소 구성 — Oracle 19c 단독
 
-제약: **사내 표준 DB가 Oracle 19c 고정.** 19c는 Oracle Text(한국어 형태소 분석 포함) 전문 검색은 되지만 네이티브 벡터 검색은 없다(23ai부터). 검토 결과 **19c 단독으로 설계를 굽히지 않고 구현 가능** — 근거는 이 그래프가 작다는 것(조직 접근법 노드는 수백~수천 개, 벡터 인덱스가 필요한 규모가 아님).
+제약: **사내 표준 DB가 Oracle 19c 고정.** 19c는 네이티브 벡터 검색이 없다(23ai부터). 저장의 진실 소스는 Oracle 하나로 두되, **검색(키워드+벡터)은 기동 시 Oracle 코퍼스를 SQLite `:memory:`로 빌드한 인메모리 인덱스**(FTS5 BM25 + sqlite-vec)로 처리한다 — 영속 검색 서버가 아니라 프로세스 내 파생 인덱스라 §6(별도 검색엔진 금지) 정신을 지키고, Oracle Text 권한(CTXAPP)도 불필요. 근거는 그래프가 작다는 것(접근법 노드 수백~수천, 인덱스 재빌드가 순식간).
 
 ```mermaid
 flowchart TD
@@ -186,7 +186,7 @@ flowchart TD
     A -->|"원본 로그 전량"| EV["증거 테이블<br/>(세션·판정·출처)"]
     P --> G["nodes / edges 테이블<br/>4계층 + 가중치 + bi-temporal 컬럼"]
     Q["신규 사용자 질의"] --> CL["LLM이 닫힌 1~2층 목록에서<br/>진입점 분류 (벡터 검색 대체)"]
-    CL --> TR["재귀 CTE 순회 (≤3 hop)<br/>+ Oracle Text 키워드 검색"]
+    CL --> TR["재귀 CTE 순회 (≤3 hop)<br/>+ SQLite 인메모리 FTS5 키워드 검색"]
     TR --> G
     G -.->|"에피소드 ID 조인"| EV
     subgraph ORA["Oracle 19c (단일 DB)"]
@@ -214,7 +214,7 @@ CREATE TABLE edges (
   raw_count NUMBER DEFAULT 0,
   PRIMARY KEY (src, dst)
 );
--- 노드 이름·설명 키워드 검색: Oracle Text CONTEXT 인덱스 + KOREAN_MORPH_LEXER
+-- 코퍼스 키워드+벡터 검색: SQLite :memory: FTS5(Kiwi 형태소) + sqlite-vec (기동 시 Oracle에서 빌드)
 ```
 
 ### 벡터 검색을 불필요하게 만드는 두 가지 장치

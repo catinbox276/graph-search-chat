@@ -18,7 +18,7 @@ flowchart LR
     subgraph srv["앱 파드 gsc-app (Deployment, 이미지 1개 = 모놀리스)"]
         API["server.py(조립) + routers/ 7개<br/>chat·pages·graph·contrib·accounts·admin_*"]
         MEM["Oracle 체크포인터 (멀티턴 기억, thread=세션)"]
-        MTX["청크 임베딩 행렬 1.4GB (기동 시 로드)"]
+        MTX["SQLite :memory: 검색 인덱스 (기동 시 Oracle에서 빌드)"]
     end
     subgraph agentbox["에이전트 (DeepAgents)"]
         AG["suggest_paths → 도구 선택<br/>search_docs·read_doc·search_{소스}·MCP 도구"]
@@ -51,8 +51,8 @@ flowchart LR
 ## 저장소 (Oracle 단일 DB — design §5 원칙 유지)
 
 **전 테이블은 `core/models.py`(SQLAlchemy)에 선언**되고 `core/db.py`의 `init_schema()`가
-서버 기동 시 생성한다(create_all + Oracle Text 인덱스 + 시드, 멱등). 규약: 단순 CRUD는
-ORM(`db.session()`), 복잡한 검색(CONTAINS·RRF)·MERGE·대량 배치·PL/SQL·체크포인터는 raw SQL.
+서버 기동 시 생성한다(create_all + 시드, 멱등). 규약: 단순 CRUD는
+ORM(`db.session()`), MERGE·대량 배치·PL/SQL·체크포인터는 raw SQL.
 
 | 테이블 | 내용 | 주 사용처 |
 |---|---|---|
@@ -89,7 +89,7 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 | `web/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = login.html — integration.md |
 | `app/index.html` `graph.html` `contrib.html` `admin.html` `login.html` `shell.css` | 채팅(궤적 타임라인·[n] 각주·화제 확인 바)·그래프(증거 패널)·내 기여(트리·분기점 ⑂)·관리 콘솔·로그인 | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
 | `core/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
-| `search/corpus_search.py` | 하이브리드 검색: Oracle Text(lexical) + 청크 행렬 코사인(semantic) → 문서 best-chunk 집계 → RRF. search_docs·read_doc·소스별 도구 생성 | 검색당 임베딩 계산은 질의 1건뿐 |
+| `search/corpus_search.py` `inmemory_index.py` | 하이브리드 검색: SQLite `:memory:` FTS5(lexical, Kiwi 형태소) + sqlite-vec(semantic) → best-chunk 집계 → RRF. 인덱스는 기동 시 Oracle에서 빌드(파생물) | Oracle Text 권한 불필요 · 검색당 임베딩 1건 |
 | `search/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
 | `core/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
 | `core/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
@@ -136,7 +136,7 @@ docker build -t graph-search-chat:latest .
 kubectl apply -k deploy/k8s/base          # 앱 Deployment + CronJob 6종 (env는 deploy/k8s/base/gsc.env → ConfigMap)
 # 데이터 준비(1회, 호스트): build_corpus.py → load_oracle.py → embed_corpus.py → ingest_bird.py
 # 접속: 채팅 :8500 (자체 계정 — .env의 ADMIN_ID/ADMIN_PASSWORD) / 그래프 :8500/graph / DataHub :9002
-# 사내 전환 체크리스트: docs/integration.md (Oracle Text 권한 GRANT 2줄 포함)
+# 사내 전환 체크리스트: docs/integration.md (검색은 SQLite 인메모리 — Oracle Text 권한 불필요)
 ```
 
 ## 알려진 한계 (사내 전환 시 체크리스트)
@@ -173,6 +173,6 @@ kubectl apply -k deploy/k8s/base           # 복제본 1로 축소
 ### 전환 시 주의사항
 
 1. **멀티턴 기억·로그인**: 둘 다 무상태(Oracle 체크포인터 / 서명 토큰)라 **세션 고정 불필요 — 복제본 간 자유 라우팅**
-2. **리소스**: 앱 복제본당 메모리 요청 3Gi(임베딩 행렬 1.4GB 포함) — 복제본 수 × 3Gi 여유 확인. 로컬 검증 때 두 번째 복제본이 노드 disk-pressure로 Pending된 사례 있음 → `docker system prune`으로 해소
+2. **리소스**: 앱 복제본당 메모리 요청 3Gi(SQLite :memory: 검색 인덱스 ~1GB 포함) — 복제본 수 × 3Gi 여유 확인. 로컬 검증 때 두 번째 복제본이 노드 disk-pressure로 Pending된 사례 있음 → `docker system prune`으로 해소
 3. **CronJob은 모드 무관** — concurrencyPolicy: Forbid라 복제본 수와 무관하게 단일 실행
 4. **Oracle·모델 서빙은 모드 대상 아님** — Oracle은 StatefulSet 단일(사내 HA는 DB 팀 영역), 모델 서빙은 호스트 LM Studio(사내는 vLLM 파드로 별도 구성)

@@ -129,8 +129,9 @@ flowchart TB
 03:15 청킹    긴 본문을 1,200자 단위(150자 겹침)로 분할
 03:30 임베딩  청크를 64건씩 묶어 벡터로 변환 (embed_model 기록 — 모델 교체 시 자동 재변환)
 ```
-검색 시 질문 하나가 키워드(Oracle Text)+의미(청크 벡터)를 동시에 타고 RRF로 융합. 청크 벡터는
-서버 메모리에 있어 검색당 외부 호출은 질문 변환 1건뿐. 임베딩 없으면 키워드 단독 폴백.
+검색 시 질문 하나가 키워드(SQLite FTS5, Kiwi 형태소)+의미(sqlite-vec)를 동시에 타고 RRF로 융합.
+검색 인덱스는 기동 시 Oracle에서 SQLite `:memory:`로 빌드(진실 소스는 Oracle, 인덱스는 파생물 —
+별도 검색 서버·Oracle Text 권한 불필요). 검색당 외부 호출은 질문 임베딩 1건뿐, 임베딩 없으면 키워드 단독 폴백.
 
 **② 구조화 (그래프용 — 도메인을 지정한 소스만)** — 문서 1건 = LLM 요청 1회, 16건 동시:
 ```mermaid
@@ -250,8 +251,7 @@ flowchart TB
 3. ~~DataHub 도구 서버~~ — 사내 제공, 주소 등록만
 
 **사내 DB 준비물** (첫 기동 전 1회, DBA 협조):
-- 앱 계정에 Oracle Text 권한: `GRANT CTXAPP TO 앱계정;` + `GRANT EXECUTE ON CTXSYS.CTX_DDL TO 앱계정;`
-  — 없으면 기동 시 이 안내가 그대로 출력되며 멈춘다
+- 검색이 SQLite 인메모리(FTS5+sqlite-vec)라 **Oracle Text 권한(CTXAPP) 불필요** — 일반 개발 계정 권한으로 기동.
 - 그 외 테이블·인덱스는 앱이 기동하며 스스로 생성(ORM `init_schema`, 일반 개발 계정 권한으로 충분)
 
 ## 10. 단계 계획

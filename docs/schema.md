@@ -112,7 +112,7 @@ CREATE TABLE corpus_chunks (
 - **텍스트는 참조가 아니라 사본** (조립본 corpus_docs의 슬라이스): ① 원본은 통제 밖(SELECT만, 언제든 변경)이라 검색 시 조인 부적합, ② 임베딩은 그 시점 텍스트의 함수 — 사본이어야 벡터-근거 일관, ③ 조립본·청크 텍스트(역할 라벨·title 접두)는 원본에 존재하지 않아 오프셋 참조로 표현 불가. 표준 RAG 패턴(파생 사본, 원본에서 재생성 가능, 단방향).
 - 청크 텍스트에 **title을 접두**로 넣는다(청크만 봐도 무슨 문서인지 임베딩에 반영).
 - 청킹 파라미터는 app_settings: `chunk_chars`(기본 1200자), `chunk_overlap`(기본 150자). 본문이 chunk_chars 이하면 청크 1개(=현행과 동일 비용).
-- lexical(Oracle Text)은 **문서(corpus_docs.body) 인덱스 유지** — 청크는 시맨틱 전용. 이유: CONTAINS는 문서 전체에서 이미 잘 동작하고, 청크에 중복 인덱스를 만들면 저장·동기화만 는다.
+- lexical·semantic 모두 **SQLite `:memory:` 인덱스**(FTS5 + sqlite-vec)에서 청크 단위로 동작 — 기동 시 Oracle corpus_docs/corpus_chunks에서 빌드하는 파생물. Oracle에는 검색 인덱스를 두지 않는다(진실 소스만). Oracle Text 권한 불필요.
 
 ## 4. 그래프·세션 테이블
 
