@@ -132,9 +132,9 @@ Milvus·OpenSearch가 standalone/cluster 설치 모드를 제공하는 방식을
 
 | 모드 | 명령 | 구성 | 검증 |
 |---|---|---|---|
-| 스탠다드 | `kubectl apply -k k8s/base` | 앱 1복제본 | 로컬 기본 운영 중 |
-| 클러스터 | `kubectl apply -k k8s/cluster` | 앱 2복제본 + sessionAffinity(ClientIP) | 2/2 Ready + 서비스 4/4 응답 확인 후 로컬은 스탠다드 복귀 |
-| DataHub 클러스터 | `helm -f k8s/datahub-values-cluster.yaml` | GMS·frontend·actions 각 2복제본 | 사내용 values (로컬 리소스로 미적용) |
+| 스탠다드 | `kubectl apply -k deploy/k8s/base` | 앱 1복제본 | 로컬 기본 운영 중 |
+| 클러스터 | `kubectl apply -k deploy/k8s/cluster` | 앱 2복제본 + sessionAffinity(ClientIP) | 2/2 Ready + 서비스 4/4 응답 확인 후 로컬은 스탠다드 복귀 |
+| DataHub 클러스터 | `helm -f deploy/k8s/datahub-values-cluster.yaml` | GMS·frontend·actions 각 2복제본 | 사내용 values (로컬 리소스로 미적용) |
 
 **한계 (사내 HA 전환 시)**: 멀티턴 기억이 파드 메모리(MemorySaver)라 클러스터 모드는 세션 고정으로 대응 — 복제본 간 자유 라우팅이 필요하면 체크포인터를 공유 저장소(Oracle 등)로 외부화해야 함.
 
@@ -160,14 +160,14 @@ PoC 원료였던 `data/` 로컬 파일 8GB 전량 삭제 (BIRD SQLite, StackExch
 
 ## 추가: 클러스터 모드 실전 전환 테스트 (2026-08-02)
 
-`kubectl apply -k k8s/cluster`로 전환 후 실사용 검증, 완료 후 스탠다드 복귀.
+`kubectl apply -k deploy/k8s/cluster`로 전환 후 실사용 검증, 완료 후 스탠다드 복귀.
 
 | 검증 항목 | 결과 |
 |---|---|
 | 전환·기동 | 복제본 2/2 Ready (두 번째 파드 행렬 로드 포함 ~1분) ✅ |
 | **세션 고정 + 기억 유지** | 같은 세션 2턴("내 이름은 달고야" → "내 이름 뭐지?")이 **같은 파드로 라우팅**(파드별 요청 수 2/0 확인)되어 "달고야" 정확 회상 ✅ |
 | UI | 채팅·현황 정상 서빙 ✅ |
-| 복귀 | `kubectl apply -k k8s/base` 한 줄로 1복제본 축소 ✅ |
+| 복귀 | `kubectl apply -k deploy/k8s/base` 한 줄로 1복제본 축소 ✅ |
 
 sessionAffinity(ClientIP) 기반 기억 유지가 실측으로 확인됨 — 단, 같은 클라이언트 IP 기준이므로 사내 프록시/LB 뒤에서는 원본 IP 전달(externalTrafficPolicy 등) 확인 필요. 근본 해법(체크포인터 외부화)은 여전히 남은 과제.
 

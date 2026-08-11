@@ -55,10 +55,10 @@ python3 ingestion/chunk_corpus.py
 .venv/bin/python -m graph.doc_pipeline [--limit N]
 
 # 배포 (전제: k8s + LM Studio :1234 — 상세 절차는 docs/implementation.md "실행 방법")
-docker build -t graph-search-chat:latest .
-kubectl apply -f k8s/oracle.yaml          # Oracle StatefulSet
-kubectl apply -k k8s/base                 # standalone (복제본 1) + CronJob
-kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤백은 base 재적용
+docker build -f deploy/Dockerfile -t graph-search-chat:latest .
+kubectl apply -f deploy/k8s/oracle.yaml          # Oracle StatefulSet
+kubectl apply -k deploy/k8s/base                 # standalone (복제본 1) + CronJob
+kubectl apply -k deploy/k8s/cluster              # cluster 모드 (복제본 2) — 롤백은 base 재적용
 ```
 
 ### 환경변수 (`.env` 하나로 제어 — `core/config.py`가 기동 시 로드)
@@ -82,7 +82,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 
 **튜닝 옵션**(전부 `.env`·`config.py`에 기본값 있음, 바꿀 때만 조절): `LLM_TEMPERATURE`, 검색 `RRF_K`/`SEARCH_TOP_LEXICAL`/`SEARCH_TOP_SEMANTIC`, 경로 `PATH_SIM_ENTRY`, dedup `DEDUP_SIM_HIGH`/`DEDUP_SIM_THRESHOLD`/`DEDUP_SHORT_NAME_CHARS`/`DEDUP_CHAR_RATIO`/`DEDUP_SELECT_MAX`, 유지보수 `MAINT_LOW_COUNT`/`MAINT_ABSORB_COUNT`/`MAINT_MIN_AGE_DAYS`, 시간 감쇠 `MAINT_DECAY_HALF_LIFE_DAYS`/`MAINT_DECAY_GRACE_DAYS`/`MAINT_DECAY_FLOOR`, 게이트 행동 신호 `SIG_REPEAT_SIM`/`SIG_TOPIC_MOVE_SIM`/`SIG_HASTY_RATIO`/`SEG_SPLIT_SIM`(태스크 분할)/`RECUR_DAYS`(재발 창), 임베딩 `EMBED_BATCH`/`EMBED_CONCURRENCY`/`EMBED_TEXT_CHARS`, 청킹 `CHUNK_CHARS`/`CHUNK_OVERLAP`(운영은 app_settings가 우선), 코퍼스 `CORPUS_TOP_N`, Oracle 풀 `ORACLE_POOL_MIN`/`ORACLE_POOL_MAX`/`ORACLE_POOL_INCREMENT`(검색·경로제안·체크포인터 **세 풀 공통**), 활동 로그 보관 `EVENTS_RETAIN_DAYS`(기본 180일), Oracle Text `ORACLE_TEXT_LEXER`(기본 `WORLD_LEXER`, 한국어 정밀은 `KOREAN_MORPH_LEXER`), Oracle 드라이버 `ORACLE_MODE`(`thin` 기본 / `thick`=Instant Client, `config.py`가 기동 시 `init_oracle_client` 1회 호출 — Dockerfile에 Instant Client 포함). 시드 스키마 중 **1층 도메인은 Oracle `domain_registry` 테이블**이 닫힌 목록(기본 2종은 코드가 시드, 확장은 관리자 API `GET/POST /admin/domains` — 사람 전용, 소급 재분류 없음). 도메인은 등록 때 **용도(scope)를 명시 선택**: `both`(대화+문서)/`chat`(대화 전용)/`doc`(문서 전용 — 대화 분류·폴백에서 제외, 소스 구조화 전용). `DATAHUB_TOOLS`(기본 시드 원천)·`LAYER_KIND`와 프롬프트 길이 가드는 코드에 둔다.
 
-**배포(k8s)**: 컨테이너별 env를 나열하지 않고 `k8s/base/gsc.env` 한 파일 → `configMapGenerator`로 ConfigMap 생성 → 앱·CronJob이 `envFrom`으로 주입받는다(클러스터 DNS·사내 모델 값). 로컬 `.env`와는 별개 파일. 값 변경 시 ConfigMap 이름 해시가 바뀌어 롤링 재시작까지 자동.
+**배포(k8s)**: 컨테이너별 env를 나열하지 않고 `deploy/k8s/base/gsc.env` 한 파일 → `configMapGenerator`로 ConfigMap 생성 → 앱·CronJob이 `envFrom`으로 주입받는다(클러스터 DNS·사내 모델 값). 로컬 `.env`와는 별개 파일. 값 변경 시 ConfigMap 이름 해시가 바뀌어 롤링 재시작까지 자동.
 
 ## 구현 아키텍처 (큰 그림)
 
@@ -110,7 +110,7 @@ kubectl apply -k k8s/cluster              # cluster 모드 (복제본 2) — 롤
 - `docs/implementation.md` — 구현 아키텍처 지도 (컴포넌트·테이블·API·실행법·한계)
 - `docs/schema.md` — 테이블 스키마 설계 (실스키마 전체 + 청크 임베딩·모델 버저닝 확장 설계, 마이그레이션 계획)
 - `docs/integration.md` — 사내 전환 통합 설계 (외부 의존은 원천 테이블 source_registry 1개 — 인증은 자체 계정)
-- `system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
+- `docs/system-overview.drawio` — 시각 자료 5페이지 (개요 / 4계층 / 세션 판정 / 19c 구성 / 구현 아키텍처)
 - `docs/component-architecture.drawio` — 컴포넌트별 아키텍처 8페이지 (에이전트 / 앱 서버 / 검색 / 경로 제안 / 파이프라인 / 유지보수 / 저장소 / 배포)
 
 ## 핵심 설계 결정 (변경 시 docs/design.md도 갱신)

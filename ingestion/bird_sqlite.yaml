@@ -1,6 +1,6 @@
 # BIRD SQLite DB -> DataHub ingest 레시피
 # usage: DB_PATH=data/bird_dev/dev_20240627/dev_databases/financial/financial.sqlite \
-#        DB_NAME=financial datahub ingest -c ingest/bird_sqlite.yaml
+#        DB_NAME=financial datahub ingest -c ingestion/bird_sqlite.yaml
 source:
   type: sqlalchemy
   config:

@@ -4,5 +4,5 @@ __pycache__/
 .venv/
 .env
 .chat.txt
-k8s/base/gsc.env
+gsc.env
 .playwright-mcp/

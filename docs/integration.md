@@ -50,7 +50,7 @@
 - **재발 판정** — 같은 userId 안에서만 매칭 (graph_pipeline.retract_recurrences).
 - **관리자 판별** — env 계정 또는 is_admin 부여 계정만 관리 API 통과.
 
-### 설정 (.env / k8s/base/gsc.env)
+### 설정 (.env / deploy/k8s/base/gsc.env)
 
 ```
 ADMIN_ID=admin                # 관리자 아이디

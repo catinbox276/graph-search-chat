@@ -98,7 +98,7 @@ DB(tools/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당
 | `poc/doc_pipeline.py` | 도메인 지정 소스 문서를 LLM 판정(fits)→같은 그래프에 병합, 미달 excluded | 판정 동시(연속 파이프라인)·병합 직렬. 생각 끄기로 ~15,000건/h |
 | `poc/graph_maintenance.py` | 형제 통합·잎 흡수·시간 감쇠 — 멱등 | |
 | `scripts/` | 코퍼스 빌드·적재·청킹(executemany)·임베딩 백필(64건×동시4)·원천 증분 적재 | |
-| `k8s/` | 앱 Deployment·CronJob 6종(timeZone Asia/Seoul)·Oracle StatefulSet·ingress | env는 k8s/base/gsc.env → ConfigMap |
+| `deploy/k8s/` | 앱 Deployment·CronJob 6종(timeZone Asia/Seoul)·Oracle StatefulSet·ingress | env는 deploy/k8s/base/gsc.env → ConfigMap |
 
 ## API 요약 (:8500)
 
@@ -131,9 +131,9 @@ helm repo add datahub https://helm.datahubproject.io/
 helm install prerequisites datahub/datahub-prerequisites
 helm install datahub datahub/datahub \
   --set global.datahub.metadata_service_authentication.enabled=false  # PoC 한정
-kubectl apply -f k8s/oracle.yaml   # Oracle StatefulSet
+kubectl apply -f deploy/k8s/oracle.yaml   # Oracle StatefulSet
 docker build -t graph-search-chat:latest .
-kubectl apply -k k8s/base          # 앱 Deployment + CronJob 6종 (env는 k8s/base/gsc.env → ConfigMap)
+kubectl apply -k deploy/k8s/base          # 앱 Deployment + CronJob 6종 (env는 deploy/k8s/base/gsc.env → ConfigMap)
 # 데이터 준비(1회, 호스트): build_corpus.py → load_oracle.py → embed_corpus.py → ingest_bird.py
 # 접속: 채팅 :8500 (자체 계정 — .env의 ADMIN_ID/ADMIN_PASSWORD) / 그래프 :8500/graph / DataHub :9002
 # 사내 전환 체크리스트: docs/integration.md (Oracle Text 권한 GRANT 2줄 포함)
@@ -156,18 +156,18 @@ Milvus·OpenSearch가 설치 모드를 나누는 방식처럼, 오라클·모델
 ### 스탠다드 → 클러스터
 
 ```bash
-kubectl apply -k k8s/cluster        # 앱 2복제본
+kubectl apply -k deploy/k8s/cluster        # 앱 2복제본
 kubectl rollout status deploy/gsc-app
 kubectl get pods -l app=gsc-app     # 2/2 Ready 확인
 
 # DataHub도 클러스터로 (선택, 사내 규모에서):
-helm upgrade datahub datahub/datahub --reuse-values -f k8s/datahub-values-cluster.yaml
+helm upgrade datahub datahub/datahub --reuse-values -f deploy/k8s/datahub-values-cluster.yaml
 ```
 
 ### 클러스터 → 스탠다드 (롤백)
 
 ```bash
-kubectl apply -k k8s/base           # 복제본 1로 축소
+kubectl apply -k deploy/k8s/base           # 복제본 1로 축소
 ```
 
 ### 전환 시 주의사항
