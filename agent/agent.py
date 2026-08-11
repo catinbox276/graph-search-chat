@@ -18,9 +18,9 @@ from deepagents import create_deep_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
-from tools import config
-from tools.corpus_search import read_doc, search_docs
-from tools.path_suggest import suggest_paths
+from core import config
+from search.corpus_search import read_doc, search_docs
+from search.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
 MODEL_NAME = config.CHAT_MODEL
@@ -54,7 +54,7 @@ def load_agent_settings() -> dict:
     DB를 못 읽으면 코드 기본값으로 동작 (CLI 단독 실행 등)."""
     out = {"system_prompt": "", "disabled_tools": set(), "mcp_enabled": True}
     try:
-        from tools import settings
+        from core import settings
         st = settings.get_all()  # ORM — 접속·반납은 db.session()이 관리
         out["system_prompt"] = (st.get("agent_system_prompt") or "").strip()
         out["disabled_tools"] = {t.strip() for t in
@@ -83,7 +83,7 @@ def _mcp_config(row: dict) -> dict:
 def _mcp_servers() -> list:
     """등록된 도구 서버 목록 (mcp_registry) — DB 미기동 시 없음."""
     try:
-        from tools import mcp_registry
+        from core import mcp_registry
         return mcp_registry.list_servers(enabled_only=True)
     except Exception as e:
         print(f"[경고] MCP 레지스트리 조회 실패 — 도구 서버 없이 동작: {e}",
@@ -104,7 +104,7 @@ async def _mcp_tools():
     for s in _mcp_servers():  # 서버별 격리 — 하나가 실패해도 나머지는 산다
         try:
             if s["transport"] == "rest":  # 사내 REST 도구 서버 (전용 어댑터)
-                from tools.rest_tools import load_rest_tools
+                from core.rest_tools import load_rest_tools
                 tools += load_rest_tools(s["name"], s["url"])
             else:
                 tools += await MultiServerMCPClient(
@@ -118,7 +118,7 @@ async def _mcp_tools():
 def _source_tools() -> list:
     """등록 소스마다 소스 한정 검색 도구 자동 생성 (search_{소스명})."""
     try:
-        from tools.corpus_search import source_search_tools
+        from search.corpus_search import source_search_tools
         return source_search_tools()
     except Exception as e:
         print(f"[경고] 소스 검색 도구 생성 실패: {e}", file=sys.stderr)
@@ -136,7 +136,7 @@ async def discover_tools() -> list:
     for s in _mcp_servers():
         try:
             if s["transport"] == "rest":
-                from tools.rest_tools import load_rest_tools
+                from core.rest_tools import load_rest_tools
                 found = load_rest_tools(s["name"], s["url"])
                 tag = f"rest:{s['name']}"
             else:
