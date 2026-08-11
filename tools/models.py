@@ -83,6 +83,8 @@ class CorpusChunk(Base):
     char_end = Column(Numeric)
     embedding = Column(BLOB)                      # float32[] — 백필 배치가 채움
     embed_model = Column(String(200))             # 이 벡터를 만든 모델 (모델 버저닝)
+    text_tokenized = Column(CLOB)                 # Kiwi 형태소(원형) 공백조인 — FTS5 렉시컬용
+    #                                               scripts/tokenize_corpus.py가 백필
     created_at = Column(TIMESTAMP, server_default=_NOW)
     __table_args__ = (
         ForeignKeyConstraint(["source_name", "src_id"],

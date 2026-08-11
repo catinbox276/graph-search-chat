@@ -111,6 +111,8 @@ CHUNK_OVERLAP = _geti("CHUNK_OVERLAP", 150)  # 인접 청크 겹침(자)
 RRF_K = _geti("RRF_K", 60)                        # RRF 융합 상수
 SEARCH_TOP_LEXICAL = _geti("SEARCH_TOP_LEXICAL", 30)   # Oracle Text 후보 수
 SEARCH_TOP_SEMANTIC = _geti("SEARCH_TOP_SEMANTIC", 30)  # 임베딩 코사인 후보 수
+SEARCH_ENGINE = _get("SEARCH_ENGINE", "oracle")    # oracle | inmemory (A/B 스위치, docs/inmemory-search-poc.md)
+INMEM_RELOAD_SECS = _geti("INMEM_RELOAD_SECS", 60)  # 인메모리 인덱스 버전 확인 주기(초)
 
 # --- 경로 제안 진입점 매칭 (tools/path_suggest.py) ---
 PATH_SIM_ENTRY = _getf("PATH_SIM_ENTRY", 0.60)

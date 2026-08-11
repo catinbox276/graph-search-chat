@@ -5,6 +5,8 @@ python-dotenv
 oracledb
 sqlalchemy>=2.0.41   # ORM (Oracle 18c/19c — 23ai VECTOR는 2.0.41+ 네이티브)
 numpy
+kiwipiepy          # 한국어 형태소(원형) — FTS5 렉시컬용, JVM·외부사전 불필요
+sqlite-vec         # 인메모리 벡터 검색(vec0) — docs/inmemory-search-poc.md
 openai
 httpx
 pyyaml

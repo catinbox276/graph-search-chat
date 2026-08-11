@@ -47,6 +47,11 @@ import re as _re
 _LOG_SKIP = ("/static", "/favicon.ico", "/stats")
 # 요청 본문(detail)을 통째로 남기지 않을 경로 — 자격증명 계열 (대소문자 무관)
 _BODY_SKIP = ("/auth", "/login", "/register", "/password", "/token", "/oauth", "/apikey")
+# SSE 스트리밍 경로: 본문 캡처(_receive 오버라이드) 금지.
+# BaseHTTPMiddleware가 스트리밍 응답의 disconnect를 감시할 때 오버라이드된 _receive가
+# http.request를 반복 반환하면 "Unexpected message received: http.request"로 터진다.
+# (nginx는 요청버퍼링으로 가려졌으나 traefik(버퍼링 없음)에서 표면화 — 프록시 무관 근본수정)
+_STREAM_SKIP = ("/chat/stream",)
 _BODY_MAX = 2000  # 본문은 이 길이까지만 (로그 비대·민감정보 노출 제한)
 # 이 이름의 JSON 키는 값을 가린다 — 진짜 비밀값만 (message/content 등 사용자 데이터는 유지)
 _SECRET_KEY = _re.compile(
@@ -81,6 +86,7 @@ async def activity_log(request: Request, call_next):
     want_body = (request.method in ("POST", "PUT", "PATCH")
                  and "application/json" in request.headers.get("content-type", "")
                  and not any(x in pl for x in _BODY_SKIP)
+                 and p not in _STREAM_SKIP           # SSE는 본문 캡처 금지(스트리밍 충돌)
                  and not any(p.startswith(x) for x in _LOG_SKIP))
     if want_body:
         raw = await request.body()  # 읽은 뒤 재주입 — 다운스트림 핸들러가 다시 읽게

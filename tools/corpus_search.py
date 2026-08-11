@@ -115,8 +115,16 @@ def search_docs(query: str, limit: int = 5) -> str:
 def _search(query: str, limit: int = 5, source: str = "") -> str:
     with _pool.acquire() as con:
         cur = con.cursor()
-        lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL, source)
-        sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC, source)
+        # 검색 백엔드 A/B: oracle(Oracle Text + numpy 행렬) | inmemory(SQLite FTS5 + sqlite-vec)
+        # 인터페이스(pid 목록/best_chunk)는 동일 — RRF·출력 로직은 아래 공용.
+        if config.SEARCH_ENGINE == "inmemory":
+            from tools import inmemory_index as ix
+            ix.ensure_fresh()
+            lex = ix.lexical(query, config.SEARCH_TOP_LEXICAL, source)
+            sem, best_chunk = ix.semantic(query, config.SEARCH_TOP_SEMANTIC, source)
+        else:
+            lex = _lexical(cur, query, config.SEARCH_TOP_LEXICAL, source)
+            sem, best_chunk = _semantic(query, config.SEARCH_TOP_SEMANTIC, source)
         scores = {}
         for rank_list in (lex, sem):
             for r, pid in enumerate(rank_list):
