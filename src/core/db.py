@@ -52,6 +52,22 @@ def init_schema():
     Base.metadata.create_all(engine())
     with engine().begin() as con:
         _seed_sources(con)
+        _ensure_model_registry_columns(con)
+
+
+def _ensure_model_registry_columns(con):
+    """구버전 model_registry 테이블에 나중에 추가된 컬럼 보강 (멱등).
+    create_all은 기존 테이블을 ALTER하지 않으므로, base_url 같은 신규 컬럼이 없으면
+    조회·동기화가 ORA-00904로 죽는다 — 여기서 없으면 ADD."""
+    have = {r[0] for r in con.execute(text(
+        "SELECT column_name FROM user_tab_columns WHERE table_name = 'MODEL_REGISTRY'"))}
+    if not have:
+        return  # 테이블 자체가 없으면 create_all이 이미 최신 스키마로 만들었음
+    for col, ddl in (("BASE_URL", "base_url VARCHAR2(500)"),
+                     ("IS_DEFAULT", "is_default CHAR(1) DEFAULT 'N'"),
+                     ("ENABLED", "enabled CHAR(1) DEFAULT 'Y'")):
+        if col not in have:
+            con.execute(text(f"ALTER TABLE model_registry ADD ({ddl})"))
 
 
 def _seed_sources(con):

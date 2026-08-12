@@ -672,7 +672,11 @@ $("psresetall").onclick = async () => {
 const mmsg = (t) => { $("mmsg").textContent = t; };
 async function loadModels() {
   const r = await fetch("/admin/models/all").catch(() => null);
-  if (!r?.ok) return;
+  if (!r?.ok) {   // 조용히 넘기지 않음 — 빈 표의 원인(500 등)을 보이게
+    let d = ""; try { d = (await r.json()).detail; } catch {}
+    mmsg(`⚠ 모델 목록 조회 실패 (${r?.status ?? "네트워크"})${d ? " — " + d : ""}`);
+    return;
+  }
   const tb = $("mlist").querySelector("tbody");
   tb.innerHTML = "";
   (await r.json()).models.forEach(m => {
