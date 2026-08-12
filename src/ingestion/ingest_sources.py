@@ -10,6 +10,7 @@ usage: .venv/bin/python ingestion/ingest_sources.py   (야간 CronJob 03:10과 �
 """
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import oracledb
@@ -63,7 +64,10 @@ def ingest_source(cur, src) -> int:
     binds = {}
     if tsc and src["last_ingest_ts"]:
         sql += f" WHERE {tsc} > :w"
-        binds["w"] = src["last_ingest_ts"]
+        # list_sources는 워터마크를 isoformat 문자열로 준다 — datetime으로 되돌려야
+        # oracledb가 네이티브 TIMESTAMP로 바인딩(문자열이면 NLS 변환 → ORA-01843).
+        w = src["last_ingest_ts"]
+        binds["w"] = datetime.fromisoformat(w) if isinstance(w, str) else w
     if tsc:
         sql += f" ORDER BY {tsc}"
     cur.execute(sql, binds)
