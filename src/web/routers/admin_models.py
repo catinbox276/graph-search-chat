@@ -48,7 +48,7 @@ def admin_model_add(inp: ModelAddIn, request: Request):
 
 class SyncIn(BaseModel):
     base_url: str = ""   # 지정 시 그 호스트만 조회, 빈값이면 설정된 채팅·임베딩·리랭커 호스트 전부
-    test: bool = False   # True면 모델마다 실제 호출로 종류 판정(정확·느림), 기본은 이름 휴리스틱(즉시)
+    test: bool = True    # 기본: 모델마다 실제 호출로 종류 판정(동작 기준). False면 이름만(빠름)
 
 
 @router.post("/admin/models/sync")

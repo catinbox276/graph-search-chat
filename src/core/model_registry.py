@@ -63,13 +63,14 @@ def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
     return _classify(name), "응답 없음(접근 불가 가능성) — 이름 휴리스틱 폴백"
 
 
-def sync_from_serving(base_url: str = "", test: bool = False) -> dict:
+def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
     """모델 서빙 목록 동기화(업서트). base_url 지정 시 그 호스트만, 없으면 설정된
     채팅·임베딩·리랭커 호스트 전부 조회(중복 제거). 각 모델을 base_url과 함께 등록.
 
-    종류 판정: 기본은 이름 휴리스틱(즉시). test=True면 모델마다 실제 호출로 판정 —
-    정확하지만 모델당 최대 2요청이라 모델이 많으면 느리다. 어느 쪽이든 발견한 모델은
-    전부 등록한다(설정 모델명이 서빙에 없어도 무관 — 등록 후 사람이 기본값 선택)."""
+    종류 판정: 기본은 능력 테스트(실제 호출) — 이름은 태생적으로 불안정(bge-m3 등
+    'embed' 없는 임베딩)하므로 동작으로 판정. 접근 불가 모델은 이름 휴리스틱 폴백.
+    test=False면 이름만으로 빠르게(테스트 생략). 발견 모델은 설정 모델명 유무와
+    무관하게 전부 등록(등록 후 사람이 기본값 선택)."""
     hosts = ([base_url.rstrip("/")] if base_url.strip()
              else list(dict.fromkeys(
                  u.rstrip("/") for u in

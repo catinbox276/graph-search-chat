@@ -162,10 +162,10 @@ def _probe_models_bg():
         # 표가 차 있게. 이미 등록분이 있으면(사람이 큐레이션) 건드리지 않는다.
         try:
             if not model_registry.list_models():
-                r = model_registry.sync_from_serving()
+                r = model_registry.sync_from_serving()  # 능력 테스트로 종류 판정
                 m = (f"레지스트리 비어 자동 동기화 — 신규 {len(r.get('registered', []))} / "
                      f"전체 {r.get('total', 0)}건, 오류 {r.get('errors') or '없음'} "
-                     f"(정확한 종류는 관리 페이지 '종류 테스트' 켜고 재동기화)")
+                     f"(종류는 실제 호출로 판정, 접근 불가는 이름 폴백)")
                 print(f"[모델자동등록] {m}", flush=True)
                 events.log("model", source="startup-autosync", level="info", status="ok",
                            summary=m)

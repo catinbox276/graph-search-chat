@@ -193,8 +193,7 @@
     <input id="mname" placeholder="served-model-name (호스트 /v1/models 값 그대로)" required style="flex:1;min-width:220px">
     <input id="murl" placeholder="base_url (예: http://vllm-embed:8000/v1 — 빈값=역할별 .env)" style="flex:1;min-width:260px">
     <button id="madd">등록/수정</button>
-    <button type="button" class="ghost" id="msync" title="설정된 서빙 호스트들(또는 위 base_url 칸에 주소를 넣으면 그 호스트)의 /v1/models를 읽어 발견 모델 전부를 base_url과 함께 등록. 설정 모델명이 서빙에 없어도 등록은 진행 — 이후 아래 표에서 '기본 지정'으로 선택">서빙 동기화</button>
-    <label title="켜면 모델마다 실제 호출(임베딩/채팅)로 종류를 판정 — 정확하지만 모델이 많으면 느림. 끄면 이름 휴리스틱(즉시)"><input type="checkbox" id="mtest">종류 테스트(느림)</label>
+    <button type="button" class="ghost" id="msync" title="설정된 서빙 호스트들(또는 위 base_url 칸에 주소를 넣으면 그 호스트)의 /v1/models를 읽어, 각 모델을 실제 호출(임베딩/채팅)로 종류 판정해 base_url과 함께 등록. 이름이 아니라 동작으로 구분 — 모델 많으면 수십 초. 접근 불가 모델은 이름 폴백">서빙 동기화</button>
     <span class="hint" id="mmsg" style="margin:0;white-space:pre-line;flex-basis:100%"></span>
   </form>
   <p class="hint">역할별 사용처 — <b>채팅 LLM</b>: llm 기본값(사용자가 채팅에서 바꿀 수 있음) ·
@@ -725,11 +724,10 @@ $("mform").onsubmit = async (e) => {
 };
 $("msync").onclick = async () => {
   const url = $("murl").value.trim();
-  const test = $("mtest").checked;
-  mmsg((url || "설정된 호스트 전부") + (test ? " 동기화·종류 테스트 중…(느림)" : " 동기화 중…"));
+  mmsg((url || "설정된 호스트 전부") + " 동기화·종류 판정 중…(실제 호출, 모델 많으면 수십 초)");
   const r = await fetch("/admin/models/sync", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({base_url: url, test})});
+    body: JSON.stringify({base_url: url})});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { mmsg(`실패 (${r.status}) — ${j.detail || ""}`); return; }
   const det = (j.models || []).map(m => `${m.kind}:${m.name}(${m.status}·${m.why})`).join(" / ");
