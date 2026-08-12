@@ -267,6 +267,9 @@ def admin_source_reprocess(sname: str, inp: ReprocessIn, request: Request):
             때문 (재발 소급 취소와 같은 원리). 지침·모델 변경 후 재구조화용.
     """
     check_admin(request)
+    if sname in _structuring:
+        raise HTTPException(409, "이 소스를 구조화 중입니다 — 끝난 뒤 다시 하세요 "
+                                 "(처리 현황이 멈추면 완료). 구조화 중 리셋하면 카운트가 꼬입니다")
     con = db()
     cur = con.cursor()
     if inp.mode == "errors":
@@ -338,6 +341,9 @@ def admin_source_reingest(sname: str, request: Request):
     원천 스키마·필드 매핑을 바꿨거나 코퍼스를 깨끗이 다시 만들 때. 그래프 구조화된
     소스면 문서 유래 기여를 먼저 회수해 이중 카운트를 막는다(대화 세션 기여는 불변)."""
     check_admin(request)
+    if sname in _structuring:
+        raise HTTPException(409, "이 소스를 구조화 중입니다 — 끝난 뒤 다시 하세요 "
+                                 "(처리 현황이 멈추면 완료). 구조화 중 재적재하면 카운트가 꼬입니다")
     from ingestion import source_registry, ingest_sources, chunk_corpus
     con = db()
     cur = con.cursor()
@@ -460,6 +466,9 @@ def admin_domain_reset(dname: str, request: Request):
     """관리자: 도메인 초기화 — 이 도메인에 물린 모든 소스의 문서 구조화를 회수·리셋.
     대화 세션 기여는 건드리지 않는다 (문서 쪽만)."""
     check_admin(request)
+    if _structuring:
+        raise HTTPException(409, f"구조화 중인 소스가 있습니다: {sorted(_structuring)} — "
+                                 "끝난 뒤 다시 하세요 (구조화 중 초기화하면 카운트가 꼬입니다)")
     con = db()
     cur = con.cursor()
     cur.execute("SELECT source_name FROM source_registry WHERE domain = :1", [dname])
@@ -479,6 +488,9 @@ def admin_domain_reset(dname: str, request: Request):
 def admin_reset_all_docs(request: Request):
     """관리자: 전체 초기화 — 도메인 지정된 모든 소스의 문서 구조화를 회수·리셋."""
     check_admin(request)
+    if _structuring:
+        raise HTTPException(409, f"구조화 중인 소스가 있습니다: {sorted(_structuring)} — "
+                                 "끝난 뒤 다시 하세요 (구조화 중 초기화하면 카운트가 꼬입니다)")
     con = db()
     cur = con.cursor()
     cur.execute("SELECT source_name FROM source_registry WHERE domain IS NOT NULL")
