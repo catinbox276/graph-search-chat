@@ -101,6 +101,38 @@ def embedding_client() -> tuple:
     return _emb_clients[url], name
 
 
+def probe_serving(timeout: float = 5.0) -> list:
+    """기동 시 설정된 모델 서빙 연결 점검 — 채팅·임베딩 엔드포인트에 GET /models.
+    [{role,url,model,ok,found,detail}] 반환, 예외 안 냄(서버 기동을 못 막게)."""
+    checks = [("chat", config.CHAT_URL, get_default("llm", None) or config.CHAT_MODEL)]
+    try:
+        eurl, emodel = embedding_endpoint()
+        checks.append(("embedding", eurl, emodel))
+    except Exception:
+        pass
+    out, seen = [], set()
+    for role, url, name in checks:
+        if not url or (url, name) in seen:
+            continue
+        seen.add((url, name))
+        rec = {"role": role, "url": url, "model": name or "",
+               "ok": False, "found": False, "detail": ""}
+        try:
+            r = httpx.get(url.rstrip("/") + "/models",
+                          headers={"Authorization": f"Bearer {config.MODEL_API_KEY}"},
+                          timeout=timeout)
+            rec["ok"] = r.status_code == 200
+            ids = [m.get("id") for m in (r.json().get("data") or [])] if rec["ok"] else []
+            rec["found"] = bool(name) and name in ids
+            rec["detail"] = (f"HTTP {r.status_code}, 서빙 모델 {len(ids)}개"
+                             + ("" if rec["found"] or not name
+                                else f", 설정 모델명 '{name}' 미발견"))
+        except Exception as e:
+            rec["detail"] = f"{type(e).__name__}: {str(e)[:150]}"
+        out.append(rec)
+    return out
+
+
 def set_enabled(kind: str, name: str, enabled: bool):
     with db.session() as s:
         row = s.get(ModelRegistry, (kind, name))

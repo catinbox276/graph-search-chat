@@ -141,6 +141,25 @@ async def startup():
     reload_index()               # SQLite 인메모리 검색 인덱스 빌드 (Oracle→:memory:)
     deps.set_saver(OracleSaver())  # 멀티턴 기억 — Oracle 외부화
     await deps.get_agent(None)   # 기본 LLM 예열
+    _probe_models_bg()           # 설정된 모델 서빙 연결 점검 (비블로킹 — 서버 기동은 안 막음)
+
+
+def _probe_models_bg():
+    """기동 시 .env/레지스트리에 설정된 모델 서빙을 점검하고 결과를 활동 로그·콘솔에 남긴다.
+    별도 스레드 — 서빙이 느리거나 죽어도 서버 기동을 지연/차단하지 않는다."""
+    import threading
+
+    def _run():
+        from core import model_registry, events
+        for rec in model_registry.probe_serving():
+            good = rec["ok"] and rec["found"]
+            lvl = "info" if good else ("warn" if rec["ok"] else "error")
+            msg = f"{rec['role']} 서빙 {rec['url']} ({rec['model'] or '모델명 미설정'}) — {rec['detail']}"
+            print(f"[모델점검] {'OK' if good else '주의'}: {msg}", flush=True)
+            events.log("model", source="startup-probe", level=lvl, actor=rec["role"],
+                       status=("ok" if rec["ok"] else "fail"), summary=msg)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 @app.get("/stats")
