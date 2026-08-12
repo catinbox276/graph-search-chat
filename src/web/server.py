@@ -158,6 +158,20 @@ def _probe_models_bg():
             print(f"[모델점검] {'OK' if good else '주의'}: {msg}", flush=True)
             events.log("model", source="startup-probe", level=lvl, actor=rec["role"],
                        status=("ok" if rec["ok"] else "fail"), summary=msg)
+        # 레지스트리가 비어 있으면 서빙에서 자동 등록 (이름 휴리스틱·빠름) — 부팅만 해도
+        # 표가 차 있게. 이미 등록분이 있으면(사람이 큐레이션) 건드리지 않는다.
+        try:
+            if not model_registry.list_models():
+                r = model_registry.sync_from_serving()
+                m = (f"레지스트리 비어 자동 동기화 — 신규 {len(r.get('registered', []))} / "
+                     f"전체 {r.get('total', 0)}건, 오류 {r.get('errors') or '없음'} "
+                     f"(정확한 종류는 관리 페이지 '종류 테스트' 켜고 재동기화)")
+                print(f"[모델자동등록] {m}", flush=True)
+                events.log("model", source="startup-autosync", level="info", status="ok",
+                           summary=m)
+        except Exception as e:
+            events.log("model", source="startup-autosync", level="error", status="fail",
+                       summary=f"{type(e).__name__}: {str(e)[:200]}")
 
     threading.Thread(target=_run, daemon=True).start()
 
