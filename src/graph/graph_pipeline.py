@@ -303,7 +303,9 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
             if nname == name:
                 node_id = nid; break
             if vec is not None and nemb:
-                sim = cosine(vec, json.loads(nemb.read()))
+                # thick 모드는 같은 실행에서 방금 INSERT한 노드의 BLOB을 LOB 아닌
+                # bytes로 돌려줄 수 있다 — 로케이터/bytes 둘 다 수용 (json.loads는 bytes OK).
+                sim = cosine(vec, json.loads(nemb.read() if hasattr(nemb, "read") else nemb))
                 if sim >= SIM_THRESHOLD:
                     cands.append((sim, nid, nname))
         if node_id is None and cands:

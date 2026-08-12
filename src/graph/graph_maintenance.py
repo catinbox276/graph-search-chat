@@ -76,7 +76,8 @@ def pass1_sibling_merge(cur):
                        JOIN nodes n ON n.id=e.dst WHERE e.src=:1 AND n.layer IN (2,3)""",
                     [parent])
         sibs = [(nid, name, layer,
-                 np.asarray(json.loads(emb.read()), dtype=np.float32) if emb else None,
+                 np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
+                            dtype=np.float32) if emb else None,
                  evidence_count(cur, nid))
                 for nid, name, layer, emb in cur.fetchall()]
         dead = set()  # 이번 순회에서 이미 흡수(삭제)된 형제 — 스냅샷이라 추적 필수

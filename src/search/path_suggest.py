@@ -54,7 +54,8 @@ def suggest_paths(problem: str) -> str:
         for gid, name, emb in cur.fetchall():
             if emb is None:
                 continue
-            v = np.asarray(json.loads(emb.read()), dtype=np.float32)
+            v = np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
+                           dtype=np.float32)
             sim = float(v @ q / np.linalg.norm(v))
             if sim >= SIM_ENTRY:
                 goals.append((sim, gid, name))
