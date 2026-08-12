@@ -48,16 +48,18 @@ def admin_model_add(inp: ModelAddIn, request: Request):
 
 class SyncIn(BaseModel):
     base_url: str = ""   # 지정 시 그 호스트만 조회, 빈값이면 설정된 채팅·임베딩·리랭커 호스트 전부
+    test: bool = False   # True면 모델마다 실제 호출로 종류 판정(정확·느림), 기본은 이름 휴리스틱(즉시)
 
 
 @router.post("/admin/models/sync")
 def admin_sync(inp: SyncIn, request: Request):
-    """관리자: 모델 서빙에서 목록 동기화(등록) — 능력 테스트로 종류 판정, base_url 저장.
-    base_url 지정 시 그 주소만, 없으면 설정된 역할별 호스트 전부."""
+    """관리자: 모델 서빙에서 목록 동기화(등록) — 발견 모델 전부 base_url과 함께 등록.
+    종류는 기본 이름 휴리스틱(즉시), test=True면 실제 호출로 판정. 설정 모델명이
+    서빙에 없어도 등록은 진행(사람이 이후 기본값 선택). base_url 없으면 역할별 호스트 전부."""
     check_admin(request)
     if inp.base_url and not inp.base_url.lower().startswith(("http://", "https://")):
         raise HTTPException(400, "base_url은 http(s):// 주소여야 합니다")
-    return model_registry.sync_from_serving(inp.base_url.strip())
+    return model_registry.sync_from_serving(inp.base_url.strip(), inp.test)
 
 
 class SelectIn(BaseModel):

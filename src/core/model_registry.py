@@ -58,10 +58,13 @@ def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
     return _classify(name), "테스트 불가 — 이름 휴리스틱"
 
 
-def sync_from_serving(base_url: str = "") -> dict:
+def sync_from_serving(base_url: str = "", test: bool = False) -> dict:
     """모델 서빙 목록 동기화(업서트). base_url 지정 시 그 호스트만, 없으면 설정된
-    채팅·임베딩·리랭커 호스트 전부 조회(중복 제거). 각 모델은 능력 테스트로 종류를
-    판정하고 base_url과 함께 등록 — 사내 다중 호스트 vLLM 지원(단일 서빙도 그대로 동작)."""
+    채팅·임베딩·리랭커 호스트 전부 조회(중복 제거). 각 모델을 base_url과 함께 등록.
+
+    종류 판정: 기본은 이름 휴리스틱(즉시). test=True면 모델마다 실제 호출로 판정 —
+    정확하지만 모델당 최대 2요청이라 모델이 많으면 느리다. 어느 쪽이든 발견한 모델은
+    전부 등록한다(설정 모델명이 서빙에 없어도 무관 — 등록 후 사람이 기본값 선택)."""
     hosts = ([base_url.rstrip("/")] if base_url.strip()
              else list(dict.fromkeys(
                  u.rstrip("/") for u in
@@ -81,7 +84,8 @@ def sync_from_serving(base_url: str = "") -> dict:
                 name = m.get("id")
                 if not name:
                     continue
-                kind, why = _probe_kind(host, name)
+                kind, why = (_probe_kind(host, name) if test
+                             else (_classify(name), "이름 휴리스틱"))
                 row = s.get(ModelRegistry, (kind, name))
                 if row:
                     row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
@@ -174,9 +178,13 @@ def probe_serving(timeout: float = 5.0) -> list:
             rec["ok"] = r.status_code == 200
             ids = [m.get("id") for m in (r.json().get("data") or [])] if rec["ok"] else []
             rec["found"] = bool(name) and name in ids
+            avail = ("" if rec["found"] else
+                     f", 서빙 모델: [{', '.join(str(i) for i in ids[:10])}"
+                     f"{' …' if len(ids) > 10 else ''}] — 서빙 동기화 후 기본 지정하세요")
             rec["detail"] = (f"HTTP {r.status_code}, 서빙 모델 {len(ids)}개"
-                             + ("" if rec["found"] or not name
-                                else f", 설정 모델명 '{name}' 미발견"))
+                             + ("" if rec["found"]
+                                else (f", 설정 모델명 '{name}' 미발견" if name
+                                      else ", 설정 모델명 없음") + avail))
         except Exception as e:
             rec["detail"] = f"{type(e).__name__}: {str(e)[:150]}"
         out.append(rec)
