@@ -24,6 +24,17 @@ from langgraph.checkpoint.base import (
 from core import config
 
 
+def _lob_bytes(v) -> bytes:
+    """BLOB 값을 bytes로 — LOB 로케이터·bytes·None 모두 수용.
+    thick 모드는 같은 세션에서 쓴 BLOB 등을 LOB이 아닌 bytes로 돌려줄 수 있어,
+    .read()를 무방비로 부르면 'bytes' object has no attribute 'read'로 죽는다."""
+    if v is None:
+        return b""
+    if hasattr(v, "read"):
+        return bytes(v.read())
+    return bytes(v)
+
+
 class OracleSaver(BaseCheckpointSaver):
     def __init__(self):
         super().__init__()
@@ -70,16 +81,13 @@ class OracleSaver(BaseCheckpointSaver):
                        WHERE thread_id=:1 AND ckpt_ns=:2 AND ckpt_id=:3
                        ORDER BY task_id, idx""", [thread_id, ns, ckpt_id])
         # Oracle은 빈 BLOB(b"")을 NULL로 저장 — None 가드 필수
-        writes = [(t, ch, self.serde.loads_typed(
-                      (vt, bytes(v.read()) if v is not None else b"")))
+        writes = [(t, ch, self.serde.loads_typed((vt, _lob_bytes(v))))
                   for t, ch, vt, v in cur.fetchall()]
         return CheckpointTuple(
             config={"configurable": {"thread_id": thread_id, "checkpoint_ns": ns_out,
                                      "checkpoint_id": ckpt_id}},
-            checkpoint=self.serde.loads_typed(
-                (ctype, bytes(ckpt.read()) if ckpt is not None else b"")),
-            metadata=self.serde.loads_typed(
-                (mtype, bytes(meta.read()) if meta is not None else b"")),
+            checkpoint=self.serde.loads_typed((ctype, _lob_bytes(ckpt))),
+            metadata=self.serde.loads_typed((mtype, _lob_bytes(meta))),
             parent_config=({"configurable": {"thread_id": thread_id,
                                              "checkpoint_ns": ns_out,
                                              "checkpoint_id": parent_id}}
