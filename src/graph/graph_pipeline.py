@@ -293,7 +293,14 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
     """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
 
     ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'."""
-    vec = embed(name) if use_embedding else None
+    # 임베딩 엔드포인트가 죽어도 구조화는 계속 — 벡터 없으면(vec=None) dedup은 이름/LLM만
+    # 사용(과병합만 줄고 진행은 됨). 무한 대기·전체 실패보다 낫다.
+    vec = None
+    if use_embedding:
+        try:
+            vec = embed(name)
+        except Exception as e:
+            print(f"[embed 실패→벡터없이 진행] {type(e).__name__}: {str(e)[:120]}", flush=True)
     node_id = None
     if parent_id:
         cur.execute("""SELECT n.id, n.name, n.embedding FROM nodes n

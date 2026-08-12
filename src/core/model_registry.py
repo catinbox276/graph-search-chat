@@ -193,7 +193,9 @@ def embedding_client() -> tuple:
     from openai import OpenAI
     url, name = embedding_endpoint()
     if url not in _emb_clients:
-        _emb_clients[url] = OpenAI(base_url=url, api_key=config.MODEL_API_KEY)
+        # 타임아웃 필수 — 임베딩 엔드포인트가 멈추면 그래프 병합(메인 스레드)이 무한 대기.
+        _emb_clients[url] = OpenAI(base_url=url, api_key=config.MODEL_API_KEY,
+                                   timeout=config.LLM_TIMEOUT)
     return _emb_clients[url], name
 
 
