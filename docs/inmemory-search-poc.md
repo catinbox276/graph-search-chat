@@ -1,6 +1,6 @@
 # 인메모리 하이브리드 검색 설계 (Oracle 원본 + SQLite FTS5 + sqlite-vec)
 
-> 작성일: 2026-08-11 (2026-08-12 개요·설명 보강)
+> 작성일: 2026-08-11 (2026-08-12 개요·설치·동기화 보강)
 > 대상 독자: 개발자 및 비개발 이해관계자
 > 요약: **원본 데이터는 Oracle에 그대로 두고, 검색은 애플리케이션 프로세스 메모리 안의
 > SQLite 색인 두 개(단어용·의미용)로 수행한다. 디스크에 파일을 남기지 않으며, Oracle에
@@ -120,78 +120,122 @@ ALTER TABLE corpus_chunks ADD (text_tokenized CLOB);   -- Kiwi 원형 토큰(공
 -- embedding 컬럼은 기존 유지 (원문 임베딩 벡터)
 ```
 
-- `text_tokenized` 예: 원문 `"환불 규정을 알려줘"` → `"환불 규정 을 알리 어 주"` (원형 기준, §6 참고)
+- `text_tokenized` 예: 원문 `"환불 규정을 알려줘"` → `"환불 규정 을 알리 어 주"` (원형 기준)
 - **사전 분해 저장 이유:** FTS5는 한국어 형태소를 인식하지 못한다. 따라서 **적재 시 Kiwi로 분해**하여 저장하고, 검색 시에도 **동일 Kiwi로 질의를 분해**하여 일치시킨다.
 
 ---
 
-## 4. 데이터 흐름
+## 4. 데이터 흐름 (3단계)
 
-### (a) 적재 — 문서 저장 시 (야간 배치 / 청킹 시점)
-```python
-from search import ko_tokenize   # 적재·질의 공용 단일 소스
-
-def tokenize_for_search(text: str) -> str:
-    # Kiwi 원형(lemma) 기준 공백 조인. 적재와 질의가 동일 함수를 사용해야 결과가 일치한다.
-    return ko_tokenize.tokenize_for_search(text)
-
-# corpus_chunks 저장 시:
-#   text            = 원문 (사람이 읽는 형태)
-#   text_tokenized  = tokenize_for_search(원문)   ← 단어 검색(FTS5)용
-#   embedding       = embed(원문)                 ← 의미 검색(벡터)용
-```
-
-### (b) 로드 — 앱 기동 시 및 원본 변경 시 (Oracle → 메모리)
-```python
-import sqlite3, sqlite_vec
-
-def build_index(rows, dim):
-    con = sqlite3.connect(":memory:")           # 파일 없음 — 메모리에만 구성
-    con.enable_load_extension(True); sqlite_vec.load(con)
-    con.execute(f"CREATE VIRTUAL TABLE vec USING vec0(cid INTEGER PRIMARY KEY, embedding float[{dim}])")
-    con.execute("CREATE VIRTUAL TABLE fts USING fts5(cid UNINDEXED, body, tokenize='unicode61')")
-    for r in rows:   # r = (chunk_id, text_tokenized, embedding_floats)
-        con.execute("INSERT INTO vec(cid, embedding) VALUES (?,?)",
-                    (r.chunk_id, sqlite_vec.serialize_float32(r.embedding)))
-        con.execute("INSERT INTO fts(cid, body) VALUES (?,?)",
-                    (r.chunk_id, r.text_tokenized))
-    return con
-```
-
-### (c) 질의 — 검색 시 (하이브리드)
-```python
-def search(con, query, embed_fn, k=10, rk=60):
-    q_tok = tokenize_for_search(query)                     # 적재와 동일하게 Kiwi 분해
-    q_vec = sqlite_vec.serialize_float32(embed_fn(query))  # 질의를 벡터로 변환
-
-    lex = con.execute("SELECT cid FROM fts WHERE fts MATCH ? ORDER BY bm25(fts) LIMIT 100",
-                      (q_tok,)).fetchall()                 # 단어 검색 상위 100
-    vec = con.execute("SELECT cid FROM vec WHERE embedding MATCH ? ORDER BY distance LIMIT 100",
-                      (q_vec,)).fetchall()                 # 의미 검색 상위 100
-
-    # RRF 융합 — 점수 크기가 아닌 '순위'로 결합하여 두 검색을 공정하게 통합
-    score = {}
-    for rank, (cid,) in enumerate(lex, 1): score[cid] = score.get(cid, 0) + 1/(rk+rank)
-    for rank, (cid,) in enumerate(vec, 1): score[cid] = score.get(cid, 0) + 1/(rk+rank)
-    return sorted(score, key=score.get, reverse=True)[:k]
-```
+| 단계 | 시점 | 처리 |
+|------|------|------|
+| **(a) 적재** | 야간 배치 / 청킹 시점 | 원문을 청크로 분할하여 Oracle에 저장한다. 각 청크에 대해 원문(`text`), Kiwi로 분해한 토큰(`text_tokenized`, 단어 검색용), 원문 임베딩(`embedding`, 의미 검색용)을 함께 기록한다. |
+| **(b) 로드** | 앱 기동 시 및 원본 변경 시 | Oracle에서 청크를 전량 읽어 메모리에 SQLite `:memory:` 색인 두 개(FTS5·vec0)를 구성한다. 파일은 생성하지 않는다. |
+| **(c) 질의** | 검색 요청 시 | 질의를 적재와 **동일한 Kiwi**로 분해하여 단어 검색을, 임베딩으로 변환하여 의미 검색을 각각 수행한 뒤, 두 결과를 **RRF**로 융합해 최종 순위를 낸다. |
 
 > **RRF(Reciprocal Rank Fusion):** 두 검색이 매긴 **순위**만으로 결합하는 방식. 점수 스케일이 서로 달라도 공정하게 통합되며, 두 검색 모두 상위에 올린 문서일수록 높은 점수를 받는다.
+>
+> **적재·질의 일관성:** 적재와 질의는 반드시 동일한 토큰화 함수(`ko_tokenize.tokenize_for_search`)를 사용해야 결과가 일치한다. 실제 구현은 §10 참조.
 
 ---
 
-## 5. 동기화 — 원본(Oracle)과 복사본(메모리) 정합
+## 5. ★ 데이터 변경 시 최신화 (다중 복제본 동기화)
 
-메모리 색인은 원본에서 파생된 복사본이므로, 원본 변경 시 갱신한다. 현재 규모에서는 **버전 확인 후 전체 재로드**가 가장 단순하고 안전하다.
+**가장 중요한 부분.** 서비스는 동일한 애플리케이션이 **레플리카(복제본) 여러 개**로 떠 있고(수평 확장), 각 레플리카는 **자기 프로세스 메모리 안에 독립된 인메모리 색인 복사본**을 가진다. 공유 검색 서버가 없으므로 레플리카끼리 색인을 공유하지 않는다. 따라서 데이터가 추가·수정·삭제될 때 **모든 레플리카가 각자 최신 상태로 맞춰지는** 방식이 필요하다. (레플리카는 배포 형태에 따라 도커 파드일 수도, 프로세스일 수도 있으나 원리는 동일하다.)
 
-- Oracle에 인덱스 버전 값을 1개 두고, 각 복제본이 주기적으로 확인하여 변경 시 전체 재빌드
-- 복제본마다 독립된 메모리 사본을 보유하므로 각자 재로드
-- **쓰기는 항상 Oracle 우선**(원본이 기준), 메모리는 재로드로만 반영
-- 증분 동기화는 본 PoC 범위 밖(현재는 전체 재로드로 충분)
+### 5.1 기본 원칙
+
+- **쓰기는 항상 Oracle에 먼저** — Oracle이 단일 진실 원천(SoT). 인메모리는 파생 복사본이다.
+- **각 복제본은 독립적으로 갱신** — 복제본 간 직접 통신이 없다. 각자 Oracle을 보고 스스로 재구성한다.
+- **버전 감지 → 통째 재빌드** — 원본이 바뀌면 해당 복제본이 자기 색인을 전체 재빌드한다(증분 아님).
+
+### 5.2 최신화 흐름
+
+```mermaid
+sequenceDiagram
+    participant W as 쓰기 주체<br/>(야간 배치 · 적재 · 재적재)
+    participant O as Oracle (원본)
+    participant A as 복제본 A (인메모리)
+    participant B as 복제본 B (인메모리)
+
+    W->>O: 청크 추가/수정/삭제 (corpus_chunks)
+    Note over O: 데이터 버전이 바뀜<br/>(청크 수·최신 시각 변화)
+    loop 주기 확인 (INMEM_RELOAD_SECS, 기본 60초)
+        A->>O: 현재 버전 조회
+        O-->>A: 버전 (바뀜)
+        A->>O: 전체 청크 로드 → 색인 재빌드
+        B->>O: 현재 버전 조회
+        O-->>B: 버전 (바뀜)
+        B->>O: 전체 청크 로드 → 색인 재빌드
+    end
+    Note over A,B: 모든 복제본이 최신으로 수렴<br/>(최종적 일관성, 지연 ≤ 확인 주기)
+```
+
+### 5.3 버전은 어떻게 판단하나
+
+Oracle 데이터의 **버전 스냅샷 = (청크 수, 최신 `created_at`)** 을 사용한다(`corpus_chunks` 중 `text_tokenized`가 있는 것 기준). 이 값이 로드 당시와 달라지면 재빌드한다.
+
+| 데이터 변경 | 버전 스냅샷에 미치는 영향 | 감지 |
+|-------------|--------------------------|------|
+| **추가** | 청크 수 증가 | ✅ |
+| **삭제** | 청크 수 감소 | ✅ |
+| **수정** | 재청킹 시 기존 청크 삭제 후 새 `created_at`으로 재삽입 → 최신 시각 갱신 | ✅ |
+
+> 즉 추가·삭제는 건수로, 수정은 최신 시각으로 감지된다. 세 경우 모두 다음 확인 주기에 재빌드가 트리거된다.
+
+### 5.4 일관성 특성
+
+- **최종적 일관성(eventual consistency):** 변경 후 각 복제본이 다음 확인 주기(`INMEM_RELOAD_SECS`, 기본 60초) 안에 최신으로 맞춰진다. 복제본마다 갱신 시점이 몇 초 다를 수 있으나 곧 수렴한다.
+- **조율 불필요:** 로드밸런서·복제본 간 별도 협의가 없다. 각자 Oracle만 보면 된다 → 복제본을 늘려도 구조가 그대로다(수평 확장 용이).
+- **재시작 안전:** 복제본이 죽거나 새로 떠도, 기동 시 Oracle에서 처음부터 색인을 만든다. 인메모리라 남는 잔여 상태가 없다.
+- **즉시 반영이 필요한 경로:** 임베딩 모델 교체·관리자 수동 `/reload` 시에는 해당 복제본이 즉시 재빌드한다.
+
+### 5.5 한계 / 향후
+
+- 현재 버전 스냅샷은 (건수, 최신 시각) 휴리스틱이다. 드문 경계 사례(같은 초에 동수 교체 등)까지 정밀히 잡으려면 **전용 버전 카운터**(예: `app_settings`에 단조 증가값, 쓰기 시 +1)로 승격한다.
+- 증분 동기화(바뀐 청크만 갱신)는 현 규모에서 불필요 — 전체 재빌드가 단순·안전. 데이터가 커져 재빌드 비용이 커지면 증분 도입을 검토한다.
 
 ---
 
-## 6. 준수 조건 (위반 시 검색 정합성 저하)
+## 6. 설치 및 의존성
+
+특별한 서버·데몬을 설치할 필요가 없다. **Python 패키지 두 개**만 추가하면 되며, 나머지는 파이썬 표준 라이브러리 또는 기존 의존성이다.
+
+### 6.1 필수 패키지
+
+```bash
+pip install kiwipiepy sqlite-vec
+# 또는 프로젝트 일괄:
+pip install -r requirements.txt
+```
+
+| 패키지 | 용도 | 특이사항 |
+|--------|------|----------|
+| `kiwipiepy` | 한국어 형태소 분석(Kiwi) — 단어 검색용 토큰화 | **Java·외부 사전 불필요.** 순수 설치(휠 제공), 컨테이너 친화적 |
+| `sqlite-vec` | 인메모리 벡터 검색(vec0) — 의미 검색용 | SQLite **로더블 익스텐션**. 별도 서버 없음 |
+| `sqlite3` | 인메모리 색인 컨테이너(FTS5 포함) | **파이썬 표준 라이브러리**(별도 설치 없음) |
+| (기존) `oracledb` · `numpy` | Oracle 접속 · 벡터 처리 | 이미 사용 중 |
+
+### 6.2 전제 조건
+
+- **FTS5 및 익스텐션 로드 지원 SQLite** — FTS5는 대부분의 표준 파이썬 빌드에 포함된다. `sqlite-vec` 로드에는 `enable_load_extension`이 필요하며, 일반적인 CPython에서 기본 지원된다(초경량 배포판에서 비활성인 경우가 드물게 있으니 확인).
+- **디스크 쓰기 불필요** — 색인은 `:memory:`에만 만든다.
+
+### 6.3 컨테이너
+
+- 위 패키지를 `requirements.txt`에 포함하므로, 이미지 빌드 시 자동 설치된다(현재 포함됨).
+- 런타임에 파일을 생성하지 않으므로 별도 볼륨·영속 스토리지가 필요 없다.
+
+### 6.4 설치 확인
+
+```bash
+python -c "from kiwipiepy import Kiwi; print(Kiwi().tokenize('환불 규정'))"
+python -c "import sqlite3, sqlite_vec; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); sqlite_vec.load(c); print('sqlite-vec OK')"
+```
+
+---
+
+## 7. 준수 조건 (위반 시 검색 정합성 저하)
 
 - 단어 색인(FTS5)과 임베딩(벡터)은 **분리** — 혼용 금지
 - **적재 Kiwi = 질의 Kiwi** (동일 버전·동일 함수) — 불일치 시 분해 결과가 달라 매칭 실패
@@ -200,7 +244,7 @@ def search(con, query, embed_fn, k=10, rk=60):
 
 ---
 
-## 7. 도구 선택 근거
+## 8. 도구 선택 근거
 
 - **형태소 분석기 = Kiwi(`kiwipiepy`)**: `pip install` 한 줄로 설치, **Java·외부사전 불필요**(KoNLPy/Okt는 Java 필요, mecab-ko는 C 사전 설치 부담). 정확도·속도가 우수하며 컨테이너 친화적이다.
 - **단어 검색 = SQLite FTS5**: BM25(관련도 점수) 내장. Oracle Text/CTXAPP 권한을 대체한다.
@@ -209,7 +253,7 @@ def search(con, query, embed_fn, k=10, rk=60):
 
 ---
 
-## 8. 조건 / 열린 질문
+## 9. 조건 / 열린 질문
 
 - 임베딩 모델 미서빙 시 **단어 검색(FTS5) 단독 폴백** 동작(검색 중단 방지)
 - 데이터가 **RAM 수용 범위** 이내여야 함(파드 메모리·로드 시간 모니터링)
@@ -219,14 +263,14 @@ def search(con, query, embed_fn, k=10, rk=60):
 
 ---
 
-## 9. 구현 위치
+## 10. 구현 위치
 
 | 역할 | 파일 |
 |------|------|
 | 한국어 토큰화(적재·질의 공용) | `src/search/ko_tokenize.py` (`tokenize_for_search`) |
-| 인메모리 인덱스 빌드·검색·리로드 | `src/search/inmemory_index.py` (`build_index`/`lexical`/`semantic`/`ensure_fresh`) |
-| 검색 진입점(하이브리드·RRF·문서 집계) | `src/search/corpus_search.py` |
+| 인메모리 인덱스 빌드·검색·리로드·버전확인 | `src/search/inmemory_index.py` (`build_index`/`lexical`/`semantic`/`ensure_fresh`/`_current_version`) |
+| 검색 진입점(하이브리드·RRF·문서 집계) | `src/search/corpus_search.py` (`reload_index`) |
 | 청킹(원문→청크, Kiwi 토큰 저장) | `src/ingestion/chunk_corpus.py` |
 | 임베딩 백필(청크→벡터) | `src/ingestion/embed_corpus.py` |
 
-> 요약: **Oracle이 원본(기준), SQLite 인메모리가 검색을 담당한다.** 파일 미잔존(보안), Oracle 추가 권한 불요(부작용 회피), 단어·의미 단일 계층 처리(하이브리드), 라이브러리 기반 관리(추가·수정·삭제 용이) — 이 네 가지가 본 설계의 근거다.
+> 요약: **Oracle이 원본(기준), SQLite 인메모리가 검색을 담당한다.** 파일 미잔존(보안), Oracle 추가 권한 불요(부작용 회피), 단어·의미 단일 계층 처리(하이브리드), 라이브러리 기반 관리(추가·수정·삭제 용이) — 이 네 가지가 본 설계의 근거다. 데이터 변경 시에는 각 복제본이 버전 변화를 감지해 독립적으로 최신화한다(§5).
