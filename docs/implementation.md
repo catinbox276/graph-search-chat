@@ -83,7 +83,7 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 | `web/routers/chat.py` | SSE 스트리밍·세션 목록/복원·화제 분기 확인(topic-check)·문서 뷰·모델 목록 | 화제 확인은 fail-open (판정 실패가 답변을 막지 않음) |
 | `web/routers/admin_sources.py` | 도메인·소스 등록·전처리 설정·드라이런/재시도/초기화·처리 현황 | 원천 테이블은 SELECT만 |
 | `web/routers/admin_models.py` | 모델·MCP 레지스트리·에이전트 설정(프롬프트·도구 on/off) | 저장 시 에이전트 캐시 무효화 |
-| `web/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan.md §6) |
+| `web/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan-v2.md §6) |
 | `web/routers/graph.py` `accounts.py` `pages.py` | 그래프 데이터·출처 증거 / 계정 승인·권한 / 페이지 서빙 | HTML no-store |
 | `web/routers/admin_events.py` `core/events.py` | 활동 로그 조회(kind/level·검색·페이지) / log()·purge_old() | log()은 예외를 삼킴 — 로깅이 앱을 못 죽임 |
 | `web/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) + **슬라이딩 세션**(수명 절반 지난 쿠키 자동 재발급 — 사용 중 만료 없음) + 로그인 성공/실패 감사 로그(kind=auth) | 로그인 UI = login.html — integration.md |
