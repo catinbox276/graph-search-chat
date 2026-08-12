@@ -94,7 +94,7 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 | `core/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
 | `core/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
 | `agent/agent.py` | DeepAgents 조립: suggest_paths + search_docs/read_doc + search_{소스} + MCP/REST 도구 | 새 문제 → suggest_paths 먼저 (시스템 프롬프트) |
-| `graph/graph_pipeline.py` | 세그먼트 분할→게이트(행동 신호)→fits·grounded 판정→추출→병합→재발 소급 취소 | dedup 3단: ≥0.92+문자 가드 / ≥0.70 LLM 선택 / 신규 |
+| `graph/graph_pipeline/` (schema·llm·gate·merge·weights·run) | 세그먼트 분할→게이트(행동 신호)→fits·grounded 판정→추출→병합→재발 소급 취소 | dedup 3단: ≥0.92+문자 가드 / ≥0.70 LLM 선택 / 신규 |
 | `graph/doc_pipeline.py` | 도메인 지정 소스 문서를 LLM 판정(fits)→같은 그래프에 병합, 미달 excluded | 판정 동시(연속 파이프라인)·병합 직렬. 생각 끄기로 ~15,000건/h |
 | `graph/graph_maintenance.py` | 형제 통합·잎 흡수·시간 감쇠 — 멱등 | |
 | `ingestion/` | 코퍼스 빌드·적재·청킹(executemany)·임베딩 백필(64건×동시4)·원천 증분 적재·토큰화 | |
