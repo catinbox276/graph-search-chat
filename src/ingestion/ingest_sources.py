@@ -78,15 +78,17 @@ def ingest_source(cur, src) -> int:
 
     n, max_ts, batch = 0, None, []
     off = 2 if tsc else 1
+    # body는 CLOB — 같은 바인드(:b)를 UPDATE·INSERT 두 곳에 쓰면 본문이 길 때
+    # ORA-22284(duplicate long binds). 서로 다른 이름(:b_u/:b_i)으로 분리한다.
     merge = """MERGE INTO corpus_docs c
                USING (SELECT :sn AS sn, :sid AS sid FROM dual) x
                ON (c.source_name = x.sn AND c.src_id = x.sid)
-               WHEN MATCHED THEN UPDATE SET title = :t, body = :b, kind = :k,
+               WHEN MATCHED THEN UPDATE SET title = :t, body = :b_u, kind = :k,
                     url = :u, src_ts = :ts, embedding = NULL,
                     updated_at = SYSTIMESTAMP  -- 본문 변경 → 재청킹·재임베딩 신호
                WHEN NOT MATCHED THEN INSERT
                     (source_name, src_id, title, body, kind, url, src_ts, updated_at)
-               VALUES (:sn, :sid, :t, :b, :k, :u, :ts, SYSTIMESTAMP)"""
+               VALUES (:sn, :sid, :t, :b_i, :k, :u, :ts, SYSTIMESTAMP)"""
 
     def flush():
         nonlocal batch
@@ -102,7 +104,7 @@ def ingest_source(cur, src) -> int:
         if not body.strip():
             continue  # 본문 없는 행은 검색 문서가 못 됨
         batch.append({"sn": src["source_name"], "sid": rid[:200], "t": title[:1000],
-                      "b": body, "k": src["content_kind"] or None,
+                      "b_u": body, "b_i": body, "k": src["content_kind"] or None,
                       "u": url[:1000] or None, "ts": rts})
         if rts and (max_ts is None or rts > max_ts):
             max_ts = rts
