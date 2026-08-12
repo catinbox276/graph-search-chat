@@ -370,8 +370,9 @@ _structuring = set()  # 지금 실행 중인 구조화 소스 (중복 실행 가
 def admin_source_structure(sname: str, request: Request):
     """관리자: 지금 구조화 — 야간 03:40 배치를 안 기다리고 미처리 문서를 즉시 판정·그래프 반영.
 
-    LLM 판정이라 오래 걸려 백그라운드 스레드로 돌린다. 진행은 처리 현황(5초 폴링)에서
-    보인다. 도메인 지정 소스만 대상 — 검색 전용은 거부."""
+    즉시 버튼은 미처리가 0이 될 때까지 끝까지 처리(drain) — '또 클릭'이 필요 없게.
+    (야간 배치만 회당 실행당 건수 상한.) LLM 판정이라 오래 걸려 백그라운드 스레드로
+    돌린다. 진행은 처리 현황(5초 폴링)에서 실시간으로 보인다. 도메인 지정 소스만 대상."""
     check_admin(request)
     import threading
     from graph import doc_pipeline
@@ -384,7 +385,7 @@ def admin_source_structure(sname: str, request: Request):
         import time
         t0 = time.time()
         try:
-            r = doc_pipeline.run_for_source(sname)
+            r = doc_pipeline.run_for_source(sname, drain=True)  # 끝까지 처리
             events.log("batch", source="doc-structure-now", level="info", status="ok",
                        actor=sname, duration_ms=int((time.time() - t0) * 1000),
                        summary=f"지금 구조화 [{sname}]: {r}")
@@ -400,8 +401,8 @@ def admin_source_structure(sname: str, request: Request):
     _structuring.add(sname)
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True,
-            "note": "구조화를 시작했습니다 — 처리 현황(5초 갱신)에서 반영/제외가 늘어나는 걸 확인하세요. "
-                    "한 번에 설정값(전처리 설정의 실행당 건수)만큼 처리합니다."}
+            "note": "구조화를 시작했습니다 — 미처리가 0이 될 때까지 끝까지 처리합니다(다시 클릭 불필요). "
+                    "진행은 아래 처리 현황(5초 갱신)에서 실시간으로 올라갑니다."}
 
 
 def _reset_source(cur, sname: str):

@@ -285,9 +285,13 @@ def _structure_one(cur, con, source_name, domain, hint, budget,
     return len(docs)
 
 
-def run_for_source(source_name: str, limit: int = 0) -> dict:
+def run_for_source(source_name: str, limit: int = 0, drain: bool = False) -> dict:
     """소스 1개를 즉시 구조화 (관리 UI '지금 구조화'). 자체 커넥션으로 동작 —
-    HTTP 요청은 이걸 백그라운드 스레드로 돌리고, 진행은 처리 현황이 폴링한다."""
+    HTTP 요청은 이걸 백그라운드 스레드로 돌리고, 진행은 처리 현황이 폴링한다.
+
+    drain=True면 미처리가 0이 될 때까지 limit건씩 반복 (즉시 버튼은 '끝까지'가 기대 —
+    야간 배치 main()만 회당 limit 상한 유지). 커밋은 _structure_one 안에서 건별로 돼
+    중간에 죽어도 진행분은 남는다."""
     con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD,
                            dsn=config.ORACLE_DSN)
     cur = con.cursor()
@@ -312,10 +316,15 @@ def run_for_source(source_name: str, limit: int = 0) -> dict:
         con.close()
         return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
     stats = {"done": 0, "excluded": 0, "error": 0}
-    n = _structure_one(cur, con, row[0], row[1], row[2], limit,
-                       conc, body_chars, pack_tokens, no_think, model, stats)
+    total = 0
+    while True:
+        n = _structure_one(cur, con, row[0], row[1], row[2], limit,
+                           conc, body_chars, pack_tokens, no_think, model, stats)
+        total += n
+        if not drain or n == 0:  # drain: 미처리가 바닥날 때까지 반복
+            break
     con.close()
-    return {"processed": n, **stats}
+    return {"processed": total, **stats}
 
 
 if __name__ == "__main__":
