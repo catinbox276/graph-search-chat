@@ -313,7 +313,10 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
             if vec is not None and nemb:
                 # thick 모드는 같은 실행에서 방금 INSERT한 노드의 BLOB을 LOB 아닌
                 # bytes로 돌려줄 수 있다 — 로케이터/bytes 둘 다 수용 (json.loads는 bytes OK).
-                sim = cosine(vec, json.loads(nemb.read() if hasattr(nemb, "read") else nemb))
+                cand = json.loads(nemb.read() if hasattr(nemb, "read") else nemb)
+                if len(cand) != len(vec):
+                    continue  # 임베딩 모델 교체로 차원 다른 옛 벡터 → 비교 불가(잘못된 병합 방지)
+                sim = cosine(vec, cand)
                 if sim >= SIM_THRESHOLD:
                     cands.append((sim, nid, nname))
         if node_id is None and cands:

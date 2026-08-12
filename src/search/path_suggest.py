@@ -56,6 +56,9 @@ def suggest_paths(problem: str) -> str:
                 continue
             v = np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
                            dtype=np.float32)
+            if v.shape[0] != q.shape[0]:
+                continue  # 임베딩 모델 교체로 차원이 다른 옛 벡터 → 비교 불가, 건너뜀
+                          # (nodes.embedding 재백필 전까지 그 노드는 경로 제안에서 제외)
             sim = float(v @ q / np.linalg.norm(v))
             if sim >= SIM_ENTRY:
                 goals.append((sim, gid, name))

@@ -88,6 +88,8 @@ def pass1_sibling_merge(cur):
             for nid2, name2, _, vec2, cnt2 in sibs:
                 if nid2 == nid or nid2 in dead or vec2 is None or cnt2 < cnt:
                     continue
+                if vec.shape[0] != vec2.shape[0]:
+                    continue  # 임베딩 모델 교체로 차원 다른 벡터 → 비교 불가(잘못된 병합 방지)
                 sim = cosine(vec.tolist(), vec2.tolist())
                 if sim >= SIM_THRESHOLD and (best is None or sim > best[0]):
                     best = (sim, nid2, name2)
