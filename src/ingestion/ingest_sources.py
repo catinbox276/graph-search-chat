@@ -70,6 +70,10 @@ def ingest_source(cur, src) -> int:
         binds["w"] = datetime.fromisoformat(w) if isinstance(w, str) else w
     if tsc:
         sql += f" ORDER BY {tsc}"
+    if "w" in binds:
+        # 기본 바인딩은 datetime을 DATE(초 정밀)로 잘라 같은 초의 행을 매번 재스캔한다 —
+        # TIMESTAMP로 바인딩해 마이크로초까지 비교. (아래 워터마크 저장도 동일)
+        cur.setinputsizes(w=oracledb.DB_TYPE_TIMESTAMP)
     cur.execute(sql, binds)
 
     n, max_ts, batch = 0, None, []
@@ -106,6 +110,7 @@ def ingest_source(cur, src) -> int:
         if len(batch) >= BATCH:
             flush()
     flush()
+    cur.setinputsizes(w=oracledb.DB_TYPE_TIMESTAMP)  # 마이크로초 보존 저장 (위 주석 참조)
     cur.execute("""UPDATE source_registry
                    SET last_ingest_ts = NVL(:w, SYSTIMESTAMP)
                    WHERE source_name = :n""",
