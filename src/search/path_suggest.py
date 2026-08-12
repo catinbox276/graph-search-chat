@@ -41,34 +41,60 @@ def suggest_paths(problem: str) -> str:
     Args:
         problem: 사용자의 문제/목표를 한 문장으로
     """
-    cli, emb_name = model_registry.embedding_client()
-    q = np.asarray(
-        cli.embeddings.create(model=emb_name, input=problem).data[0].embedding,
-        dtype=np.float32)
-    q /= np.linalg.norm(q)
+    # 진입 매칭 = 하이브리드(렉시컬 키워드 + 시맨틱 임베딩, RRF 융합).
+    # 임베딩 실패(엔드포인트 다운 등) 시 렉시컬 단독으로 폴백 — 그래프 진입이 아예
+    # 막히지 않게 (문서 검색과 대칭). 정확한 용어는 렉시컬이, 다른 표현은 임베딩이 잡음.
+    from search import ko_tokenize
+    q_toks = {t for t in ko_tokenize.tokenize_for_search(problem).split() if t}
+    q = None
+    try:
+        cli, emb_name = model_registry.embedding_client()
+        qv = np.asarray(cli.embeddings.create(model=emb_name, input=problem).data[0].embedding,
+                        dtype=np.float32)
+        nrm = float(np.linalg.norm(qv))
+        q = qv / nrm if nrm else None
+    except Exception as e:
+        print(f"[suggest_paths embed 실패→렉시컬 단독] {type(e).__name__}: {str(e)[:120]}",
+              flush=True)
     with _pool.acquire() as con:
         cur = con.cursor()
         _ensure_table(cur)
         cur.execute("SELECT id, name, embedding FROM nodes WHERE layer = 2")
-        goals = []
+        info, sem_hits, lex_hits = {}, [], []   # gid→(name,sem,lex), 랭킹용 (score,gid)
         for gid, name, emb in cur.fetchall():
-            if emb is None:
-                continue
-            v = np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
-                           dtype=np.float32)
-            if v.shape[0] != q.shape[0]:
-                continue  # 임베딩 모델 교체로 차원이 다른 옛 벡터 → 비교 불가, 건너뜀
-                          # (nodes.embedding 재백필 전까지 그 노드는 경로 제안에서 제외)
-            sim = float(v @ q / np.linalg.norm(v))
-            if sim >= SIM_ENTRY:
-                goals.append((sim, gid, name))
-        if not goals:
+            name_toks = {t for t in ko_tokenize.tokenize_for_search(name).split() if t}
+            lex = len(q_toks & name_toks)       # 키워드 겹침(렉시컬)
+            sem = 0.0                           # 임베딩 코사인(시맨틱)
+            if q is not None and emb is not None:
+                v = np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
+                               dtype=np.float32)
+                if v.shape[0] == q.shape[0]:    # 모델 교체로 차원 다른 옛 벡터는 건너뜀
+                    vn = float(np.linalg.norm(v))
+                    if vn:
+                        sem = float(v @ q / vn)
+            if sem >= SIM_ENTRY:
+                sem_hits.append((sem, gid))
+            if lex > 0:
+                lex_hits.append((lex, gid))
+            if sem >= SIM_ENTRY or lex > 0:     # 둘 중 하나라도 걸리면 진입 후보
+                info[gid] = (name, sem, lex)
+        if not info:
             return ("이 문제와 유사한 과거 해결 이력이 그래프에 없습니다. "
                     "새로운 유형의 문제이니 자유롭게 접근하세요 (해결하면 그래프에 새 경로로 축적됩니다).")
-        goals.sort(reverse=True)
+        # RRF 융합 — 시맨틱 순위 + 렉시컬 순위를 합침(점수 스케일 무관)
+        rrf = {}
+        for r, (_, gid) in enumerate(sorted(sem_hits, reverse=True)):
+            rrf[gid] = rrf.get(gid, 0.0) + 1.0 / (config.RRF_K + r + 1)
+        for r, (_, gid) in enumerate(sorted(lex_hits, reverse=True)):
+            rrf[gid] = rrf.get(gid, 0.0) + 1.0 / (config.RRF_K + r + 1)
+        goals = sorted(rrf, key=rrf.get, reverse=True)   # gid 리스트(RRF 내림차순)
         out = ["📚 과거 조직의 유사 문제 해결 이력:"]
-        for sim, gid, gname in goals[:3]:
-            out.append(f"\n[유사 목표] {gname} (유사도 {sim:.2f})")
+        for gid in goals[:3]:
+            gname, sem, lex = info[gid]
+            tag = (f"의미 {sem:.2f} + 키워드 {lex}개" if sem >= SIM_ENTRY and lex
+                   else f"의미 유사 {sem:.2f}" if sem >= SIM_ENTRY
+                   else f"키워드 {lex}개 일치")
+            out.append(f"\n[유사 목표] {gname} ({tag})")
             # 성공/실패는 불리언 플래그가 아니라 세션 판정 카운트로 (poc-results 이슈2 해법)
             cur.execute("""
                 SELECT n.id, n.name, e.raw_count, n.fail_reason,
@@ -124,7 +150,8 @@ def suggest_paths(problem: str) -> str:
         # (피드백 루프 퇴행 완화 — docs/references 2026-08-10 조사, DeepMind 2019 처방).
         # 몰래 섞지 않고 탐색임을 명시하는 게 신뢰 조건.
         if len(goals) > 3:
-            _, xgid, xgname = goals[3]
+            xgid = goals[3]
+            xgname = info[xgid][0]
             cur.execute("""SELECT n.id, n.name, e.raw_count FROM edges e
                            JOIN nodes n ON n.id = e.dst
                            WHERE e.src = :1 AND n.layer = 3
