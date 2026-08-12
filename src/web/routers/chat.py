@@ -1,4 +1,8 @@
-"""채팅 — SSE 스트리밍·세션 기록·화제 분기 확인·문서 뷰·모델 목록."""
+"""채팅 — SSE 스트리밍·세션 기록·화제 분기 확인·문서 뷰·모델 목록.
+
+읽기 규약: DB는 `with db_cursor() as cur:` — CLOB은 블록 안(커넥션 생존 중)에서 읽는다.
+스트림 루프의 도구 이벤트 처리는 _on_tool_call/_on_tool_result 헬퍼 소관.
+"""
 import json
 import re
 import time
@@ -9,18 +13,22 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from web import auth
-from web.deps import db, get_agent, log_turn, sse
-from core import config, model_registry
+from web.deps import db_cursor, get_agent, log_turn, sse
+from core import config, events, model_registry
 from core.session_ctx import current_session
 
 router = APIRouter()
+
+
+def _lob(v) -> str:
+    """CLOB 로케이터/str/None 공용 읽기 — 커넥션이 살아 있을 때 호출할 것."""
+    return v.read() if hasattr(v, "read") else (v or "")
 
 
 class ChatIn(BaseModel):
     session_id: str | None = None
     message: str
     model: str | None = None  # 사용자가 선택한 LLM (미지정 시 레지스트리 기본값)
-
 
 
 class TopicCheckIn(BaseModel):
@@ -35,17 +43,14 @@ def topic_check(inp: TopicCheckIn, request: Request):
     shifted=true면 UI가 "새 대화로 시작할까요?" 확인 바를 띄운다. 판정 실패는
     조용히 false — 확인 바는 보조 장치라 검색·답변을 막으면 안 된다 (fail-open)."""
     u = auth.require_user(request)
-    con = db()
-    cur = con.cursor()
-    cur.execute("""SELECT question FROM sessions
-                   WHERE id = :sid
-                     AND ((:u IS NULL AND user_id IS NULL) OR user_id = :u)
-                   ORDER BY turn DESC FETCH FIRST 1 ROWS ONLY""",
-                {"sid": inp.session_id, "u": u.get("user")})
-    row = cur.fetchone()
-    # CLOB은 커넥션이 살아 있을 때 읽어야 한다 (닫은 뒤 .read()는 오류)
-    prev = (row[0].read() if hasattr(row[0], "read") else (row[0] or "")) if row else ""
-    con.close()
+    with db_cursor() as cur:
+        cur.execute("""SELECT question FROM sessions
+                       WHERE id = :sid
+                         AND ((:u IS NULL AND user_id IS NULL) OR user_id = :u)
+                       ORDER BY turn DESC FETCH FIRST 1 ROWS ONLY""",
+                    {"sid": inp.session_id, "u": u.get("user")})
+        row = cur.fetchone()
+        prev = _lob(row[0]) if row else ""
     if not row:
         return {"shifted": False}
     try:
@@ -60,7 +65,6 @@ def topic_check(inp: TopicCheckIn, request: Request):
         return {"shifted": sim < config.SEG_SPLIT_SIM, "sim": round(sim, 3)}
     except Exception:
         return {"shifted": False}
-
 
 
 def prettify_result(result: str) -> str:
@@ -91,30 +95,27 @@ def _source_items(refs: dict) -> list:
     order = sorted(refs, key=lambda p: refs[p] != "열람")[:8]
     items = []
     try:
-        con = db()
-        cur = con.cursor()
-        for pid in order:
-            src, sep, sid_ = pid.partition(":")
-            if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
-                continue
-            cur.execute("""SELECT d.title,
-                                  CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
-                           FROM corpus_docs d
-                           JOIN source_registry r ON r.source_name = d.source_name
-                           WHERE d.source_name = :1 AND d.src_id = :2""", [src, sid_])
-            row = cur.fetchone()
-            if row:
-                # 원천 테이블 값이라 신뢰 불가 — http(s) 외 스킴은 링크로 내보내지 않음 (XSS)
-                url = (row[1] or "").strip()
-                if not url.lower().startswith(("http://", "https://")):
-                    url = ""
-                items.append({"id": pid, "title": row[0], "url": url,
-                              "kind": refs[pid]})
-        con.close()
+        with db_cursor() as cur:
+            for pid in order:
+                src, sep, sid_ = pid.partition(":")
+                if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
+                    continue
+                cur.execute("""SELECT d.title,
+                                      CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
+                               FROM corpus_docs d
+                               JOIN source_registry r ON r.source_name = d.source_name
+                               WHERE d.source_name = :1 AND d.src_id = :2""", [src, sid_])
+                row = cur.fetchone()
+                if row:
+                    # 원천 테이블 값이라 신뢰 불가 — http(s) 외 스킴은 링크로 내보내지 않음 (XSS)
+                    url = (row[1] or "").strip()
+                    if not url.lower().startswith(("http://", "https://")):
+                        url = ""
+                    items.append({"id": pid, "title": row[0], "url": url,
+                                  "kind": refs[pid]})
     except Exception:
         pass  # footer는 부가 정보 — 실패해도 답변을 막지 않는다
     return items
-
 
 
 @router.get("/doc/{pid}")
@@ -122,12 +123,10 @@ def doc_view(pid: str, request: Request):
     """참고 문서 사내 뷰 — 에이전트가 실제로 읽은 corpus 본문을 그대로 보여준다.
     원문 URL로 바로 보내지 않고 근거를 먼저 확인할 수 있게 (footer·각주 클릭)."""
     auth.require_user(request)
-    con = db()
-    cur = con.cursor()
-    try:
-        src, sep, sid_ = pid.partition(":")
-        if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
-            raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
+    src, sep, sid_ = pid.partition(":")
+    if not sep:  # 문서 id는 '소스명:원천id' 단일 형식
+        raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
+    with db_cursor() as cur:
         cur.execute("""SELECT d.title, d.body, d.kind,
                               CASE WHEN NVL(r.url_enabled, 'Y') = 'Y' THEN d.url END
                        FROM corpus_docs d
@@ -136,29 +135,51 @@ def doc_view(pid: str, request: Request):
         row = cur.fetchone()
         if row is None:
             raise HTTPException(404, f"문서를 찾을 수 없습니다: {pid}")
-        source, kind = src, row[2] or ""
-        body = row[1].read() if hasattr(row[1], "read") else (row[1] or "")
-        url = (row[3] or "").strip()
-        if not url.lower().startswith(("http://", "https://")):  # XSS — http(s)만
-            url = ""
-        return {"id": pid, "title": row[0], "body": body[:20000],
-                "kind": kind, "source": source, "url": url}
-    finally:
-        con.close()
-
+        body = _lob(row[1])
+    url = (row[3] or "").strip()
+    if not url.lower().startswith(("http://", "https://")):  # XSS — http(s)만
+        url = ""
+    return {"id": pid, "title": row[0], "body": body[:20000],
+            "kind": row[2] or "", "source": src, "url": url}
 
 
 def _check_session_owner(sid: str | None, uid: str | None):
     """이어하기 세션의 소유 검사 — 남의 session_id로 기억·기록에 올라타는 것(IDOR) 차단."""
     if not sid:
         return
-    con = db()
-    cur = con.cursor()
-    cur.execute("SELECT user_id FROM sessions WHERE id = :1 AND turn = 1", [sid])
-    row = cur.fetchone()
-    con.close()
+    with db_cursor() as cur:
+        cur.execute("SELECT user_id FROM sessions WHERE id = :1 AND turn = 1", [sid])
+        row = cur.fetchone()
     if row and row[0] != uid:
         raise HTTPException(403, "본인 세션만 이어할 수 있습니다")
+
+
+def _on_tool_call(c: dict, uid, sid, calls: list, refs: dict) -> dict:
+    """도구 호출 이벤트 — 궤적 기록·참고 문서 추적·활동 로그 후 SSE 페이로드 반환."""
+    calls.append({"name": c["name"], "args": c["args"]})
+    if c["name"] in ("read_doc", "read_blog_post") and c["args"].get("post_id"):
+        refs[str(c["args"]["post_id"])] = "열람"
+    args_json = json.dumps(c["args"], ensure_ascii=False)
+    events.log("tool", source=c["name"], actor=uid, ref=sid,
+               status="call", summary=args_json[:300], detail=args_json)
+    return {"type": "tool", "name": c["name"], "args": c["args"]}
+
+
+def _on_tool_result(m, uid, sid, refs: dict) -> dict:
+    """도구 결과 이벤트 — 결과에서 문서 id 수집·활동 로그 후 SSE 페이로드 반환."""
+    result = m.content if isinstance(m.content, str) \
+        else json.dumps(m.content, ensure_ascii=False)
+    tname = getattr(m, "name", "") or ""
+    if tname.startswith("search_"):  # search_docs·search_{소스명} 공통
+        for pid in re.findall(r"(?m)^\[([^\]\n]+)\]", result):
+            refs.setdefault(pid, "검색")
+    elif tname == "suggest_paths":  # 경로 제안의 근거 문서
+        for pid in re.findall(r"\[([^\[\]\s]+:[^\[\]\s]+)\]", result):
+            refs.setdefault(pid, "경로 근거")
+    events.log("tool", source=tname, actor=uid, ref=sid,
+               status="result", summary=result[:300], detail=result)
+    return {"type": "tool_end", "name": tname,
+            "result": prettify_result(result)[:3000]}
 
 
 @router.post("/chat/stream")
@@ -175,11 +196,11 @@ async def chat_stream(inp: ChatIn, request: Request):
         yield sse({"type": "session", "session_id": sid})
         calls, answer, t0 = [], "", time.time()
         refs = {}  # 이 턴의 참고 문서: pid -> '열람'|'검색' (footer용, 도구 기록 기반)
-        config = {"configurable": {"thread_id": sid}}
+        lg_cfg = {"configurable": {"thread_id": sid}}
         try:
             async for mode, chunk in agent.astream(
                 {"messages": [{"role": "user", "content": inp.message}]},
-                config, stream_mode=["updates", "messages"],
+                lg_cfg, stream_mode=["updates", "messages"],
             ):
                 if mode == "messages":
                     # LLM 생성 중 토큰을 실시간 전송 (이게 체감 스트리밍의 핵심)
@@ -199,33 +220,9 @@ async def chat_stream(inp: ChatIn, request: Request):
                         msgs = [msgs]
                     for m in msgs:
                         for c in getattr(m, "tool_calls", None) or []:
-                            calls.append({"name": c["name"], "args": c["args"]})
-                            if c["name"] in ("read_doc", "read_blog_post") and c["args"].get("post_id"):
-                                refs[str(c["args"]["post_id"])] = "열람"
-                            from core import events
-                            args_json = json.dumps(c["args"], ensure_ascii=False)
-                            events.log("tool", source=c["name"], actor=uid, ref=sid,
-                                       status="call", summary=args_json[:300],
-                                       detail=args_json)
-                            yield sse({"type": "tool", "name": c["name"],
-                                       "args": c["args"]})
+                            yield sse(_on_tool_call(c, uid, sid, calls, refs))
                         if getattr(m, "type", "") == "tool":
-                            result = m.content if isinstance(m.content, str) \
-                                else json.dumps(m.content, ensure_ascii=False)
-                            tname = getattr(m, "name", "") or ""
-                            if tname.startswith("search_"):  # search_docs·search_{소스명} 공통
-                                for pid in re.findall(r"(?m)^\[([^\]\n]+)\]", result):
-                                    refs.setdefault(pid, "검색")
-                            elif tname == "suggest_paths":  # 경로 제안의 근거 문서
-                                for pid in re.findall(r"\[([^\[\]\s]+:[^\[\]\s]+)\]", result):
-                                    refs.setdefault(pid, "경로 근거")
-                            from core import events
-                            events.log("tool", source=tname, actor=uid, ref=sid,
-                                       status="result", summary=result[:300],
-                                       detail=result)
-                            yield sse({"type": "tool_end",
-                                       "name": getattr(m, "name", "") or "",
-                                       "result": prettify_result(result)[:3000]})
+                            yield sse(_on_tool_result(m, uid, sid, refs))
                         if getattr(m, "type", "") == "ai" and m.content \
                                 and not getattr(m, "tool_calls", None):
                             answer = m.content if isinstance(m.content, str) \
@@ -267,27 +264,24 @@ async def chat(inp: ChatIn, request: Request):
             "elapsed_sec": round(time.time() - t0, 1)}
 
 
-
 @router.get("/sessions")
 def list_sessions(request: Request):
     """내 대화 목록 — 사용자별 독립 (다른 사람 세션은 안 보임)."""
     u = auth.require_user(request)
     uid = (u or {}).get("user")
-    con = db()
-    cur = con.cursor()
-    cur.execute("""
-        SELECT s1.id, s1.question, x.turns, x.last_ts
-        FROM sessions s1
-        JOIN (SELECT id, COUNT(*) AS turns, MAX(ts) AS last_ts FROM sessions
-              WHERE (:u IS NULL AND user_id IS NULL) OR user_id = :u
-              GROUP BY id) x ON x.id = s1.id
-        WHERE s1.turn = 1
-        ORDER BY x.last_ts DESC
-        FETCH FIRST 30 ROWS ONLY""", {"u": uid})
-    out = [{"id": r[0], "title": (r[1].read() if r[1] is not None else "")[:80],
-            "turns": r[2], "last_ts": r[3].isoformat() if r[3] else None}
-           for r in cur.fetchall()]
-    con.close()
+    with db_cursor() as cur:
+        cur.execute("""
+            SELECT s1.id, s1.question, x.turns, x.last_ts
+            FROM sessions s1
+            JOIN (SELECT id, COUNT(*) AS turns, MAX(ts) AS last_ts FROM sessions
+                  WHERE (:u IS NULL AND user_id IS NULL) OR user_id = :u
+                  GROUP BY id) x ON x.id = s1.id
+            WHERE s1.turn = 1
+            ORDER BY x.last_ts DESC
+            FETCH FIRST 30 ROWS ONLY""", {"u": uid})
+        out = [{"id": r[0], "title": _lob(r[1])[:80], "turns": r[2],
+                "last_ts": r[3].isoformat() if r[3] else None}
+               for r in cur.fetchall()]
     return {"sessions": out}
 
 
@@ -297,14 +291,11 @@ def get_session(sid: str, request: Request):
     Oracle 체크포인터가 기억을 이어준다)."""
     u = auth.require_user(request)
     uid = (u or {}).get("user")
-    con = db()
-    cur = con.cursor()
-    cur.execute("""SELECT turn, question, answer, user_id, tool_calls FROM sessions
-                   WHERE id = :1 ORDER BY turn""", [sid])
-    rows = [(t, q.read() if q else "", a.read() if a else "", owner,
-             c.read() if c else "")
-            for t, q, a, owner, c in cur.fetchall()]
-    con.close()
+    with db_cursor() as cur:
+        cur.execute("""SELECT turn, question, answer, user_id, tool_calls FROM sessions
+                       WHERE id = :1 ORDER BY turn""", [sid])
+        rows = [(t, _lob(q), _lob(a), owner, _lob(c))
+                for t, q, a, owner, c in cur.fetchall()]
     if not rows:
         raise HTTPException(404, "세션이 없습니다")
     if rows[0][3] != uid:
@@ -320,11 +311,9 @@ def get_session(sid: str, request: Request):
                        "tool_calls": calls(c)} for t, q, a, _, c in rows]}
 
 
-
 @router.get("/models")
 def models():
     """사용자용: 선택 가능한 LLM 목록 + 현재 임베딩(정보만)."""
     llms = [m for m in model_registry.list_models("llm") if m["enabled"]]
     return {"llm": llms,
             "embedding_in_use": model_registry.embedding_endpoint()[1]}
-
