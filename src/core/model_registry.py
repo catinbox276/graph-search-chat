@@ -26,8 +26,34 @@ def _classify(name: str) -> str:
     return "llm"
 
 
+def _set_default_prefer_verified(s, kind: str, verified: set):
+    """종류별 기본 모델 자동 지정 — 동작 테스트 통과(verified) 모델을 우선.
+    현재 기본값이 verified면 유지, 아니면(없거나 죽은/미검증) verified 첫 모델로,
+    verified가 없으면 이름순 첫 모델로. sync가 각 종류에 대해 호출."""
+    cur = s.query(ModelRegistry).filter_by(kind=kind, is_default="Y").first()
+    if cur is not None:
+        if verified and cur.name not in verified:   # 현재 기본이 미검증 → 검증된 것으로 교체
+            pick = (s.query(ModelRegistry)
+                    .filter(ModelRegistry.kind == kind, ModelRegistry.name.in_(verified))
+                    .order_by(ModelRegistry.name).first())
+            if pick:
+                cur.is_default = "N"
+                pick.is_default = "Y"
+        return  # 그 외에는 현재 기본값 유지
+    pick = None
+    if verified:
+        pick = (s.query(ModelRegistry)
+                .filter(ModelRegistry.kind == kind, ModelRegistry.name.in_(verified))
+                .order_by(ModelRegistry.name).first())
+    if pick is None:
+        pick = (s.query(ModelRegistry).filter_by(kind=kind)
+                .order_by(ModelRegistry.name).first())
+    if pick:
+        pick.is_default = "Y"
+
+
 def _ensure_default(s, kind: str):
-    """그 종류에 기본값이 없으면 이름순 첫 모델을 기본값으로."""
+    """그 종류에 기본값이 없으면 이름순 첫 모델을 기본값으로 (수동 등록 경로용)."""
     has = s.query(ModelRegistry).filter_by(kind=kind, is_default="Y").first()
     if not has:
         first = (s.query(ModelRegistry).filter_by(kind=kind)
@@ -139,7 +165,10 @@ def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
                             "why": why, "status": status})
         s.flush()
         for kind in ("llm", "embedding", "reranker"):
-            _ensure_default(s, kind)
+            # 이번 동기화에서 '응답 정상'으로 확인된 모델 = 동작 검증됨(이름 폴백·접근불가 제외)
+            verified = {r["name"] for r in results
+                        if r["kind"] == kind and "정상" in (r["why"] or "")}
+            _set_default_prefer_verified(s, kind, verified)
     registered = [f"{r['kind']}:{r['name']}" for r in results if r["status"] == "신규"]
     return {"registered": registered, "total": total, "hosts": hosts,
             "models": results, "errors": errors}
