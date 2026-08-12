@@ -36,31 +36,52 @@ def _ensure_default(s, kind: str):
             first.is_default = "Y"
 
 
+def _payload_ok(r, key: str) -> bool:
+    """진짜 응답인지 — 사내 게이트웨이는 에러도 HTTP 200으로 주고 본문에 {"error":...}를
+    담으므로, 상태코드가 아니라 '에러 아님 + 기대 페이로드(key) 존재'로 판정."""
+    if r.status_code != 200:
+        return False
+    try:
+        j = r.json()
+    except Exception:
+        return False
+    return not j.get("error") and bool(j.get(key))
+
+
 def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
-    """모델 능력을 실제 호출로 판정 — (kind, 근거). 이름 휴리스틱보다 정확:
-    /embeddings 성공→embedding, /chat/completions 성공→llm, 이름 rerank→reranker,
-    둘 다 실패 시 이름 휴리스틱 폴백."""
+    """모델 능력을 실제 호출로 판정 — (kind, 근거). 상태코드가 아니라 응답 본문으로.
+    순서 중요: 임베딩 모델은 /rerank에도 답하므로(스코어) embeddings를 먼저 본다 —
+    embeddings 진짜 응답=embedding, 아니면서 rerank 진짜 응답=reranker, chat=llm.
+    셋 다 아니면(접근 불가·미지원) 이름 휴리스틱 폴백."""
     base = base_url.rstrip("/")
     hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
-    if "rerank" in name.lower():
-        return "reranker", "이름 기준(rerank)"
+    # 1) 임베딩 (임베딩 모델은 여기 진짜 벡터로 응답 — 리랭커는 error 본문)
     try:
         r = httpx.post(f"{base}/embeddings", headers=hdr, timeout=timeout,
                        json={"model": name, "input": "ping"})
-        if r.status_code == 200 and (r.json().get("data")):
+        if _payload_ok(r, "data"):
             return "embedding", "임베딩 응답 정상"
     except Exception:
         pass
+    # 2) 리랭커 (임베딩이 아닌데 /rerank가 진짜 results면 리랭커)
+    try:
+        r = httpx.post(f"{base}/rerank", headers=hdr, timeout=timeout,
+                       json={"model": name, "query": "test", "documents": ["a", "b"]})
+        if _payload_ok(r, "results"):
+            return "reranker", "리랭크 응답 정상"
+    except Exception:
+        pass
+    # 3) 채팅(생성)
     try:
         r = httpx.post(f"{base}/chat/completions", headers=hdr, timeout=timeout,
                        json={"model": name,
                              "messages": [{"role": "user", "content": "ping"}],
                              "max_tokens": 1})
-        if r.status_code == 200:
+        if _payload_ok(r, "choices"):
             return "llm", "채팅 응답 정상"
     except Exception:
         pass
-    return _classify(name), "응답 없음(접근 불가 가능성) — 이름 휴리스틱 폴백"
+    return _classify(name), "동작 판정 불가(미지원·접근 불가) — 이름 휴리스틱 폴백"
 
 
 def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
