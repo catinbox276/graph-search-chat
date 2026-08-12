@@ -72,7 +72,8 @@ def _load_rows(cur):
                    WHERE text_tokenized IS NOT NULL""", m=emb_name)
     for pid, no, tok, blob in cur:
         tok = tok.read() if hasattr(tok, "read") else (tok or "")
-        vec = np.frombuffer(blob.read(), dtype=np.float32) if blob is not None else None
+        raw = (blob.read() if hasattr(blob, "read") else blob) if blob is not None else None
+        vec = np.frombuffer(raw, dtype=np.float32) if raw else None
         yield pid, no, tok, vec
 
 
