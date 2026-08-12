@@ -1,6 +1,6 @@
 """모델 레지스트리 — model_registry 테이블 (ORM).
 
-- 등록: LM Studio /v1/models 동기화 (이름 휴리스틱으로 llm/embedding/reranker 분류)
+- 등록: 설정된 서빙 호스트들의 /v1/models 동기화 (능력 테스트로 llm/embedding/reranker 분류)
 - LLM 기본값: 사용자가 UI에서 세션별 선택 (레지스트리의 default는 초기값)
 - embedding/reranker 기본값: 관리자 API로만 변경 (임베딩 교체 = 전체 재백필 필요)
 - 테이블 생성은 db.init_schema(). DB 미기동 시 get_default/embedding_endpoint는
@@ -10,8 +10,6 @@ import httpx
 
 from core import config, db
 from core.models import ModelRegistry
-
-MODEL_URL = config.CHAT_URL  # sync는 LLM 호스트의 /v1/models만 조회
 
 
 def _classify(name: str) -> str:
@@ -33,20 +31,72 @@ def _ensure_default(s, kind: str):
             first.is_default = "Y"
 
 
-def sync_from_serving() -> dict:
-    """모델 서빙(/v1/models)에서 목록을 받아 레지스트리에 등록(업서트)."""
-    models = httpx.get(f"{MODEL_URL}/models", timeout=10).json()["data"]
-    added = []
+def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
+    """모델 능력을 실제 호출로 판정 — (kind, 근거). 이름 휴리스틱보다 정확:
+    /embeddings 성공→embedding, /chat/completions 성공→llm, 이름 rerank→reranker,
+    둘 다 실패 시 이름 휴리스틱 폴백."""
+    base = base_url.rstrip("/")
+    hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
+    if "rerank" in name.lower():
+        return "reranker", "이름 기준(rerank)"
+    try:
+        r = httpx.post(f"{base}/embeddings", headers=hdr, timeout=timeout,
+                       json={"model": name, "input": "ping"})
+        if r.status_code == 200 and (r.json().get("data")):
+            return "embedding", "임베딩 응답 정상"
+    except Exception:
+        pass
+    try:
+        r = httpx.post(f"{base}/chat/completions", headers=hdr, timeout=timeout,
+                       json={"model": name,
+                             "messages": [{"role": "user", "content": "ping"}],
+                             "max_tokens": 1})
+        if r.status_code == 200:
+            return "llm", "채팅 응답 정상"
+    except Exception:
+        pass
+    return _classify(name), "테스트 불가 — 이름 휴리스틱"
+
+
+def sync_from_serving(base_url: str = "") -> dict:
+    """모델 서빙 목록 동기화(업서트). base_url 지정 시 그 호스트만, 없으면 설정된
+    채팅·임베딩·리랭커 호스트 전부 조회(중복 제거). 각 모델은 능력 테스트로 종류를
+    판정하고 base_url과 함께 등록 — 사내 다중 호스트 vLLM 지원(단일 서빙도 그대로 동작)."""
+    hosts = ([base_url.rstrip("/")] if base_url.strip()
+             else list(dict.fromkeys(
+                 u.rstrip("/") for u in
+                 (config.CHAT_URL, config.EMBED_URL, config.RERANK_URL) if u)))
+    hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
+    results, errors, total = [], [], 0
     with db.session() as s:
-        for m in models:
-            kind = _classify(m["id"])
-            if not s.get(ModelRegistry, (kind, m["id"])):
-                s.add(ModelRegistry(kind=kind, name=m["id"]))
-                added.append(f"{kind}:{m['id']}")
+        for host in hosts:
+            try:
+                data = httpx.get(f"{host}/models", headers=hdr,
+                                 timeout=10).json().get("data") or []
+            except Exception as e:
+                errors.append(f"{host} — {type(e).__name__}: {str(e)[:100]}")
+                continue
+            total += len(data)
+            for m in data:
+                name = m.get("id")
+                if not name:
+                    continue
+                kind, why = _probe_kind(host, name)
+                row = s.get(ModelRegistry, (kind, name))
+                if row:
+                    row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
+                    status = "갱신"
+                else:
+                    s.add(ModelRegistry(kind=kind, name=name, base_url=host))
+                    status = "신규"
+                results.append({"kind": kind, "name": name, "base_url": host,
+                                "why": why, "status": status})
         s.flush()
         for kind in ("llm", "embedding", "reranker"):
             _ensure_default(s, kind)
-    return {"registered": added, "total": len(models)}
+    registered = [f"{r['kind']}:{r['name']}" for r in results if r["status"] == "신규"]
+    return {"registered": registered, "total": total, "hosts": hosts,
+            "models": results, "errors": errors}
 
 
 def list_models(kind: str | None = None) -> list:

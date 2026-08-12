@@ -193,8 +193,8 @@
     <input id="mname" placeholder="served-model-name (호스트 /v1/models 값 그대로)" required style="flex:1;min-width:220px">
     <input id="murl" placeholder="base_url (예: http://vllm-embed:8000/v1 — 빈값=역할별 .env)" style="flex:1;min-width:260px">
     <button id="madd">등록/수정</button>
-    <button type="button" class="ghost" id="msync" title="채팅 호스트 /v1/models에서 목록 동기화 (LM Studio 단일 서빙용)">서빙 동기화</button>
-    <span class="hint" id="mmsg" style="margin:0"></span>
+    <button type="button" class="ghost" id="msync" title="설정된 서빙 호스트들(또는 위 base_url 칸에 주소를 넣으면 그 호스트)의 /v1/models를 읽어, 각 모델을 능력 테스트(임베딩/채팅 호출)로 종류 판정해 base_url과 함께 등록">서빙 동기화</button>
+    <span class="hint" id="mmsg" style="margin:0;white-space:pre-line;flex-basis:100%"></span>
   </form>
   <p class="hint">역할별 사용처 — <b>채팅 LLM</b>: llm 기본값(사용자가 채팅에서 바꿀 수 있음) ·
      <b>전처리 LLM</b>: 아래 전처리 설정의 '전처리 모델' · <b>임베딩</b>: embedding 기본값
@@ -719,10 +719,18 @@ $("mform").onsubmit = async (e) => {
   loadModels(); loadAgentSettings();
 };
 $("msync").onclick = async () => {
-  mmsg("⏳ 동기화 중…");
-  const r = await fetch("/admin/models/sync", {method: "POST"});
+  const url = $("murl").value.trim();
+  mmsg(url ? `⏳ ${url} 동기화·종류 테스트 중…` : "⏳ 설정된 호스트 전부 동기화·종류 테스트 중…");
+  const r = await fetch("/admin/models/sync", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({base_url: url})});
   const j = await r.json().catch(() => ({}));
-  mmsg(r.ok ? `✓ 동기화 — 신규 ${j.registered?.length ?? 0}건` : `실패 (${r.status})`);
+  if (!r.ok) { mmsg(`실패 (${r.status}) — ${j.detail || ""}`); return; }
+  const det = (j.models || []).map(m => `${m.kind}:${m.name}(${m.status}·${m.why})`).join(" / ");
+  let msg = `✓ 동기화 — 신규 ${j.registered?.length ?? 0} / 전체 ${j.total ?? 0}건`;
+  if (det) msg += `\n${det}`;
+  if (j.errors?.length) msg += `\n⚠ ${j.errors.join("; ")}`;
+  mmsg(msg);
   loadModels();
 };
 
