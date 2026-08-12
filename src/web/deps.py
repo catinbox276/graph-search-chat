@@ -4,6 +4,7 @@
 DB를 만지는 로직은 core/·search/·ingestion/ 모듈로 — 라우터는 HTTP 입출력·권한 검사·호출만.
 """
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import oracledb
@@ -25,8 +26,21 @@ def db():
     return _db_pool.acquire()
 
 
+@contextmanager
+def db_cursor():
+    """라우터용 커서 — 정상 종료 시 commit, 예외 시 commit 없이 반납(자동 롤백).
+    수동 con/cursor/close 보일러플레이트와 에러 경로의 커넥션 누수를 없앤다."""
+    con = _db_pool.acquire()
+    try:
+        yield con.cursor()
+        con.commit()
+    finally:
+        con.close()
+
+
 def check_admin(request: Request):
-    """관리자 = env 계정 또는 is_admin 부여 계정."""
+    """관리자 = env 계정 또는 is_admin 부여 계정.
+    라우터 전체 강제는 APIRouter(dependencies=[Depends(check_admin)]) 한 줄로."""
     if not auth.is_admin(request):
         raise HTTPException(403, "관리자 권한이 필요합니다")
 

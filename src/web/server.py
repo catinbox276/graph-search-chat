@@ -16,6 +16,7 @@ import traceback
 
 import oracledb
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from web import auth, deps
@@ -127,6 +128,14 @@ async def activity_log(request: Request, call_next):
                    duration_ms=int((time.time() - t0) * 1000),
                    summary=f"{request.method} {p}", detail=(detail or None))
     return resp
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """Pydantic 검증 실패 → 사람이 읽는 detail 문자열로 (UI가 detail을 그대로 표시)."""
+    msgs = "; ".join(e.get("msg", "").removeprefix("Value error, ")
+                     for e in exc.errors()) or "요청 형식이 올바르지 않습니다"
+    return JSONResponse({"detail": msgs}, status_code=422)
 
 
 @app.exception_handler(Exception)
