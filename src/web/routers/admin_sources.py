@@ -324,6 +324,45 @@ def admin_source_ingest(sname: str, request: Request):
                     "임베딩(검색 시맨틱)·그래프 구조화는 배치나 CLI로."}
 
 
+@router.post("/admin/sources/{sname}/reingest")
+def admin_source_reingest(sname: str, request: Request):
+    """관리자: 전량 재적재 — 이 소스의 corpus_docs·chunks를 지우고 워터마크를 리셋해
+    원천 테이블에서 처음부터 다시 적재 + 청킹.
+
+    지금 적재는 워터마크 이후 신규분만 — 이미 적재분은 안 다시 넣는다. 재적재는
+    원천 스키마·필드 매핑을 바꿨거나 코퍼스를 깨끗이 다시 만들 때. 그래프 구조화된
+    소스면 문서 유래 기여를 먼저 회수해 이중 카운트를 막는다(대화 세션 기여는 불변)."""
+    check_admin(request)
+    from ingestion import source_registry, ingest_sources, chunk_corpus
+    con = db()
+    cur = con.cursor()
+    source_registry.ensure(cur)
+    source_registry.ensure_corpus(cur)
+    src = next((s for s in source_registry.list_sources(cur)
+                if s["source_name"] == sname), None)
+    if not src:
+        con.close()
+        raise HTTPException(404, f"소스가 없습니다: {sname}")
+    if not source_registry.table_allowed(src["table_name"]):
+        con.close()
+        raise HTTPException(403, f"허용되지 않은 테이블: {src['table_name']}")
+    try:
+        _, retracted = _reset_source(cur, sname)  # 그래프 기여 회수 (검색 전용이면 0)
+        cur.execute("DELETE FROM corpus_chunks WHERE source_name = :1", [sname])
+        cur.execute("DELETE FROM corpus_docs WHERE source_name = :1", [sname])
+        cur.execute("""UPDATE source_registry SET last_ingest_ts = NULL
+                       WHERE source_name = :1""", [sname])
+        src["last_ingest_ts"] = None
+        n = ingest_sources.ingest_source(cur, src)
+        con.commit()
+    finally:
+        con.close()
+    chunk_corpus.main()
+    return {"ok": True, "ingested": n, "evidence_retracted": retracted,
+            "note": f"전량 재적재 {n}건 + 청킹 완료 (기여 회수 {retracted}건). "
+                    "임베딩·그래프 구조화는 배치나 CLI로."}
+
+
 def _reset_source(cur, sname: str):
     """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1
