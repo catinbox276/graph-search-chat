@@ -308,6 +308,11 @@ def admin_source_ingest(sname: str, request: Request):
     if not source_registry.table_allowed(src["table_name"]):
         con.close()
         raise HTTPException(403, f"허용되지 않은 테이블: {src['table_name']}")
+    if not source_registry.table_columns(cur, src["table_name"]):
+        con.close()
+        raise HTTPException(400,
+            f"원천 테이블 '{src['table_name']}'이 이 DB에 없습니다 — 테이블명을 확인하세요. "
+            "(시드 blog_posts는 이관 전용이라 원천 테이블이 없어 적재 대상이 아닙니다)")
     try:
         if src["source_name"] == "blog_posts" and not src["last_ingest_ts"]:
             n = ingest_sources.migrate_blog_posts(cur, src)
@@ -346,6 +351,11 @@ def admin_source_reingest(sname: str, request: Request):
     if not source_registry.table_allowed(src["table_name"]):
         con.close()
         raise HTTPException(403, f"허용되지 않은 테이블: {src['table_name']}")
+    if not source_registry.table_columns(cur, src["table_name"]):
+        con.close()
+        raise HTTPException(400,
+            f"원천 테이블 '{src['table_name']}'이 이 DB에 없습니다 — 테이블명을 확인하세요. "
+            "(시드 blog_posts는 이관 전용이라 원천 테이블이 없어 적재 대상이 아닙니다)")
     try:
         _, retracted = _reset_source(cur, sname)  # 그래프 기여 회수 (검색 전용이면 0)
         cur.execute("DELETE FROM corpus_chunks WHERE source_name = :1", [sname])
