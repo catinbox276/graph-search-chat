@@ -93,6 +93,9 @@ def ingest_source(cur, src) -> int:
     def flush():
         nonlocal batch
         if batch:
+            # body를 CLOB로 명시 바인딩 — 32KB 초과 본문을 VARCHAR로 바인딩하다 나는
+            # ORA-03146(invalid buffer length) 방지. (:b_u/:b_i 분리는 ORA-22284 방지)
+            cur.setinputsizes(b_u=oracledb.DB_TYPE_CLOB, b_i=oracledb.DB_TYPE_CLOB)
             cur.executemany(merge, batch)
             batch = []
 
