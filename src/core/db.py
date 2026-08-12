@@ -78,6 +78,13 @@ def _seed_sources(con):
     if n:
         return
     for name, tbl, idc, tsc, fmap, kind in SEED_SOURCES:
+        # 원천 테이블이 없는 시드는 건너뛴다 — 사내 신규 환경엔 PoC용 BLOG_POSTS가
+        # 없어, 시드하면 적재 시 ORA-00942만 유발한다.
+        exists = con.execute(text(
+            "SELECT COUNT(*) FROM user_tables WHERE table_name = :t"),
+            {"t": tbl.upper()}).scalar()
+        if not exists:
+            continue
         con.execute(text("""INSERT INTO source_registry
             (source_name, table_name, id_column, ts_column, field_map, content_kind)
             VALUES (:n, :t, :i, :ts, :f, :k)"""),
