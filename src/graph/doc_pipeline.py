@@ -109,24 +109,28 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
     prompt = PACK_PROMPT.format(
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
         docs="\n\n".join(blocks))
-    by_id = {}
+    by_id, pack_usage = {}, (0, 0)
     try:
         resp = llm.chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 1600))
+        pack_usage = _usage_of(resp)   # 묶음 1요청 전체 토큰
         m = re.search(r"\[.*\]", resp.choices[0].message.content, re.S)
         for item in (json.loads(m.group()) if m else []):
             if isinstance(item, dict) and item.get("id") is not None:
                 by_id[str(item["id"])] = item
     except Exception:
         pass  # 아래 단건 폴백이 받는다
-    out = []
+    out, usage_attached = [], False
     for d in pack:
         j = by_id.get(str(d[0]))
-        if j is None:  # 묶음 응답 누락 → 단건 재판정
+        if j is None:  # 묶음 응답 누락 → 단건 재판정(자체 _usage 있음)
             j = judge_doc(domain, hint, d[2], d[1], d[3],
                           model=model, body_chars=body_chars, no_think=no_think)
+        elif not usage_attached:  # 묶음 총 토큰을 첫 문서에 한 번만 귀속(합계 정확)
+            j = {**j, "_usage": pack_usage}
+            usage_attached = True
         out.append((d, j))
     return out
 
@@ -144,9 +148,19 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 400))
         m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
-        return _loads_lenient(m.group()) if m else {}
+        d = _loads_lenient(m.group()) if m else {}
+        d["_usage"] = _usage_of(resp)   # (입력토큰, 출력토큰) — 처리량 가시화
+        return d
     except Exception as e:  # 판정 1건 실패가 배치를 죽이지 않게
         return {"_error": str(e)[:300]}
+
+
+def _usage_of(resp) -> tuple:
+    """응답의 토큰 사용량 (prompt, completion) — 없으면 (0,0)."""
+    u = getattr(resp, "usage", None)
+    if not u:
+        return (0, 0)
+    return (getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
 
 
 def _loads_lenient(s: str) -> dict:
@@ -284,8 +298,12 @@ def _structure_one(cur, con, source_name, domain, hint, budget,
                             [status, (note or "")[:1000] or None, source_name, src_id])
                 con.commit()
                 stats[status] += 1
+                pt, ct = (j or {}).get("_usage", (0, 0))   # 입력·출력 토큰
+                stats["in_tok"] = stats.get("in_tok", 0) + pt
+                stats["out_tok"] = stats.get("out_tok", 0) + ct
                 mark = {"done": "+", "excluded": "-", "error": "!"}[status]
-                print(f"  {mark} {src_id}: {status}"
+                tok = f" [in {pt} / out {ct} tok]" if pt or ct else ""
+                print(f"  {mark} {src_id}: {status}{tok}"
                       f"{' — ' + note if status != 'done' and note else ''}", flush=True)
     ex.shutdown()
     return len(docs)
