@@ -12,12 +12,17 @@ from core import config, db
 from core.models import ModelRegistry
 
 
+# 임베딩 계열 이름 힌트 — "embed" 없이도 흔한 임베딩 모델(bge-m3, gte, e5 등).
+# 이름 휴리스틱의 한계라 완벽하진 않다 — 확실히 하려면 sync의 능력 테스트(test=True).
+_EMBED_HINTS = ("embed", "bge", "gte", "e5", "nomic", "jina", "mxbai", "minilm", "stella")
+
+
 def _classify(name: str) -> str:
     n = name.lower()
-    if "embed" in n:
-        return "embedding"
-    if "rerank" in n:
+    if "rerank" in n:                       # bge-reranker처럼 embed 힌트와 겹치므로 먼저
         return "reranker"
+    if any(k in n for k in _EMBED_HINTS):
+        return "embedding"
     return "llm"
 
 
@@ -95,6 +100,12 @@ def sync_from_serving(base_url: str = "", test: bool = False) -> dict:
     results = []
     with db.session() as s:
         for host, name, kind, why in classified:
+            # 같은 이름의 다른 종류 잔재 제거 — 재분류(예: llm→embedding) 시 양쪽에
+            # 남는 중복 방지. 서빙 모델명은 하나의 참 종류를 가진다는 전제.
+            stale = s.query(ModelRegistry).filter(
+                ModelRegistry.name == name, ModelRegistry.kind != kind).all()
+            for old in stale:
+                s.delete(old)
             row = s.get(ModelRegistry, (kind, name))
             if row:
                 row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
