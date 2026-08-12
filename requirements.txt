@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 itsdangerous
-python-dotenv
+pydantic-settings  # 중앙 설정 (core/config.py) — .env 로드·타입 캐스팅·검증
 oracledb
 sqlalchemy>=2.0.41   # ORM (Oracle 18c/19c — 23ai VECTOR는 2.0.41+ 네이티브)
 numpy
