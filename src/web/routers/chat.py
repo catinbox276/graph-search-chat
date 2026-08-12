@@ -203,8 +203,10 @@ async def chat_stream(inp: ChatIn, request: Request):
                             if c["name"] in ("read_doc", "read_blog_post") and c["args"].get("post_id"):
                                 refs[str(c["args"]["post_id"])] = "열람"
                             from core import events
+                            args_json = json.dumps(c["args"], ensure_ascii=False)
                             events.log("tool", source=c["name"], actor=uid, ref=sid,
-                                       summary=json.dumps(c["args"], ensure_ascii=False)[:300])
+                                       status="call", summary=args_json[:300],
+                                       detail=args_json)
                             yield sse({"type": "tool", "name": c["name"],
                                        "args": c["args"]})
                         if getattr(m, "type", "") == "tool":
@@ -217,6 +219,10 @@ async def chat_stream(inp: ChatIn, request: Request):
                             elif tname == "suggest_paths":  # 경로 제안의 근거 문서
                                 for pid in re.findall(r"\[([^\[\]\s]+:[^\[\]\s]+)\]", result):
                                     refs.setdefault(pid, "경로 근거")
+                            from core import events
+                            events.log("tool", source=tname, actor=uid, ref=sid,
+                                       status="result", summary=result[:300],
+                                       detail=result)
                             yield sse({"type": "tool_end",
                                        "name": getattr(m, "name", "") or "",
                                        "result": prettify_result(result)[:3000]})

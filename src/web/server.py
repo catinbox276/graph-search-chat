@@ -53,7 +53,6 @@ _BODY_SKIP = ("/auth", "/login", "/register", "/password", "/token", "/oauth", "
 # http.request를 반복 반환하면 "Unexpected message received: http.request"로 터진다.
 # (nginx는 요청버퍼링으로 가려졌으나 traefik(버퍼링 없음)에서 표면화 — 프록시 무관 근본수정)
 _STREAM_SKIP = ("/chat/stream",)
-_BODY_MAX = 2000  # 본문은 이 길이까지만 (로그 비대·민감정보 노출 제한)
 # 이 이름의 JSON 키는 값을 가린다 — 진짜 비밀값만 (message/content 등 사용자 데이터는 유지)
 _SECRET_KEY = _re.compile(
     r"(?i)(pass|pw|secret|token|api[_-]?key|authorization|bearer|pin|otp|ssn|"
@@ -61,8 +60,8 @@ _SECRET_KEY = _re.compile(
 
 
 def _redact(text: str) -> str:
-    """요청 본문에서 비밀 키의 값만 [REDACTED]로. JSON 아니면 길이만 잘라 반환.
-    절대 예외를 던지지 않는다(로깅이 앱을 못 죽이게)."""
+    """요청 본문에서 비밀 키의 값만 [REDACTED]로 — 절단 없이 전문 저장(2026-08-12 정책).
+    detail은 CLOB이라 길이 제한 불필요. 절대 예외를 던지지 않는다(로깅이 앱을 못 죽이게)."""
     try:
         def walk(v):
             if isinstance(v, dict):
@@ -71,9 +70,9 @@ def _redact(text: str) -> str:
             if isinstance(v, list):
                 return [walk(x) for x in v]
             return v
-        return _json.dumps(walk(_json.loads(text)), ensure_ascii=False)[:_BODY_MAX]
+        return _json.dumps(walk(_json.loads(text)), ensure_ascii=False)
     except Exception:
-        return text[:_BODY_MAX]
+        return text
 
 
 @app.middleware("http")
@@ -98,16 +97,35 @@ async def activity_log(request: Request, call_next):
         body_text = _redact(raw.decode("utf-8", "replace"))
 
     resp = await call_next(request)
+    auth.refresh_cookie(request, resp)  # 슬라이딩 세션 — 사용 중이면 만료를 밀어냄
     if not any(p.startswith(x) for x in _LOG_SKIP):
+        # 응답 본문도 전문 저장 (2026-08-12 정책) — JSON 응답만, SSE·자격증명 경로·
+        # 활동 로그 조회 자체(로그가 로그를 낳는 자기증폭)는 제외
+        resp_text = ""
+        if (p not in _STREAM_SKIP and not p.startswith("/admin/events")
+                and not any(x in pl for x in _BODY_SKIP)
+                and "application/json" in resp.headers.get("content-type", "")):
+            chunks = [c async for c in resp.body_iterator]
+
+            async def _replay(cs=chunks):
+                for c in cs:
+                    yield c
+            resp.body_iterator = _replay()
+            resp_text = _redact(b"".join(chunks).decode("utf-8", "replace"))
         try:
             actor = (auth.current_user(request) or {}).get("user")
         except Exception:
             actor = None
+        detail = ""
+        if body_text:
+            detail = "▶ 요청\n" + body_text
+        if resp_text:
+            detail += ("\n\n" if detail else "") + "◀ 응답\n" + resp_text
         events.log("request", source=p, actor=actor, status=resp.status_code,
                    level=("error" if resp.status_code >= 500 else
                           "warn" if resp.status_code >= 400 else "info"),
                    duration_ms=int((time.time() - t0) * 1000),
-                   summary=f"{request.method} {p}", detail=(body_text or None))
+                   summary=f"{request.method} {p}", detail=(detail or None))
     return resp
 
 

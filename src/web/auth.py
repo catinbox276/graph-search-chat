@@ -16,7 +16,7 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel
 
-from core import config, db
+from core import config, db, events
 from core.models import AppUser
 
 COOKIE = "gsc_auth"
@@ -67,6 +67,28 @@ def _set_login_cookie(resp, token: str):
                     httponly=True, samesite="lax")
 
 
+def refresh_cookie(request: Request, resp) -> None:
+    """슬라이딩 세션 갱신 — 수명 절반을 넘긴 유효 쿠키는 재발급해 만료를 밀어낸다.
+    계속 사용 중인 사용자는 로그아웃되지 않고, 방치 시에만 MAX_AGE 후 만료.
+    모든 요청 미들웨어(server.py)에서 호출 — 실패는 조용히 무시(다음 요청에 재시도)."""
+    raw = request.cookies.get(COOKIE)
+    if not raw:
+        return
+    # 핸들러가 이미 세션 쿠키를 설정·삭제한 응답(로그인·로그아웃)은 건드리지 않는다
+    # — 로그아웃의 delete_cookie를 갱신이 덮어쓰면 로그아웃이 무효화된다
+    if any(COOKIE + "=" in v for v in resp.headers.getlist("set-cookie")):
+        return
+    try:
+        user, ts = _signer.loads(raw, max_age=config.SESSION_MAX_AGE,
+                                 return_timestamp=True)
+        from datetime import datetime, timezone
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        if age > config.SESSION_MAX_AGE / 2:
+            _set_login_cookie(resp, issue_token(user))
+    except Exception:
+        pass  # 만료·위조 쿠키는 갱신 대상 아님 — 본 요청 처리에 영향 없음
+
+
 def require_user(request: Request) -> dict:
     u = current_user(request)
     if not u:
@@ -100,7 +122,10 @@ def login(inp: CredIn):
     # 1) 관리자 (환경 설정 계정 — DB 조회 없음)
     if secrets.compare_digest(uid, config.ADMIN_ID):
         if not secrets.compare_digest(pw, config.ADMIN_PASSWORD):
+            events.log("auth", source="/auth/login", actor=uid, level="warn",
+                       summary="로그인 실패 (비밀번호 불일치)")
             raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다")
+        events.log("auth", source="/auth/login", actor=uid, summary="로그인 성공 (관리자)")
         token = issue_token({"user": uid, "admin": True})
         resp = JSONResponse({"ok": True, "user": uid, "admin": True, "token": token})
         _set_login_cookie(resp, token)
@@ -110,10 +135,16 @@ def login(inp: CredIn):
         u = s.get(AppUser, uid)
         row = (u.pw_hash, u.approved, u.is_admin or "N") if u else None
     if not row or not _verify_pw(pw, row[0]):
+        events.log("auth", source="/auth/login", actor=uid, level="warn",
+                   summary="로그인 실패 (아이디 또는 비밀번호 불일치)")
         raise HTTPException(401, "아이디 또는 비밀번호가 올바르지 않습니다")
     if row[1] != "Y":
+        events.log("auth", source="/auth/login", actor=uid, level="warn",
+                   summary="로그인 거부 (가입 승인 대기)")
         raise HTTPException(403, "가입 승인 대기 중입니다 — 관리자에게 승인을 요청하세요")
     admin = row[2] == "Y"  # 관리자가 부여한 권한 (재로그인 시 반영)
+    events.log("auth", source="/auth/login", actor=uid,
+               summary=f"로그인 성공{' (관리자 권한)' if admin else ''}")
     token = issue_token({"user": uid, "admin": admin})
     resp = JSONResponse({"ok": True, "user": uid, "admin": admin, "token": token})
     _set_login_cookie(resp, token)

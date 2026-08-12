@@ -47,6 +47,13 @@
   <span id="who" style="display:none;font-size:12px;color:#8892a6;align-items:center;gap:8px"></span>
 </header>
 <script>
+// 세션 만료(401) 공통 처리 — 모든 fetch에서 401이면 로그인 페이지로 안내 (재로그인 후 복귀)
+(f => window.fetch = async (...a) => {
+  const r = await f(...a);
+  if (r.status === 401)
+    location.href = "/login?next=" + encodeURIComponent(location.pathname) + "&expired=1";
+  return r;
+})(window.fetch);
 // 로그인 사용자 표시
 fetch("/me").then(r => r.json()).then(m => {
   if (!m.user) return;

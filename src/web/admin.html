@@ -269,6 +269,13 @@
 </main>
 
 <script>
+// 세션 만료(401) 공통 처리 — 모든 fetch에서 401이면 로그인 페이지로 안내 (재로그인 후 복귀)
+(f => window.fetch = async (...a) => {
+  const r = await f(...a);
+  if (r.status === 401)
+    location.href = "/login?next=" + encodeURIComponent(location.pathname) + "&expired=1";
+  return r;
+})(window.fetch);
 const $ = (id) => document.getElementById(id);
 const derr = $("derr"), serr = $("serr");
 const dmsg = (t, ok) => { derr.textContent = t; derr.classList.toggle("ok", !!ok); };

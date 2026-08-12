@@ -55,6 +55,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const next = new URLSearchParams(location.search).get("next") || "/";
+if (new URLSearchParams(location.search).get("expired"))
+  $("lmsg").textContent = "세션이 만료되어 로그아웃되었습니다 — 다시 로그인해주세요";
 $("showSignup").onclick = () => { $("loginCard").style.display = "none"; $("signupCard").style.display = "block"; $("sid").focus(); };
 $("showLogin").onclick = () => { $("signupCard").style.display = "none"; $("loginCard").style.display = "block"; $("lid").focus(); };
 
