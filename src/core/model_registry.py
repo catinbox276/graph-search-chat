@@ -55,7 +55,7 @@ def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
             return "llm", "채팅 응답 정상"
     except Exception:
         pass
-    return _classify(name), "테스트 불가 — 이름 휴리스틱"
+    return _classify(name), "응답 없음(접근 불가 가능성) — 이름 휴리스틱 폴백"
 
 
 def sync_from_serving(base_url: str = "", test: bool = False) -> dict:
@@ -70,31 +70,40 @@ def sync_from_serving(base_url: str = "", test: bool = False) -> dict:
                  u.rstrip("/") for u in
                  (config.CHAT_URL, config.EMBED_URL, config.RERANK_URL) if u)))
     hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
-    results, errors, total = [], [], 0
-    with db.session() as s:
-        for host in hosts:
-            try:
-                data = httpx.get(f"{host}/models", headers=hdr,
-                                 timeout=10).json().get("data") or []
-            except Exception as e:
-                errors.append(f"{host} — {type(e).__name__}: {str(e)[:100]}")
+    errors, total = [], 0
+
+    # 1) 목록 조회 + 종류 판정을 DB 세션 밖에서 먼저 (능력 테스트가 느려도 트랜잭션을
+    #    오래 안 잡음 — 님이 지적한 'for문이 처리 못하고 롤백'을 구조적으로 방지).
+    classified = []  # (host, name, kind, why)
+    for host in hosts:
+        try:
+            data = httpx.get(f"{host}/models", headers=hdr,
+                             timeout=10).json().get("data") or []
+        except Exception as e:
+            errors.append(f"{host} — {type(e).__name__}: {str(e)[:100]}")
+            continue
+        total += len(data)
+        for m in data:
+            name = m.get("id")
+            if not name:
                 continue
-            total += len(data)
-            for m in data:
-                name = m.get("id")
-                if not name:
-                    continue
-                kind, why = (_probe_kind(host, name) if test
-                             else (_classify(name), "이름 휴리스틱"))
-                row = s.get(ModelRegistry, (kind, name))
-                if row:
-                    row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
-                    status = "갱신"
-                else:
-                    s.add(ModelRegistry(kind=kind, name=name, base_url=host))
-                    status = "신규"
-                results.append({"kind": kind, "name": name, "base_url": host,
-                                "why": why, "status": status})
+            kind, why = (_probe_kind(host, name) if test
+                         else (_classify(name), "이름 휴리스틱"))
+            classified.append((host, name, kind, why))
+
+    # 2) 짧은 트랜잭션으로 등록 (네트워크 없음).
+    results = []
+    with db.session() as s:
+        for host, name, kind, why in classified:
+            row = s.get(ModelRegistry, (kind, name))
+            if row:
+                row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
+                status = "갱신"
+            else:
+                s.add(ModelRegistry(kind=kind, name=name, base_url=host))
+                status = "신규"
+            results.append({"kind": kind, "name": name, "base_url": host,
+                            "why": why, "status": status})
         s.flush()
         for kind in ("llm", "embedding", "reranker"):
             _ensure_default(s, kind)
