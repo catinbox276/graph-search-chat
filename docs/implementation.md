@@ -2,7 +2,7 @@
 
 > 설계 근거는 [design.md](design.md), 실증 수치는 [poc-results.md](poc-results.md).
 > 컴포넌트별 상세 다이어그램: [component-architecture.drawio](component-architecture.drawio) (8페이지 — draw.io에서 열기).
-> 이 문서는 **현재 리포에서 실제로 돌아가는 것**의 지도다. (2026-08-10 기준)
+> 이 문서는 **현재 리포에서 실제로 돌아가는 것**의 지도다. (2026-08-12 기준)
 > **배치 형태: 모델 서빙(로컬 LM Studio / 사내 vLLM)을 제외한 전부가 k8s 파드** — 앱(Deployment), Oracle(StatefulSet), DataHub(helm), 배치(CronJob).
 
 ## 전체 구성
@@ -63,11 +63,11 @@ ORM(`db.session()`), MERGE·대량 배치·PL/SQL·체크포인터는 raw SQL.
 | `sessions` | 대화 증거 계층: 질문·툴호출·답변·게이트 판정(verdict)·user_id | routers/chat (deps.log_turn) / graph_pipeline |
 | `nodes` / `edges` / `node_evidence` | 4계층 지식그래프 + 가중치 + 출처(session/doc 구분) | graph_pipeline / doc_pipeline / path_suggest |
 | `suggestions` | 경로 제안 노출 기록 (채택률 보정 + "이후 N회 제안됨") | path_suggest / contrib |
-| `model_registry` | 모델 등록·기본값·base_url (LLM=사용자 선택, 임베딩·리랭커=관리자) | model_registry.py |
+| `model_registry` | 모델 등록·기본값·base_url (LLM=사용자 선택, 임베딩·리랭커=관리자). 서빙 동기화는 **능력 테스트**(응답 본문 기준 — 게이트웨이가 에러도 200으로 주는 문제 대응)로 종류 판정 + 종류별 기본을 동작 검증된 모델로 자동 지정. 기동 시 등록 모델 프로브, 레지스트리 비면 서빙에서 자동 등록 | model_registry.py |
 | `mcp_registry` | 도구 서버 등록 (transport: streamable_http/sse/stdio/rest) — 등록 = 도구 자동 조립 | mcp_registry.py / agent |
 | `app_settings` | 운영 설정 KV (전처리 건수·동시성·에이전트 프롬프트/도구 등 — 재배포 없이 변경) | settings.py |
 | `app_users` | 자체 계정 (가입·승인·is_admin) — 관리자는 env 계정 1개 별도 | auth.py / routers/accounts |
-| `app_events` | 활동 로그(요청·도구·배치·오류 전부, level=lvl) — 180일 회전 | events.py / routers/admin_events / graph_maintenance(purge) |
+| `app_events` | 활동 로그(요청·도구·배치·오류·로그인 전부, level=lvl) — **요청·응답 본문과 도구 입력(call)/결과(result)를 절단 없이 전문 저장**(비밀 키 `[REDACTED]`), 180일 회전 | events.py / routers/admin_events / graph_maintenance(purge) |
 | `blog_posts` | 구 노하우 코퍼스 — corpus_docs에 '소스 1호'로 흡수됨 | (읽기 원천으로만) |
 | `lg_checkpoints` / `lg_writes` | LangGraph 체크포인터 외부화 (모델 선언 없음 — 체크포인터 소유) | oracle_checkpointer.py |
 
@@ -86,11 +86,11 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 | `web/routers/contrib.py` | 내 기여 조회·문구 수정(단독 기여만)·철회·실패 표식 해제 | 사용자 제어=증폭기 (plan.md §6) |
 | `web/routers/graph.py` `accounts.py` `pages.py` | 그래프 데이터·출처 증거 / 계정 승인·권한 / 페이지 서빙 | HTML no-store |
 | `web/routers/admin_events.py` `core/events.py` | 활동 로그 조회(kind/level·검색·페이지) / log()·purge_old() | log()은 예외를 삼킴 — 로깅이 앱을 못 죽임 |
-| `web/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) | 로그인 UI = login.html — integration.md |
+| `web/auth.py` | 자체 계정: env 관리자 + 가입·승인 + 서명 토큰(쿠키·Bearer) + **슬라이딩 세션**(수명 절반 지난 쿠키 자동 재발급 — 사용 중 만료 없음) + 로그인 성공/실패 감사 로그(kind=auth) | 로그인 UI = login.html — integration.md |
 | `app/index.html` `graph.html` `contrib.html` `admin.html` `login.html` `shell.css` | 채팅(궤적 타임라인·[n] 각주·화제 확인 바)·그래프(증거 패널)·내 기여(트리·분기점 ⑂)·관리 콘솔·로그인 | 색=의미: 파랑 경로·초록 검증·빨강 실패우세 |
 | `core/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
-| `search/corpus_search.py` `inmemory_index.py` | 하이브리드 검색: SQLite `:memory:` FTS5(lexical, Kiwi 형태소) + sqlite-vec(semantic) → best-chunk 집계 → RRF. 인덱스는 기동 시 Oracle에서 빌드(파생물) | Oracle Text 권한 불필요 · 검색당 임베딩 1건 |
-| `search/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
+| `search/corpus_search.py` `inmemory_index.py` | 하이브리드 검색: SQLite `:memory:` FTS5(lexical, Kiwi 형태소) + sqlite-vec(semantic) → best-chunk 집계 → RRF. 인덱스는 기동 시 Oracle에서 빌드(파생물). **2층 목표 노드용 인덱스(gfts+gvec)도 함께 빌드** — 그래프 진입 매칭 공용 | Oracle Text 권한 불필요 · 검색당 임베딩 1건 |
+| `search/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). **진입 매칭 = 인메모리 하이브리드**(목표 노드 렉시컬+시맨틱 RRF — 문서 검색과 동일 인덱스, 임베딩 미서빙 시 렉시컬 폴백). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
 | `core/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
 | `core/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
 | `agent/agent.py` | DeepAgents 조립: suggest_paths + search_docs/read_doc + search_{소스} + MCP/REST 도구 | 새 문제 → suggest_paths 먼저 (시스템 프롬프트) |
@@ -114,6 +114,7 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 - `GET/POST /admin/domains` · `POST /admin/domains/{d}/reset` — 도메인 시드 (삭제 API는 의도적으로 없음)
 - `GET/POST /admin/sources` · `GET /admin/sources/tables[/{t}]` — 소스 등록 + 테이블 브라우저 (SOURCE_TABLE_ALLOWLIST 적용)
 - `POST /admin/sources/{s}/dryrun` · `POST /admin/sources/{s}/reprocess` — 판정 미리보기 / errors·reset
+- `POST /admin/sources/{s}/{ingest,reingest,structure}` — 지금 적재(증분)·전량 재적재(코퍼스+워터마크 리셋)·지금 구조화(백그라운드 drain — 미처리 0건까지, 실행 중 리셋/재적재는 409)
 - `POST /admin/reset-all-docs` — 전역 문서 초기화 (문서 유래 기여만 회수)
 - `GET/POST /admin/pipeline-settings` — 전처리 설정 (app_settings, 재배포 불필요) · `GET /admin/doc-status` — 처리 현황
 - `GET/POST /admin/agent-settings` — 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 캐시 무효화)
@@ -146,7 +147,7 @@ kubectl apply -k deploy/k8s/base          # 앱 Deployment + CronJob 6종 (env�
 3. ~~관리자 인증은 단일 토큰~~ → **자체 계정 인증** (env 관리자 + 가입·승인·is_admin — docs/integration.md. SSO/게이트웨이 모드는 기획 변경으로 폐기)
 4. 리랭커는 레지스트리 슬롯만 존재(검색 파이프라인에 리랭크 단계 미구현)
 5. 야간 CronJob 6종(03:00~03:40, Asia/Seoul)이 미판정 세션·신규 문서를 자동 처리. 로컬은 야간에 모델 서빙이 켜져 있어야 동작
-6. 임베딩 검색은 인메모리 행렬 (기동 시 1.4GB 로드) — 23ai/23.6 전환 시 VECTOR 컬럼(models.py) + VECTOR_DISTANCE로 교체 예정 (schema.md §5.5)
+6. 검색 인덱스는 프로세스 내 SQLite `:memory:`(복제본마다 각자 빌드, 버전 변경 감지 시 재빌드) — 23ai/23.6 전환 시 VECTOR 컬럼(models.py) + VECTOR_DISTANCE로 검색을 DB 안으로 이관 예정 (schema.md §5.5)
 7. 나머지는 poc-results.md "남은 것" 참조 (채택률 보정 고도화, supersession 자동화, 사용자 숙련 가중 등)
 
 ## 배포 모드 전환 (standalone ↔ cluster)
