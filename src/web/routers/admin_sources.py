@@ -391,6 +391,20 @@ def admin_source_structure(sname: str, request: Request):
     if sname in _structuring:
         raise HTTPException(409, "이미 이 소스를 구조화 중입니다 — 처리 현황에서 진행 확인")
 
+    # 미처리 문서가 없으면 "시작했다"고만 하고 100%에 머무는 혼란 방지 — 명확히 안내.
+    con = db(); cur = con.cursor()
+    try:
+        cur.execute("""SELECT COUNT(*) FROM corpus_docs
+                       WHERE source_name = :1 AND graph_status IS NULL""", [sname])
+        pending = cur.fetchone()[0]
+    finally:
+        con.close()
+    if not pending:
+        return {"ok": True, "pending": 0,
+                "note": "미처리 문서가 0건입니다 — 이미 다 구조화됨. 다시 구조화하려면 먼저: "
+                        "역할 매핑을 바꿨으면 [⚠ 전량 재적재], 도메인·지침만 바꿨으면 "
+                        "[⚠ 초기화 재처리]로 문서를 미처리로 되돌린 뒤 [지금 구조화]."}
+
     def _run():
         import time
         t0 = time.time()
