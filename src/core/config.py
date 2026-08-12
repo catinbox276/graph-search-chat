@@ -95,6 +95,8 @@ SESSION_MAX_AGE = _geti("SESSION_MAX_AGE", 28800)  # 로그인 쿠키 수명(초
 
 # --- LLM 호출 ---
 LLM_TEMPERATURE = _getf("LLM_TEMPERATURE", 0.0)
+LLM_TIMEOUT = _getf("LLM_TIMEOUT", 180.0)   # LLM 요청 타임아웃(초) — 한 요청이 멈춰도
+                                            # 파이프라인이 무한 대기하지 않게 (기본 600초 대체)
 
 # --- 원천 테이블 접근 제어 (ingestion/source_registry.py) ---
 # 소스로 등록·조회·적재할 수 있는 원천 테이블 화이트리스트 (쉼표구분, 대소문자 무관).

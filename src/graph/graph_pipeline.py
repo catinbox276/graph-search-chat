@@ -35,7 +35,8 @@ from openai import OpenAI
 
 from core import config
 
-llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY)
+llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY,
+             timeout=config.LLM_TIMEOUT)   # 멈춘 요청이 파이프라인을 무한 대기시키지 않게
 # 임베딩 클라이언트는 model_registry.embedding_client()가 해석 (레지스트리 우선)
 CHAT_MODEL = config.CHAT_MODEL
 SIM_HIGH = config.DEDUP_SIM_HIGH       # 이 이상은 명백히 동일 — LLM 확인 생략하고 병합
