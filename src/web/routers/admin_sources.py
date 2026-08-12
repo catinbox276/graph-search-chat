@@ -363,6 +363,47 @@ def admin_source_reingest(sname: str, request: Request):
                     "임베딩·그래프 구조화는 배치나 CLI로."}
 
 
+_structuring = set()  # 지금 실행 중인 구조화 소스 (중복 실행 가드)
+
+
+@router.post("/admin/sources/{sname}/structure")
+def admin_source_structure(sname: str, request: Request):
+    """관리자: 지금 구조화 — 야간 03:40 배치를 안 기다리고 미처리 문서를 즉시 판정·그래프 반영.
+
+    LLM 판정이라 오래 걸려 백그라운드 스레드로 돌린다. 진행은 처리 현황(5초 폴링)에서
+    보인다. 도메인 지정 소스만 대상 — 검색 전용은 거부."""
+    check_admin(request)
+    import threading
+    from graph import doc_pipeline
+    from core import events
+
+    if sname in _structuring:
+        raise HTTPException(409, "이미 이 소스를 구조화 중입니다 — 처리 현황에서 진행 확인")
+
+    def _run():
+        import time
+        t0 = time.time()
+        try:
+            r = doc_pipeline.run_for_source(sname)
+            events.log("batch", source="doc-structure-now", level="info", status="ok",
+                       actor=sname, duration_ms=int((time.time() - t0) * 1000),
+                       summary=f"지금 구조화 [{sname}]: {r}")
+        except Exception as e:
+            import traceback
+            events.log("batch", source="doc-structure-now", level="error", status="fail",
+                       actor=sname, duration_ms=int((time.time() - t0) * 1000),
+                       summary=f"{type(e).__name__}: {str(e)[:200]}",
+                       detail=traceback.format_exc())
+        finally:
+            _structuring.discard(sname)
+
+    _structuring.add(sname)
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True,
+            "note": "구조화를 시작했습니다 — 처리 현황(5초 갱신)에서 반영/제외가 늘어나는 걸 확인하세요. "
+                    "한 번에 설정값(전처리 설정의 실행당 건수)만큼 처리합니다."}
+
+
 def _reset_source(cur, sname: str):
     """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1

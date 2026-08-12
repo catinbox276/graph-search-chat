@@ -200,81 +200,122 @@ def main():
     for source_name, domain, hint in sources:
         if budget <= 0:
             break
-        cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
-                       FROM corpus_docs
-                       WHERE source_name = :1 AND graph_status IS NULL
-                       ORDER BY src_id
-                       FETCH FIRST :2 ROWS ONLY""", [source_name, budget])
-        # CLOB은 fetch 직후 바로 읽는다 — SQL dbms_lob.substr는 한글에서 VARCHAR2
-        # 4000바이트 한계로 ORA-06502가 나고, 로케이터를 커밋 뒤까지 들고 있지 않기 위해
-        docs = [(r[0], r[1], r[2],
-                 r[3].read() if hasattr(r[3], "read") else (r[3] or ""))
-                for r in cur.fetchall()]
-        if not docs:
-            continue
-        budget -= len(docs)
-        # 묶음 구성: 입력 토큰 예산(문자 ≈ 토큰×2 근사)까지 문서를 묶는다.
-        # 0이면 1건씩. 묶음당 상한 PACK_MAX_DOCS — 출력 길이·판정 품질 보호.
-        if pack_tokens <= 0:
-            packs = [[d] for d in docs]
-        else:
-            budget_chars = pack_tokens * 2
-            packs, pk, chars = [], [], 0
-            for d in docs:
-                dlen = min(len(d[3] or ""), body_chars) + 400  # 제목·스캐폴드 여유
-                if pk and (len(pk) >= PACK_MAX_DOCS or chars + dlen > budget_chars):
-                    packs.append(pk)
-                    pk, chars = [], 0
-                pk.append(d)
-                chars += dlen
-            if pk:
-                packs.append(pk)
-        print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
-              f"(동시 {conc}, 묶음 {len(packs)}개)", flush=True)
-        # 연속 파이프라인: 판정 요청(묶음)을 항상 conc건 서버에 걸어둔다 — 하나
-        # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
-        # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
-        ex = ThreadPoolExecutor(max_workers=conc)
-        it = iter(packs)
-        pending = set()
-        for p in packs[:conc]:
-            next(it)
-            pending.add(ex.submit(judge_pack, domain, hint, p, model, body_chars,
-                                  no_think))
-        while pending:
-            finished, pending = wait(pending, return_when=FIRST_COMPLETED)
-            for fut in finished:
-                np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
-                if np_ is not None:
-                    pending.add(ex.submit(judge_pack, domain, hint, np_,
-                                          model, body_chars, no_think))
-                for (src_id, title, kind, body), j in fut.result():
-                    ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
-                    if not j or j.get("_error"):
-                        status, note = "error", (j.get("_error") if j
-                                                 else "LLM 응답 파싱 실패")
-                    elif j.get("fits") and j.get("goal") and j.get("approach"):
-                        d = get_or_create(cur, 1, domain, None, "doc", ref,
-                                          use_embedding=False)
-                        g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref)
-                        get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref)
-                        status, note = "done", str(j.get("reason") or "")[:1000]
-                    else:
-                        status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
-                    cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
-                                   WHERE source_name = :3 AND src_id = :4""",
-                                [status, (note or "")[:1000] or None, source_name, src_id])
-                    con.commit()
-                    stats[status] += 1
-                    mark = {"done": "+", "excluded": "-", "error": "!"}[status]
-                    print(f"  {mark} {src_id}: {status}"
-                          f"{' — ' + note if status != 'done' and note else ''}", flush=True)
-        ex.shutdown()
+        budget -= _structure_one(cur, con, source_name, domain, hint, budget,
+                                 conc, body_chars, pack_tokens, no_think, model, stats)
 
     cur.execute("""SELECT NVL(graph_status, '미처리'), COUNT(*) FROM corpus_docs
                    GROUP BY graph_status""")
     print(f"\n이번 실행: {stats} / 전체 현황: {dict(cur.fetchall())}")
     con.close()
+
+
+def _structure_one(cur, con, source_name, domain, hint, budget,
+                   conc, body_chars, pack_tokens, no_think, model, stats):
+    """소스 1개의 미처리 문서를 최대 budget건 판정·병합. 처리한 문서 수를 반환.
+    main()(전 소스 루프)과 run_for_source()(즉시 실행) 공용."""
+    cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
+                   FROM corpus_docs
+                   WHERE source_name = :1 AND graph_status IS NULL
+                   ORDER BY src_id
+                   FETCH FIRST :2 ROWS ONLY""", [source_name, budget])
+    # CLOB은 fetch 직후 바로 읽는다 — SQL dbms_lob.substr는 한글에서 VARCHAR2
+    # 4000바이트 한계로 ORA-06502가 나고, 로케이터를 커밋 뒤까지 들고 있지 않기 위해
+    docs = [(r[0], r[1], r[2],
+             r[3].read() if hasattr(r[3], "read") else (r[3] or ""))
+            for r in cur.fetchall()]
+    if not docs:
+        return 0
+    # 묶음 구성: 입력 토큰 예산(문자 ≈ 토큰×2 근사)까지 문서를 묶는다.
+    # 0이면 1건씩. 묶음당 상한 PACK_MAX_DOCS — 출력 길이·판정 품질 보호.
+    if pack_tokens <= 0:
+        packs = [[d] for d in docs]
+    else:
+        budget_chars = pack_tokens * 2
+        packs, pk, chars = [], [], 0
+        for d in docs:
+            dlen = min(len(d[3] or ""), body_chars) + 400  # 제목·스캐폴드 여유
+            if pk and (len(pk) >= PACK_MAX_DOCS or chars + dlen > budget_chars):
+                packs.append(pk)
+                pk, chars = [], 0
+            pk.append(d)
+            chars += dlen
+        if pk:
+            packs.append(pk)
+    print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
+          f"(동시 {conc}, 묶음 {len(packs)}개)", flush=True)
+    # 연속 파이프라인: 판정 요청(묶음)을 항상 conc건 서버에 걸어둔다 — 하나
+    # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
+    # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
+    ex = ThreadPoolExecutor(max_workers=conc)
+    it = iter(packs)
+    pending = set()
+    for p in packs[:conc]:
+        next(it)
+        pending.add(ex.submit(judge_pack, domain, hint, p, model, body_chars,
+                              no_think))
+    while pending:
+        finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for fut in finished:
+            np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
+            if np_ is not None:
+                pending.add(ex.submit(judge_pack, domain, hint, np_,
+                                      model, body_chars, no_think))
+            for (src_id, title, kind, body), j in fut.result():
+                ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
+                if not j or j.get("_error"):
+                    status, note = "error", (j.get("_error") if j
+                                             else "LLM 응답 파싱 실패")
+                elif j.get("fits") and j.get("goal") and j.get("approach"):
+                    d = get_or_create(cur, 1, domain, None, "doc", ref,
+                                      use_embedding=False)
+                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref)
+                    get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref)
+                    status, note = "done", str(j.get("reason") or "")[:1000]
+                else:
+                    status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
+                cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
+                               WHERE source_name = :3 AND src_id = :4""",
+                            [status, (note or "")[:1000] or None, source_name, src_id])
+                con.commit()
+                stats[status] += 1
+                mark = {"done": "+", "excluded": "-", "error": "!"}[status]
+                print(f"  {mark} {src_id}: {status}"
+                      f"{' — ' + note if status != 'done' and note else ''}", flush=True)
+    ex.shutdown()
+    return len(docs)
+
+
+def run_for_source(source_name: str, limit: int = 0) -> dict:
+    """소스 1개를 즉시 구조화 (관리 UI '지금 구조화'). 자체 커넥션으로 동작 —
+    HTTP 요청은 이걸 백그라운드 스레드로 돌리고, 진행은 처리 현황이 폴링한다."""
+    con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD,
+                           dsn=config.ORACLE_DSN)
+    cur = con.cursor()
+    ddl(cur)
+    doc_ddl(cur)
+    st = settings.get_all()
+    con.commit()
+    limit = limit or settings.get_int(st, "doc_extract_limit", config.DOC_EXTRACT_LIMIT)
+    conc = max(1, settings.get_int(st, "doc_concurrency", config.DOC_CONCURRENCY))
+    body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
+    pack_tokens = settings.get_int(st, "doc_pack_tokens", config.DOC_PACK_TOKENS)
+    no_think = bool(settings.get_int(st, "doc_no_think", config.DOC_NO_THINK))
+    model = (st.get("doc_extract_model") or "").strip()
+    # 대화 전용(scope=chat) 도메인은 제외 — main()과 동일 기준
+    cur.execute("""SELECT s.source_name, s.domain, NVL(d.extract_hint, ' ')
+                   FROM source_registry s
+                   JOIN domain_registry d ON d.name = s.domain
+                   WHERE s.source_name = :1 AND s.enabled = 'Y' AND s.domain IS NOT NULL
+                     AND NVL(d.scope, 'both') != 'chat'""", [source_name])
+    row = cur.fetchone()
+    if not row:
+        con.close()
+        return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
+    stats = {"done": 0, "excluded": 0, "error": 0}
+    n = _structure_one(cur, con, row[0], row[1], row[2], limit,
+                       conc, body_chars, pack_tokens, no_think, model, stats)
+    con.close()
+    return {"processed": n, **stats}
 
 
 if __name__ == "__main__":
