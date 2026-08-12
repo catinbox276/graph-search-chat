@@ -149,7 +149,7 @@ RECUR_DAYS = _geti("RECUR_DAYS", 7)                 # 재발 판정 창 (일) �
 # 아래 3개는 기본값 — 운영 중 변경은 app_settings(관리 UI 📚 소스 > 전처리 설정)가 우선
 DOC_EXTRACT_LIMIT = _geti("DOC_EXTRACT_LIMIT", 200)  # 실행당 처리 문서 수 (야간 반복으로 소진)
 DOC_CONCURRENCY = _geti("DOC_CONCURRENCY", 16)       # LLM 판정 동시 요청 수 (vLLM 여유 있으면 UI에서 상향)
-DOC_BODY_CHARS = _geti("DOC_BODY_CHARS", 3000)       # 판정에 넣는 본문 길이(자)
+DOC_BODY_CHARS = _geti("DOC_BODY_CHARS", 3000)       # 판정에 넣는 본문 길이(자, 0=전체)
 DOC_PACK_TOKENS = _geti("DOC_PACK_TOKENS", 0)        # 0=문서 1건씩 / N=입력 N토큰 예산으로 묶음 판정
 DOC_NO_THINK = _geti("DOC_NO_THINK", 1)              # 1=판정 시 추론(생각) 출력 끔 — A/B 실측 7~8배 빠름, 품질 동일
 

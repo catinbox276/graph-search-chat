@@ -86,6 +86,12 @@ def _gen_kwargs(no_think: bool, max_tokens: int) -> dict:
             "max_tokens": max_tokens}
 
 
+def _clip(s: str, n: int) -> str:
+    """본문 자르기 — n<=0이면 전체(제한 없음)."""
+    s = s or ""
+    return s if n <= 0 else s[:n]
+
+
 def judge_pack(domain: str, hint: str, pack: list, model: str = "",
                body_chars: int = 3000, no_think: bool = True) -> list:
     """문서 묶음을 요청 1건으로 판정 — [(doc, verdict)] 반환.
@@ -98,7 +104,7 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
         return [(d, judge_doc(domain, hint, d[2], d[1], d[3],
                               model=model, body_chars=body_chars,
                               no_think=no_think))]
-    blocks = [f"===[{d[0]}]===\n제목: {(d[1] or '').strip()[:300]}\n{(d[3] or '')[:body_chars]}"
+    blocks = [f"===[{d[0]}]===\n제목: {(d[1] or '').strip()[:300]}\n{_clip(d[3], body_chars)}"
               for d in pack]
     prompt = PACK_PROMPT.format(
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
@@ -131,7 +137,7 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
     prompt = DOC_PROMPT.format(
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
         kind=(kind or "").strip(), title=(title or "").strip()[:300],
-        body=(body or "")[:body_chars])
+        body=_clip(body, body_chars))
     try:
         resp = llm.chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
