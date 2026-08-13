@@ -36,10 +36,6 @@ def _ensure_legacy():
         if not has_ck:
             con.execute(text("""ALTER TABLE mcp_registry ADD CONSTRAINT mcp_transport_ck
                                 CHECK (transport IN ('streamable_http', 'sse', 'stdio'))"""))
-        # 구버전 이미지가 시드했던 DataHub stdio 행 자동 정리 (원형 그대로일 때만)
-        con.execute(text("""DELETE FROM mcp_registry
-                            WHERE name = 'datahub' AND transport = 'stdio'
-                            AND NVL(command, ' ') = 'mcp-server-datahub'"""))
         # .env 기본 도구 서버 시드 — 없을 때만 삽입 (관리 페이지 수정·비활성은 보존)
         if config.MCP_DEFAULT_URL:
             tr = config.MCP_DEFAULT_TRANSPORT
