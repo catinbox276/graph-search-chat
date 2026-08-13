@@ -24,7 +24,6 @@ from search.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
 MODEL_NAME = config.CHAT_MODEL
-DATAHUB_GMS = config.DATAHUB_GMS_URL
 
 SYSTEM_PROMPT = """당신은 사내 데이터 분석가를 돕는 어시스턴트다.
 
@@ -72,13 +71,10 @@ def _tool_name(t) -> str:
 
 def _mcp_config(row: dict) -> dict:
     """레지스트리 행 → langchain-mcp-adapters 커넥션 설정."""
-    if row["transport"] == "stdio":
-        cmd = row["command"] or "mcp-server-datahub"
-        env = {"DATAHUB_GMS_URL": DATAHUB_GMS}
-        if config.DATAHUB_GMS_TOKEN:  # GMS 인증 켜진 환경 — 토큰 없으면 401
-            env["DATAHUB_GMS_TOKEN"] = config.DATAHUB_GMS_TOKEN
+    if row["transport"] == "stdio":  # 범용 stdio — command는 등록 행에서
+        cmd = row["command"] or ""
         return {"command": shutil.which(cmd) or str(ROOT.parent / f".venv/bin/{cmd}"),
-                "args": [], "transport": "stdio", "env": env}
+                "args": [], "transport": "stdio"}
     return {"transport": row["transport"], "url": row["url"]}
 
 
