@@ -30,7 +30,7 @@ flowchart LR
         T3["nodes/edges/node_evidence (그래프)"]
         T4["suggestions·레지스트리 4종·app_users·app_settings"]
     end
-    MCP["mcp_registry 등록 도구 서버<br/>(streamable_http/sse/stdio/rest — 사내 DataHub는 rest 어댑터)"]
+    MCP["mcp_registry 등록 도구 서버<br/>(streamable_http/sse/stdio — 사내 DataHub는 GMS 주소로 공식 MCP 직결)"]
     UI & GV & CB & AD --> API
     API --> AG
     AG -->|"함수: corpus_search·path_suggest"| ora
@@ -64,7 +64,7 @@ ORM(`db.session()`), MERGE·대량 배치·PL/SQL·체크포인터는 raw SQL.
 | `nodes` / `edges` / `node_evidence` | 4계층 지식그래프 + 가중치 + 출처(session/doc 구분) | graph_pipeline / doc_pipeline / path_suggest |
 | `suggestions` | 경로 제안 노출 기록 (채택률 보정 + "이후 N회 제안됨") | path_suggest / contrib |
 | `model_registry` | 모델 등록·기본값·base_url (LLM=사용자 선택, 임베딩·리랭커=관리자). 서빙 동기화는 **능력 테스트**(응답 본문 기준 — 게이트웨이가 에러도 200으로 주는 문제 대응)로 종류 판정 + 종류별 기본을 동작 검증된 모델로 자동 지정. 기동 시 등록 모델 프로브, 레지스트리 비면 서빙에서 자동 등록 | model_registry.py |
-| `mcp_registry` | 도구 서버 등록 (transport: streamable_http/sse/stdio/rest) — 등록 = 도구 자동 조립 | mcp_registry.py / agent |
+| `mcp_registry` | 도구 서버 등록 (transport: streamable_http/sse/stdio) — 등록 = 도구 자동 조립 | mcp_registry.py / agent |
 | `app_settings` | 운영 설정 KV (전처리 건수·동시성·에이전트 프롬프트/도구 등 — 재배포 없이 변경) | settings.py |
 | `app_users` | 자체 계정 (가입·승인·is_admin) — 관리자는 env 계정 1개 별도 | auth.py / routers/accounts |
 | `app_events` | 활동 로그(요청·도구·배치·오류·로그인 전부, level=lvl) — **요청·응답 본문과 도구 입력(call)/결과(result)를 절단 없이 전문 저장**(비밀 키 `[REDACTED]`), 180일 회전 | events.py / routers/admin_events / graph_maintenance(purge) |
@@ -91,7 +91,6 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 | `core/models.py` `db.py` | 전 테이블 ORM 선언 / 엔진·세션·init_schema | 23ai 전환 시 VECTOR 컬럼만 여기 추가 |
 | `search/corpus_search.py` `inmemory_index.py` | 하이브리드 검색: SQLite `:memory:` FTS5(lexical, Kiwi 형태소) + sqlite-vec(semantic) → best-chunk 집계 → RRF. 인덱스는 기동 시 Oracle에서 빌드(파생물). **2층 목표 노드용 인덱스(gfts+gvec)도 함께 빌드** — 그래프 진입 매칭 공용 | Oracle Text 권한 불필요 · 검색당 임베딩 1건 |
 | `search/path_suggest.py` | 경로 제안 + 실패 경고 + 탐색 노출(🔍 컷 바깥 1건 라벨 명시). **진입 매칭 = 인메모리 하이브리드**(목표 노드 렉시컬+시맨틱 RRF — 문서 검색과 동일 인덱스, 임베딩 미서빙 시 렉시컬 폴백). 서열: ✅검증 > 📄문서 근거 > ⚠실패 우세 | 성공/실패는 판정 카운트 (불리언 금지) |
-| `core/rest_tools.py` | 사내 REST 도구 서버(GET /tools + POST /call) 어댑터 — MCP와 무손실 1:1 | 오류는 예외 아닌 문자열 (턴 보호) |
 | `core/model_registry.py` `mcp_registry.py` `settings.py` `source_registry.py` | 레지스트리·설정 (ORM CRUD) | 임베딩 기본값 교체 → 자동 재백필 |
 | `agent/agent.py` | DeepAgents 조립: suggest_paths + search_docs/read_doc + search_{소스} + MCP/REST 도구 | 새 문제 → suggest_paths 먼저 (시스템 프롬프트) |
 | `graph/graph_pipeline/` (schema·llm·gate·merge·weights·run) | 세그먼트 분할→게이트(행동 신호)→fits·grounded 판정→추출→병합→재발 소급 취소 | dedup 3단: ≥0.92+문자 가드 / ≥0.70 LLM 선택 / 신규 |
@@ -119,7 +118,7 @@ DB(core/db.py·models.py). 새 엔드포인트는 server.py가 아니라 해당 
 - `GET/POST /admin/pipeline-settings` — 전처리 설정 (app_settings, 재배포 불필요) · `GET /admin/doc-status` — 처리 현황
 - `GET/POST /admin/agent-settings` — 프롬프트 덮어쓰기·MCP on/off·도구별 활성 (저장 시 캐시 무효화)
 - `GET /models` · `GET /admin/models/all` · `POST /admin/models/{add,sync,select}` — 모델 레지스트리
-- `GET/POST /admin/mcp` — 도구 서버 등록 (transport: streamable_http/sse/stdio/**rest**)
+- `GET/POST /admin/mcp` — 도구 서버 등록 (transport: streamable_http/sse/stdio)
 - `GET /admin/events[/{id}]` — 활동 로그 조회 (kind/level 필터·검색·페이지·상세)
 - `GET /stats` · `GET /reload`(임베딩 행렬 갱신)
 

@@ -148,5 +148,5 @@ SESSION_MAX_AGE=28800         # 토큰 수명(초), 기본 8시간
 2. **원천 테이블**: 관리자가 UI에서 테이블·id·시간·필드 역할을 등록(`source_registry`).
    야간 증분 적재가 자동으로 코퍼스·임베딩·검색에 반영. 필요 시 `SOURCE_TABLE_ALLOWLIST`로 제한.
 3. **DataHub 도구 서버**: 관리 페이지(또는 `MCP_DEFAULT_NAME/URL/TRANSPORT` env)에 주소만 등록 —
-   사내 REST 서버(GET /tools + POST /call)는 `transport=rest`.
+   사내 DataHub는 GMS 주소로 공식 MCP 직결 확인(2026-08-13 — 구 REST 어댑터 제거).
 4. 그 외 전부(그래프·세션·레지스트리·체크포인터)는 같은 Oracle에 우리가 생성 — 협의 불필요.

@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # 사내 HTTP MCP를 배포 env만으로 등록할 때 사용. 빈값=시드 없음.
     MCP_DEFAULT_NAME: str = "mcp"
     MCP_DEFAULT_URL: str = ""
-    # streamable_http(표준 MCP) | rest(사내 GET /tools + POST /call) | sse
+    # streamable_http(표준 MCP) | sse | stdio
     MCP_DEFAULT_TRANSPORT: str = "streamable_http"
 
     # --- 인증 (자체 계정 — web/auth.py) ---
@@ -133,9 +133,6 @@ class Settings(BaseSettings):
 
     # --- 활동 로그 보관 (core/events.py) — 전부 쌓되 이 일수 지난 건 야간 회전 삭제 ---
     EVENTS_RETAIN_DAYS: int = 180
-
-    # --- REST 도구 서버 (core/rest_tools.py) ---
-    REST_TOOL_TIMEOUT: float = 30.0
 
     # --- Oracle 드라이버 모드 ---
     # thin = 순수 파이썬(기본, Instant Client 불필요) / thick = Instant Client 사용

@@ -103,12 +103,8 @@ async def _mcp_tools():
     tools = []
     for s in _mcp_servers():  # 서버별 격리 — 하나가 실패해도 나머지는 산다
         try:
-            if s["transport"] == "rest":  # 사내 REST 도구 서버 (전용 어댑터)
-                from core.rest_tools import load_rest_tools
-                tools += load_rest_tools(s["name"], s["url"])
-            else:
-                tools += await MultiServerMCPClient(
-                    {s["name"]: _mcp_config(s)}).get_tools()
+            tools += await MultiServerMCPClient(
+                {s["name"]: _mcp_config(s)}).get_tools()
         except Exception as e:
             print(f"[경고] 도구 서버 '{s['name']}' 연결 실패 — 제외하고 계속: "
                   f"{_exc_detail(e)}", file=sys.stderr)
@@ -135,13 +131,8 @@ async def discover_tools() -> list:
              "source": "source"} for t in _source_tools()]
     for s in _mcp_servers():
         try:
-            if s["transport"] == "rest":
-                from core.rest_tools import load_rest_tools
-                found = load_rest_tools(s["name"], s["url"])
-                tag = f"rest:{s['name']}"
-            else:
-                found = await MultiServerMCPClient({s["name"]: _mcp_config(s)}).get_tools()
-                tag = f"mcp:{s['name']}"
+            found = await MultiServerMCPClient({s["name"]: _mcp_config(s)}).get_tools()
+            tag = f"mcp:{s['name']}"
             for t in found:
                 out.append({"name": _tool_name(t),
                             "description": (getattr(t, "description", "") or "").split("\n")[0],
