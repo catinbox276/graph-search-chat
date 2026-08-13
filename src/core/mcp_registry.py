@@ -20,21 +20,22 @@ def _ensure_legacy():
     if _ensured:
         return
     with db.engine().begin() as con:
-        # 기존 CHECK 제약에 'rest' 추가 — 구버전 무명 제약을 명명 제약으로 교체
-        n = con.execute(text("""SELECT COUNT(*) FROM user_constraints
-                                WHERE table_name = 'MCP_REGISTRY'
-                                AND constraint_name = 'MCP_TRANSPORT_CK'""")).scalar()
-        if not n:
-            rows = con.execute(text("""SELECT constraint_name, search_condition
-                                       FROM user_constraints
-                                       WHERE table_name = 'MCP_REGISTRY'
-                                       AND constraint_type = 'C'""")).fetchall()
-            for name, cond in rows:
-                cond = (cond or "").lower()
-                if "transport" in cond and "not null" not in cond:
-                    con.execute(text(f'ALTER TABLE mcp_registry DROP CONSTRAINT "{name}"'))
+        # rest 지원 제거(2026-08-13) — 구 rest 행 삭제 + transport 제약을 표준 3종으로 교체
+        con.execute(text("DELETE FROM mcp_registry WHERE transport = 'rest'"))
+        rows = con.execute(text("""SELECT constraint_name, search_condition
+                                   FROM user_constraints
+                                   WHERE table_name = 'MCP_REGISTRY'
+                                   AND constraint_type = 'C'""")).fetchall()
+        for name, cond in rows:  # transport CHECK 중 'rest'를 허용하는 구버전만 교체 대상
+            c = (cond or "")
+            if "transport" in c.lower() and "not null" not in c.lower() and "'rest'" in c:
+                con.execute(text(f'ALTER TABLE mcp_registry DROP CONSTRAINT "{name}"'))
+        has_ck = con.execute(text("""SELECT COUNT(*) FROM user_constraints
+                                     WHERE table_name = 'MCP_REGISTRY'
+                                     AND constraint_name = 'MCP_TRANSPORT_CK'""")).scalar()
+        if not has_ck:
             con.execute(text("""ALTER TABLE mcp_registry ADD CONSTRAINT mcp_transport_ck
-                                CHECK (transport IN ('streamable_http', 'sse', 'stdio', 'rest'))"""))
+                                CHECK (transport IN ('streamable_http', 'sse', 'stdio'))"""))
         # 구버전 이미지가 시드했던 DataHub stdio 행 자동 정리 (원형 그대로일 때만)
         con.execute(text("""DELETE FROM mcp_registry
                             WHERE name = 'datahub' AND transport = 'stdio'

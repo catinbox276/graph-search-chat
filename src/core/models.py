@@ -171,12 +171,12 @@ class McpRegistry(Base):
     __tablename__ = "mcp_registry"
     name = Column(String(100), primary_key=True)
     transport = Column(String(20), server_default=text("'streamable_http'"))
-    url = Column(String(500))       # http 계열·rest 전용
+    url = Column(String(500))       # http 계열 전용
     command = Column(String(500))   # stdio 전용
     enabled = Column(CHAR(1), server_default=text("'Y'"))
     created = Column(TIMESTAMP, server_default=_NOW)
     __table_args__ = (CheckConstraint(
-        "transport IN ('streamable_http', 'sse', 'stdio', 'rest')",
+        "transport IN ('streamable_http', 'sse', 'stdio')",
         name="mcp_transport_ck"),)
 
 
