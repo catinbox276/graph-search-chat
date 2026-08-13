@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     # --- DataHub ---
     DATAHUB_GMS_URL: str = "http://localhost:8080"
+    DATAHUB_GMS_TOKEN: str = ""  # GMS 메타데이터 인증 켜진 경우 PAT (UI Settings > Access Tokens)
 
     # --- MCP 기본 서버 (core/mcp_registry.py) ---
     # 주소를 넣으면 mcp_registry에 자동 시드(최초 1회 — 이후 관리 페이지에서 수정/비활성).

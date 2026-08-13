@@ -74,9 +74,11 @@ def _mcp_config(row: dict) -> dict:
     """레지스트리 행 → langchain-mcp-adapters 커넥션 설정."""
     if row["transport"] == "stdio":
         cmd = row["command"] or "mcp-server-datahub"
+        env = {"DATAHUB_GMS_URL": DATAHUB_GMS}
+        if config.DATAHUB_GMS_TOKEN:  # GMS 인증 켜진 환경 — 토큰 없으면 401
+            env["DATAHUB_GMS_TOKEN"] = config.DATAHUB_GMS_TOKEN
         return {"command": shutil.which(cmd) or str(ROOT.parent / f".venv/bin/{cmd}"),
-                "args": [], "transport": "stdio",
-                "env": {"DATAHUB_GMS_URL": DATAHUB_GMS}}
+                "args": [], "transport": "stdio", "env": env}
     return {"transport": row["transport"], "url": row["url"]}
 
 
