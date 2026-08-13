@@ -12,8 +12,9 @@
    - 내용 유형: 문제해결, 가이드 등
 2. **그 DB 안에 우리 테이블을 만들어도 된다.** 원천 테이블만 저쪽 소유(읽기 전용)이고,
    나머지 저장소는 전부 우리가 같은 DB에 생성한다.
-3. **DataHub MCP 서버도 이미 제공된다** — GMS 주소로 공식 MCP에 직결한다
-   (2026-08-13 실연결 확인 — 구 REST 래핑 가정 폐기). 우리는 총 8개 중 읽기 전용 5개
+3. **DataHub MCP 서버도 이미 제공된다** — `GET http://<서버>/tools` + `POST /call`의
+   REST 래핑. GMS 직결(stdio)도 검증했으나 사내 GMS가 느려 실사용 불가(2026-08-13 실측)
+   — REST 방식으로 확정. 우리는 총 8개 중 읽기 전용 5개
    (`search` / `get_entities` / `list_schema_fields` / `get_lineage` / `get_dataset_queries`)만
    소비한다. 제공받는 것이라 협의 대상이 아니며, 엔드포인트 주소만 관리 페이지/env로 등록한다.
 
@@ -148,5 +149,5 @@ SESSION_MAX_AGE=28800         # 토큰 수명(초), 기본 8시간
 2. **원천 테이블**: 관리자가 UI에서 테이블·id·시간·필드 역할을 등록(`source_registry`).
    야간 증분 적재가 자동으로 코퍼스·임베딩·검색에 반영. 필요 시 `SOURCE_TABLE_ALLOWLIST`로 제한.
 3. **DataHub 도구 서버**: 관리 페이지(또는 `MCP_DEFAULT_NAME/URL/TRANSPORT` env)에 주소만 등록 —
-   사내 DataHub는 GMS 주소로 공식 MCP 직결 확인(2026-08-13 — 구 REST 어댑터 제거).
+   사내 DataHub REST 서버는 `transport=rest`로 등록(GMS 직결은 느려서 불채택 — 2026-08-13 실측).
 4. 그 외 전부(그래프·세션·레지스트리·체크포인터)는 같은 Oracle에 우리가 생성 — 협의 불필요.

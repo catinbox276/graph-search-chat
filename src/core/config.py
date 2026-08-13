@@ -135,6 +135,9 @@ class Settings(BaseSettings):
     # --- 활동 로그 보관 (core/events.py) — 전부 쌓되 이 일수 지난 건 야간 회전 삭제 ---
     EVENTS_RETAIN_DAYS: int = 180
 
+    # --- REST 도구 서버 (core/rest_tools.py — 사내 MCP-over-REST) ---
+    REST_TOOL_TIMEOUT: float = 30.0
+
     # --- Oracle 드라이버 모드 ---
     # thin = 순수 파이썬(기본, Instant Client 불필요) / thick = Instant Client 사용
     # (레거시 NLS 문자셋·Kerberos/wallet·AQ/CQN 등 thick 전용 기능이 필요할 때)

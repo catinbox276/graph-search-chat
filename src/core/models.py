@@ -176,7 +176,7 @@ class McpRegistry(Base):
     enabled = Column(CHAR(1), server_default=text("'Y'"))
     created = Column(TIMESTAMP, server_default=_NOW)
     __table_args__ = (CheckConstraint(
-        "transport IN ('streamable_http', 'sse', 'stdio')",
+        "transport IN ('streamable_http', 'sse', 'stdio', 'rest')",
         name="mcp_transport_ck"),)
 
 

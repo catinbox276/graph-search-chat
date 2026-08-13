@@ -1,7 +1,7 @@
 """MCP 서버 레지스트리 — mcp_registry 테이블 (ORM, 관리 페이지 /admin에서 등록).
 
 - 주소(url)를 등록하면 에이전트가 그 MCP의 도구들을 자동 발견해 조립한다.
-- transport: streamable_http / sse / stdio(command 필요).
+- transport: streamable_http / sse / stdio(command 필요) / rest(사내 GET /tools+POST /call).
 - 도구별 활성/비활성은 agent_disabled_tools(app_settings)가 담당 — 여기는 서버 단위.
 - 테이블 생성은 db.init_schema(). 구버전 마이그레이션·env 시드는 _ensure_legacy가
   프로세스당 1회 (raw SQL — 제약 교체·MERGE는 ORM 표현 밖).
@@ -20,26 +20,27 @@ def _ensure_legacy():
     if _ensured:
         return
     with db.engine().begin() as con:
-        # rest 지원 제거(2026-08-13) — 구 rest 행 삭제 + transport 제약을 표준 3종으로 교체
-        con.execute(text("DELETE FROM mcp_registry WHERE transport = 'rest'"))
+        # rest 재도입(2026-08-13) — 사내 GMS 직결이 느려 MCP-over-REST 방식 채택.
+        # transport CHECK에 'rest'가 없으면(어제 제거 마이그레이션을 탄 DB 포함) 재생성
         rows = con.execute(text("""SELECT constraint_name, search_condition
                                    FROM user_constraints
                                    WHERE table_name = 'MCP_REGISTRY'
                                    AND constraint_type = 'C'""")).fetchall()
-        for name, cond in rows:  # transport CHECK 중 'rest'를 허용하는 구버전만 교체 대상
+        ok = False
+        for name, cond in rows:
             c = (cond or "")
-            if "transport" in c.lower() and "not null" not in c.lower() and "'rest'" in c:
-                con.execute(text(f'ALTER TABLE mcp_registry DROP CONSTRAINT "{name}"'))
-        has_ck = con.execute(text("""SELECT COUNT(*) FROM user_constraints
-                                     WHERE table_name = 'MCP_REGISTRY'
-                                     AND constraint_name = 'MCP_TRANSPORT_CK'""")).scalar()
-        if not has_ck:
+            if "transport" in c.lower() and "not null" not in c.lower():
+                if "'rest'" in c:
+                    ok = True
+                else:
+                    con.execute(text(f'ALTER TABLE mcp_registry DROP CONSTRAINT "{name}"'))
+        if not ok:
             con.execute(text("""ALTER TABLE mcp_registry ADD CONSTRAINT mcp_transport_ck
-                                CHECK (transport IN ('streamable_http', 'sse', 'stdio'))"""))
+                                CHECK (transport IN ('streamable_http', 'sse', 'stdio', 'rest'))"""))
         # .env 기본 도구 서버 시드 — 없을 때만 삽입 (관리 페이지 수정·비활성은 보존)
         if config.MCP_DEFAULT_URL:
             tr = config.MCP_DEFAULT_TRANSPORT
-            if tr not in ("streamable_http", "sse"):
+            if tr not in ("streamable_http", "sse", "rest"):
                 tr = "streamable_http"
             con.execute(text("""MERGE INTO mcp_registry m USING dual ON (m.name = :n)
                                 WHEN NOT MATCHED THEN INSERT (name, transport, url)
@@ -62,8 +63,8 @@ def list_servers(enabled_only: bool = False) -> list:
 
 def upsert(name: str, transport: str, url: str = "", command: str = "",
            enabled: bool = True):
-    if transport not in ("streamable_http", "sse", "stdio"):
-        raise ValueError(f"transport는 streamable_http/sse/stdio 중 하나: {transport}")
+    if transport not in ("streamable_http", "sse", "stdio", "rest"):
+        raise ValueError(f"transport는 streamable_http/sse/stdio/rest 중 하나: {transport}")
     if transport in ("streamable_http", "sse", "rest"):
         if not url.lower().startswith(("http://", "https://")):
             raise ValueError("http 계열/rest transport는 http(s):// 주소가 필요합니다")
