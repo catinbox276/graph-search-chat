@@ -104,6 +104,8 @@
     <button id="dsave">추가/수정</button>
     <button type="button" class="warn" id="dreset"
             title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
+    <button type="button" class="warn" id="ddelete"
+            title="도메인 삭제 — 처리된 데이터가 없으면 즉시, 있으면 연결 데이터 전부 삭제 경고 후 delete 입력 확인. 이 도메인을 쓰던 소스는 검색 전용(도메인 없음)으로 전환">⚠ 도메인 삭제</button>
   </form>
   <p class="hint">같은 이름으로 저장하면 수정(upsert). <b>용도</b>를 등록 때 선택합니다 —
      <b>문서 전용</b>은 대화 분류·폴백에 끼지 않고 소스에 지정해 문서 구조화에만,
@@ -115,8 +117,10 @@
 
 <section class="card">
   <h3>구조화 원천 테이블 <small>접점 2 — 저쪽 테이블은 읽기 전용, 등록은 사람 전용</small></h3>
-  <table id="slist"><thead><tr><th>소스</th><th>테이블</th><th>id</th><th>시간</th>
+  <table id="slist"><thead><tr><th style="width:26px"><input type="checkbox" id="sall" title="현재 페이지 전체 선택/해제"></th>
+    <th>소스</th><th>테이블</th><th>id</th><th>시간</th>
     <th>역할 매핑</th><th>유형</th><th>그래프 도메인</th><th>사용</th></tr></thead><tbody></tbody></table>
+  <div id="spager" class="hint" style="display:flex;gap:8px;align-items:center"></div>
   <form id="sform">
     <input id="sname" placeholder="소스 이름" required style="width:120px">
     <select id="stable" required><option value="">테이블…</option></select>
@@ -149,11 +153,13 @@
     <span class="badge later" title="지금은 문서를 '미처리'로 되돌리기만 — 실제 처리는 야간 03:40 배치나 위 [지금 구조화]가 함">예약</span>
     <button type="button" class="ghost" id="sretry" title="error 상태 문서를 미처리로 되돌림 — 야간 배치나 [지금 구조화]가 재시도">실패 재시도</button>
     <button type="button" class="warn" id="sreset" title="이 소스가 그래프에 올린 문서 기여를 회수하고 전부 미처리로 되돌림 — 지침·모델 변경 후. 대화 세션 기여는 불변. 실제 재구조화는 [지금 구조화]/야간 배치가">⚠ 초기화 재처리</button>
+    <button type="button" class="warn" id="sdelete"
+            title="체크한 소스들의 파생 데이터 삭제 — 청크·코퍼스·그래프 문서 기여·소스 등록이 삭제됩니다 (원천 테이블 자체는 불변). delete 입력 확인 필요">⚠ 선택 삭제(파생 데이터)</button>
   </form>
   <div id="dryout"></div>
   <p class="hint"><b class="badge now" style="font-weight:700">즉시</b> = 누르면 지금 실행 ·
      <b class="badge later" style="font-weight:700">예약</b> = 지금은 표시만, 야간 배치가 처리 (또는 [지금 구조화]로 당겨 실행).<br>
-     같은 소스 이름으로 저장하면 수정(upsert). <b>그래프 도메인</b> 미지정 = 검색 전용(구조화 안 함, 아래 처리 현황에 안 뜸).
+     같은 소스 이름으로 저장하면 수정(upsert) — <b>수정·재적재·드라이런·초기화는 1개만 체크</b>, <b>적재·구조화·삭제는 여러 개 체크해 일괄 실행</b>. <b>그래프 도메인</b> 미지정 = 검색 전용(구조화 안 함, 아래 처리 현황에 안 뜸).
      원천 테이블에는 절대 쓰지 않습니다(SELECT만) — 끄려면 '사용' 해제.</p>
   <p class="hint err" id="serr"></p>
 </section>
@@ -182,6 +188,14 @@
             title="도메인 지정된 모든 소스의 문서 기여를 회수하고 전부 '미처리'로 되돌림 — 대화 세션 기여는 유지. 예약: 실제 재구조화는 야간 03:40 배치나 각 소스 [지금 구조화]가 처리">⚠ 전체 문서 초기화(예약)</button>
     <span class="hint" id="psmsg" style="margin:0"></span>
   </form>
+  <p class="hint">각 옵션 설명 —
+    <b>실행당 건수</b>: 야간 배치 1회에 판정할 문서 수 (기본 200 — 즉시 버튼은 무시하고 끝까지) ·
+    <b>동시 요청</b>: LLM 판정을 동시에 보낼 개수 (기본 16 — 서빙 GPU 여유에 맞춰 조절, 클수록 빠름) ·
+    <b>본문 길이</b>: 판정 프롬프트에 넣는 본문 최대 글자 수 (기본 3000, <b>0=문서 전체</b> — 길수록 정확하지만 느리고 토큰 소모 큼) ·
+    <b>묶음 토큰</b>: 0=문서 1건씩 판정 / N=입력 N토큰 예산까지 여러 문서를 요청 1건으로 묶어 판정 (속도↑, 묶음당 최대 8건, 누락분 단건 자동 폴백) ·
+    <b>전처리 모델</b>: 구조화 판정 전용 모델 (빈값=채팅 기본 모델 — 판정은 작은 모델로 충분한 경우 비용 절감) ·
+    <b>청크 크기/겹침</b>: 검색용 조각 크기(기본 1,200자)와 인접 조각 겹침(기본 150자 — 경계에 걸린 문장 보존) ·
+    <b>생각 끄기</b>: 추론 모델의 생각(thinking) 출력 생략 — 실측 7~8배 빠르고 판정 품질 동일 (끄는 게 기본).</p>
 </section>
 
 <section class="card">
@@ -405,14 +419,37 @@ $("dreset").onclick = async () => {
 };
 
 // ── 구조화 원천 테이블 ────────────────────────────────────────
+let _srcAll = [], _srcPage = 0;
+const SRC_PAGE_SIZE = 10;
+function checkedSources() {
+  return [...document.querySelectorAll("#slist tbody input[type=checkbox]:checked")]
+    .map(c => c.dataset.name);
+}
+function oneChecked(action) {  // 단일 대상 작업 가드
+  const sel = checkedSources();
+  if (sel.length !== 1) { smsg(`${action}은(는) 소스를 정확히 1개만 체크해야 합니다 (현재 ${sel.length}개)`); return null; }
+  return sel[0];
+}
 async function loadSources(selName) {
   smsg("");
   const r = await fetch("/admin/sources");
   if (!r.ok) { smsg(`조회 실패 (${r.status}) — 관리자 권한이 필요합니다`); return; }
+  _srcAll = (await r.json()).sources;
+  renderSources(selName);
+}
+function renderSources(selName) {
+  const pages = Math.max(1, Math.ceil(_srcAll.length / SRC_PAGE_SIZE));
+  _srcPage = Math.min(_srcPage, pages - 1);
   const tb = $("slist").querySelector("tbody");
   tb.innerHTML = "";
-  (await r.json()).sources.forEach(s => {
+  $("sall").checked = false;
+  _srcAll.slice(_srcPage * SRC_PAGE_SIZE, (_srcPage + 1) * SRC_PAGE_SIZE).forEach(s => {
     const tr = document.createElement("tr");
+    const cbTd = document.createElement("td");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.dataset.name = s.source_name;
+    cb.onclick = (e) => e.stopPropagation();  // 체크는 행 클릭(폼 채우기)과 분리
+    cbTd.appendChild(cb); tr.appendChild(cbTd);
     const fmap = Object.entries(s.field_map).map(([k, v]) => `${k}:${v}`).join(" ");
     [s.source_name, s.table_name, s.id_column, s.ts_column, fmap,
      s.content_kind, s.domain, s.enabled ? "Y" : "N"].forEach((v, i) => {  // textContent — XSS 차단
@@ -421,10 +458,11 @@ async function loadSources(selName) {
       if (i >= 1 && i <= 4) td.className = "mono";
       tr.appendChild(td);
     });
-    if (s.source_name === selName) tr.classList.add("sel");
-    tr.onclick = async () => {
+    if (s.source_name === selName) { tr.classList.add("sel"); cb.checked = true; }
+    tr.onclick = async () => {  // 행 클릭 = 폼에 로드(수정용) + 이 행만 체크
       tb.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel"));
-      tr.classList.add("sel");
+      tb.querySelectorAll("input[type=checkbox]").forEach(x => { x.checked = false; });
+      tr.classList.add("sel"); cb.checked = true;
       smsg("");
       $("sname").value = s.source_name; $("skind").value = s.content_kind;
       $("sdomain").value = s.domain || "";
@@ -439,7 +477,23 @@ async function loadSources(selName) {
     };
     tb.appendChild(tr);
   });
+  const pager = $("spager");
+  pager.innerHTML = "";
+  if (pages > 1) {
+    const mk = (label, d) => { const b = document.createElement("button");
+      b.type = "button"; b.className = "ghost"; b.textContent = label;
+      b.onclick = () => { _srcPage += d; renderSources(); }; return b; };
+    if (_srcPage > 0) pager.appendChild(mk("◀ 이전", -1));
+    const info = document.createElement("span");
+    info.textContent = `${_srcPage + 1} / ${pages} 페이지 (총 ${_srcAll.length}개)`;
+    pager.appendChild(info);
+    if (_srcPage < pages - 1) pager.appendChild(mk("다음 ▶", 1));
+  }
 }
+$("sall").onclick = () => {
+  document.querySelectorAll("#slist tbody input[type=checkbox]")
+    .forEach(c => { c.checked = $("sall").checked; });
+};
 async function loadTables() {
   if ($("stable").options.length > 1) return;
   const r = await fetch("/admin/sources/tables");
@@ -476,6 +530,7 @@ $("stable").onchange = () => loadCols($("stable").value);
 $("sform").onsubmit = async (e) => {
   e.preventDefault();
   smsg("");
+  if (checkedSources().length > 1) { smsg("수정(등록)은 소스를 1개만 체크한 상태에서 하세요"); return; }
   const fmap = {};
   ROLE_IDS.forEach(id => { if ($(id).value) fmap[id.slice(2)] = $(id).value; });
   const name = $("sname").value.trim();
@@ -498,23 +553,24 @@ $("sform").onsubmit = async (e) => {
   smsg(`✓ 저장 완료 — "${name}" (다음 적재 배치부터 반영)`, true);
 };
 $("singest").onclick = async () => {
-  const name = $("sname").value.trim();
-  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const names = checkedSources();
+  if (!names.length) { smsg("적재할 소스를 체크하세요 (여러 개 가능)"); return; }
   const out = $("dryout");
-  out.textContent = "⏳ 적재 중… (원천 → corpus_docs + 청킹 — 데이터 양에 따라 수십 초~분)";
-  const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/ingest`, {method: "POST"});
-  if (!r.ok) {
-    let msg = `적재 실패 (${r.status})`;
-    try { msg += " — " + (await r.json()).detail; } catch {}
-    out.textContent = msg; return;
+  const lines = [];
+  for (const [i, name] of names.entries()) {  // 순차 실행 — DB·서빙 부하 보호
+    out.textContent = `⏳ [${i + 1}/${names.length}] ${name} 적재 중… (원천 → corpus_docs + 청킹)\n` + lines.join("\n");
+    const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/ingest`, {method: "POST"});
+    let msg;
+    try { const j = await r.json(); msg = r.ok ? `✓ ${name}: ${j.note}` : `✗ ${name}: ${j.detail || r.status}`; }
+    catch { msg = `✗ ${name}: 실패 (${r.status})`; }
+    lines.push(msg);
   }
-  const j = await r.json();
-  out.textContent = `✓ ${j.note}`;
+  out.textContent = lines.join("\n");
   loadSources(); loadDocStatus();  // 처리 현황·사용 카운트 갱신
 };
 $("sreingest").onclick = async () => {
-  const name = $("sname").value.trim();
-  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const name = oneChecked("전량 재적재");
+  if (!name) return;
   if (!confirm(`[${name}] 전량 재적재\n\ncorpus_docs·청크를 지우고 워터마크를 리셋해 원천에서 처음부터 다시 적재합니다. 그래프 문서 기여도 회수됩니다(대화 세션 기여는 불변). 계속할까요?`)) return;
   const out = $("dryout");
   out.textContent = "⏳ 전량 재적재 중… (기여 회수 → 코퍼스 삭제 → 재적재 → 청킹)";
@@ -529,8 +585,8 @@ $("sreingest").onclick = async () => {
   loadSources(); loadDocStatus();
 };
 $("sdry").onclick = async () => {
-  const name = $("sname").value.trim();
-  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const name = oneChecked("드라이런");
+  if (!name) return;
   const out = $("dryout");
   out.textContent = "⏳ 드라이런 중… (문서 3건 판정 — 그래프 반영 없음, 수십 초 걸릴 수 있음)";
   const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/dryrun`, {
@@ -555,8 +611,8 @@ $("sdry").onclick = async () => {
   });
 };
 async function reprocess(mode, label) {
-  const name = $("sname").value.trim();
-  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const name = oneChecked(label);
+  if (!name) return;
   if (mode === "reset" && !confirm(
       `"${name}" 소스의 그래프 기여를 전부 회수하고 처음부터 재구조화합니다.\n` +
       "지침·모델을 바꾼 뒤 쓰는 기능입니다. 계속할까요?")) return;
@@ -573,20 +629,66 @@ async function reprocess(mode, label) {
   smsg(`✓ ${label}: ${j.reset}건 미처리로 — ${j.note}`, true);
   loadDocStatus();
 }
-$("sretry").onclick = () => reprocess("errors", "실패 재시도");
-$("sreset").onclick = () => reprocess("reset", "초기화 재처리");
-$("sstruct").onclick = async () => {
-  const name = $("sname").value.trim();
-  if (!name) { smsg("소스를 먼저 선택하세요 (목록 행 클릭)"); return; }
-  smsg("⏳ 지금 구조화 시작 요청 중…");
-  const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/structure`, {method: "POST"});
+$("sdelete").onclick = async () => {
+  const names = checkedSources();
+  if (!names.length) { smsg("삭제할 소스를 체크하세요 (여러 개 가능)"); return; }
+  const typed = prompt(
+    `선택한 ${names.length}개 소스(${names.join(", ")})의 파생 데이터가 전부 삭제됩니다:\n` +
+    "- 검색 코퍼스(corpus_docs)·청크\n- 그래프 문서 기여(회수)\n- 소스 등록\n" +
+    "원천 테이블 자체는 삭제되지 않습니다.\n\n계속하려면 delete 를 입력하세요:");
+  if (typed !== "delete") { smsg("취소됨 (delete 입력 필요)"); return; }
+  smsg("⏳ 파생 데이터 삭제 중…");
+  const r = await fetch("/admin/sources/delete", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({names, confirm: "delete"})});
   if (!r.ok) {
-    let msg = `지금 구조화 실패 (${r.status})`;
+    let msg = `삭제 실패 (${r.status})`;
     try { msg += " — " + (await r.json()).detail; } catch {}
     smsg(msg); return;
   }
   const j = await r.json();
-  smsg(`▶ ${j.note}`, true);
+  smsg(`✓ ${j.note} — ` + Object.entries(j.deleted)
+    .map(([n, d]) => `${n}(문서 ${d.docs}·청크 ${d.chunks}·기여회수 ${d.evidence_retracted})`).join(", "), true);
+  loadSources(); loadDocStatus();
+};
+$("ddelete").onclick = async () => {
+  const name = $("dname").value.trim();
+  if (!name) { dmsg("삭제할 도메인을 선택하세요 (목록 행 클릭)"); return; }
+  // 1차: 확인 없이 시도 — 연결 데이터 없으면 즉시 삭제, 있으면 409로 영향 안내가 온다
+  let r = await fetch(`/admin/domains/${encodeURIComponent(name)}/delete`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({confirm: ""})});
+  if (r.status === 409) {
+    let warn = "";
+    try { warn = (await r.json()).detail; } catch {}
+    const typed = prompt(`⚠ ${warn}\n\n계속하려면 delete 를 입력하세요:`);
+    if (typed !== "delete") { dmsg("취소됨 (delete 입력 필요)"); return; }
+    r = await fetch(`/admin/domains/${encodeURIComponent(name)}/delete`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({confirm: "delete"})});
+  }
+  if (!r.ok) {
+    let msg = `도메인 삭제 실패 (${r.status})`;
+    try { msg += " — " + (await r.json()).detail; } catch {}
+    dmsg(msg); return;
+  }
+  const j = await r.json();
+  dmsg(`✓ ${j.note}` + (j.deleted_nodes ? ` (노드 ${j.deleted_nodes}개 삭제)` : ""), true);
+  $("dname").value = "";
+  loadDomains(); loadSources(); loadDocStatus();
+};
+$("sretry").onclick = () => reprocess("errors", "실패 재시도");
+$("sreset").onclick = () => reprocess("reset", "초기화 재처리");
+$("sstruct").onclick = async () => {
+  const names = checkedSources();
+  if (!names.length) { smsg("구조화할 소스를 체크하세요 (여러 개 가능 — 각각 백그라운드로 동시 진행)"); return; }
+  const lines = [];
+  for (const name of names) {  // 시작 요청만 순차 — 실제 처리는 각각 백그라운드
+    const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/structure`, {method: "POST"});
+    try { const j = await r.json(); lines.push(r.ok ? `▶ ${name}: ${j.note}` : `✗ ${name}: ${j.detail || r.status}`); }
+    catch { lines.push(`✗ ${name}: 실패 (${r.status})`); }
+  }
+  smsg(lines.join("\n"), true);
   loadDocStatus();  // 이후 처리 현황이 5초마다 자동 갱신하며 반영/제외가 늘어남
 };
 const fmtResetSummary = (j) => {

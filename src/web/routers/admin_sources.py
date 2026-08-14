@@ -431,6 +431,92 @@ def _reset_source(cur, sname: str):
     return cur.rowcount, len(refs)
 
 
+class ConfirmIn(BaseModel):
+    confirm: str = ""  # 파괴적 삭제는 "delete" 타이핑 확인 (연결 데이터 있을 때)
+
+
+def _domain_subtree(cur, dname: str) -> tuple:
+    """도메인 그래프 노드 id와 자손 노드 수 — 삭제 영향 산정용."""
+    cur.execute("SELECT id FROM nodes WHERE layer = 1 AND name = :1", [dname])
+    r = cur.fetchone()
+    if not r:
+        return None, 0
+    cur.execute("""SELECT COUNT(DISTINCT dst) FROM edges
+                   START WITH src = :1 CONNECT BY PRIOR dst = src""", [r[0]])
+    return r[0], cur.fetchone()[0]
+
+
+@router.post("/admin/domains/{dname}/delete")
+def admin_domain_delete(dname: str, inp: ConfirmIn):
+    """관리자: 도메인 삭제.
+
+    처리된 데이터가 없으면 즉시 삭제. 있으면 연결 데이터(그래프 서브트리·문서 기여)가
+    전부 삭제됨을 경고하고 confirm="delete"일 때만 실행. 이 도메인을 쓰던 소스는
+    domain=NULL(검색 전용)로 전환된다 — 원천 테이블 자체는 건드리지 않는다.
+    """
+    _guard_not_structuring()
+    with db_cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM domain_registry WHERE name = :1", [dname])
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"도메인이 없습니다: {dname}")
+        cur.execute("SELECT source_name FROM source_registry WHERE domain = :1", [dname])
+        sources = [r[0] for r in cur.fetchall()]
+        did, desc = _domain_subtree(cur, dname)
+        if (did or sources) and inp.confirm != "delete":
+            raise HTTPException(409,
+                f"이 도메인과 연결된 데이터가 있습니다 — 그래프 노드 {desc}개(하위 목표·접근법 포함), "
+                f"연결 소스 {len(sources)}개({', '.join(sources) or '없음'}). "
+                "삭제하면 전부 사라지고 소스는 검색 전용으로 전환됩니다. "
+                "계속하려면 확인란에 delete를 입력하세요.")
+        for s in sources:  # 문서 기여 회수 + 문서 상태 리셋 (재등록 대비 이중 카운트 방지)
+            _reset_source(cur, s)
+        if did:  # 서브트리(자손 전부) 삭제 — edges·evidence·suggestions는 FK CASCADE
+            cur.execute("""DELETE FROM nodes WHERE id IN (
+                             SELECT dst FROM edges
+                             START WITH src = :1 CONNECT BY PRIOR dst = src)
+                           OR id = :1""", [did])
+        cur.execute("UPDATE source_registry SET domain = NULL WHERE domain = :1", [dname])
+        cur.execute("DELETE FROM domain_registry WHERE name = :1", [dname])
+    return {"ok": True, "deleted_nodes": (desc + 1) if did else 0,
+            "detached_sources": sources,
+            "note": ("연결 데이터까지 삭제 완료 — 소스는 검색 전용(domain 없음)으로 전환"
+                     if did or sources else "연결 데이터 없음 — 도메인만 삭제")}
+
+
+class SourcesDeleteIn(BaseModel):
+    names: list[str]
+    confirm: str = ""
+
+
+@router.post("/admin/sources/delete")
+def admin_sources_delete(inp: SourcesDeleteIn):
+    """관리자: 선택 소스들의 파생 데이터 삭제 — 원천 테이블은 건드리지 않는다.
+
+    삭제 대상: 이 소스로 만든 corpus_docs·청크·그래프 문서 기여(회수) + 소스 등록 자체.
+    파괴적이므로 confirm="delete" 필수.
+    """
+    if inp.confirm != "delete":
+        raise HTTPException(409,
+            "선택한 소스의 청크·코퍼스·그래프 기여 등 파생 데이터가 전부 삭제됩니다 "
+            "(원천 테이블은 불변). 계속하려면 확인란에 delete를 입력하세요.")
+    if not inp.names:
+        raise HTTPException(400, "선택된 소스가 없습니다")
+    for n in inp.names:
+        _guard_not_structuring(n)
+    out = {}
+    with db_cursor() as cur:
+        for n in inp.names:
+            _, retracted = _reset_source(cur, n)  # 그래프 기여 회수
+            cur.execute("DELETE FROM corpus_chunks WHERE source_name = :1", [n])
+            chunks = cur.rowcount
+            cur.execute("DELETE FROM corpus_docs WHERE source_name = :1", [n])
+            docs = cur.rowcount
+            cur.execute("DELETE FROM source_registry WHERE source_name = :1", [n])
+            out[n] = {"docs": docs, "chunks": chunks, "evidence_retracted": retracted}
+    return {"ok": True, "deleted": out,
+            "note": "파생 데이터 삭제 완료 — 원천 테이블은 그대로. 검색 인덱스는 다음 갱신 주기에 반영"}
+
+
 @router.post("/admin/domains/{dname}/reset")
 def admin_domain_reset(dname: str):
     """관리자: 도메인 초기화 — 이 도메인에 물린 모든 소스의 문서 구조화를 회수·리셋.
