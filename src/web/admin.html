@@ -812,12 +812,14 @@ const fmtResetSummary = (j) => {
 };
 
 // ── 처리 현황 프로그래스 — 전체 > 도메인 > 소스 3단, 5초 폴링 ──
+const esc = v => String(v ?? "").replace(/[&<>"']/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 function pRow(label, s, agg) {
   const seg = (n, c) => s.total ? `<i style="width:${n / s.total * 100}%;background:${c}"></i>` : "";
   const procd = s.done + s.excluded + s.error;
   const pct = s.total ? Math.round(procd / s.total * 100) : 0;
   return `<div class="prow${agg ? " agg" : ""}">
-    <span class="plabel" title="${label}">${label}</span>
+    <span class="plabel" title="${esc(label)}">${esc(label)}</span>
     <span class="pbar">${seg(s.done, "#16a34a")}${seg(s.excluded, "#9ca3af")}${seg(s.error, "#dc2626")}</span>
     <span class="pnum">${pct}% — 반영 ${s.done} · 제외 ${s.excluded}${s.error ? ` · <b style="color:#dc2626">오류 ${s.error}</b>` : ""} · 미처리 ${s.pending}</span>
   </div>`;
@@ -862,7 +864,7 @@ async function openRunPanel(src) {
   const p = $("runpanel");
   p.innerHTML = "";
   if (!_runSrc) return;
-  p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${src} — 구조화 실행(run) 버전</h4>
+  p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${esc(src)} — 구조화 실행(run) 버전</h4>
     <div id="runlist">⏳</div><div id="runform"></div>
     <h4 style="margin:10px 0 4px">📄 문서별 결과</h4>
     <div id="docfilter"></div><div id="doclist"></div>`;
@@ -921,7 +923,7 @@ async function renderRunForm(src) {
   f.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
     <input id="rfVer" type="number" min="1" placeholder="도메인 버전 (빈값=기본)" style="width:150px" title="도메인 시드 탭의 버전 번호 — 빈값이면 현재 기본 버전">
     <select id="rfModel" title="판정 LLM — 빈값이면 현재 전처리 모델"><option value="">LLM (빈값=현재 기본)</option>
-      ${models.map(m => `<option>${m.name}</option>`).join("")}</select>
+      ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
     <input id="rfChars" type="number" min="0" placeholder="본문 길이 (빈값=현재)" style="width:140px">
     <input id="rfPack" type="number" min="0" placeholder="묶음 토큰 (빈값=현재)" style="width:140px">
     <button type="button" id="rfGo">생성</button></div>`;
