@@ -436,7 +436,11 @@ def _reset_source(cur, sname: str):
         cur.execute("DELETE FROM node_evidence WHERE kind = 'doc' AND ref = :1", [ref])
     cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
                    WHERE source_name = :1 AND graph_status IS NOT NULL""", [sname])
-    return cur.rowcount, len(refs)
+    n = cur.rowcount
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
+    if cur.fetchone()[0]:  # run별 결과도 리셋 (run 행은 이력으로 보존)
+        cur.execute("DELETE FROM doc_results WHERE source_name = :1", [sname])
+    return n, len(refs)
 
 
 def _ensure_domain_versions(cur):
@@ -641,6 +645,59 @@ def admin_reset_all_docs():
     return {"ok": True, "sources": {s: {"reset": n, "evidence_retracted": r}
                                     for s, (n, r) in per.items()},
             "note": "다음 배치가 처음부터 재구조화 (고아 노드는 야간 유지보수가 정리)"}
+
+
+# ── 구조화 실행(run) 버저닝 — B-full ──────────────────────────
+
+@router.get("/admin/sources/{sname}/runs")
+def admin_source_runs(sname: str):
+    """관리자: 이 소스의 구조화 실행 이력 — 조합(도메인 버전·모델·설정)·시각·결과 카운트."""
+    from graph.doc_pipeline.runs import ensure_runs
+    with db_cursor() as cur:
+        ensure_runs(cur)
+        cur.execute("""
+            SELECT r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
+                   r.settings, r.active,
+                   TO_CHAR(r.started, 'MM-DD HH24:MI'), TO_CHAR(r.finished, 'MM-DD HH24:MI'),
+                   SUM(CASE WHEN d.status = 'done' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN d.status = 'excluded' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END)
+            FROM doc_runs r LEFT JOIN doc_results d ON d.run_id = r.run_id
+            WHERE r.source_name = :1
+            GROUP BY r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
+                     r.settings, r.active, r.started, r.finished
+            ORDER BY MAX(r.started) DESC""", [sname])
+        rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
+                 "chat_model": r[3], "embed_model": r[4], "settings": r[5],
+                 "active": r[6] == "Y", "started": r[7], "finished": r[8],
+                 "done": int(r[9] or 0), "excluded": int(r[10] or 0),
+                 "error": int(r[11] or 0)} for r in cur.fetchall()]
+    return {"runs": rows}
+
+
+@router.get("/admin/sources/{sname}/docs")
+def admin_source_docs(sname: str, status: str = "", page: int = 1):
+    """관리자: 문서별 구조화 결과 목록 — 반영/제외/오류/미처리 필터, 20개 페이지."""
+    page = max(1, page)
+    where, binds = "d.source_name = :s", {"s": sname}
+    if status == "pending":
+        where += " AND d.graph_status IS NULL"
+    elif status in ("done", "excluded", "error"):
+        where += " AND d.graph_status = :st"
+        binds["st"] = status
+    with db_cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM corpus_docs d WHERE {where}", binds)
+        total = cur.fetchone()[0]
+        cur.execute(f"""SELECT d.src_id, NVL(d.title, ' '), d.graph_status, d.graph_note
+                        FROM corpus_docs d WHERE {where}
+                        ORDER BY d.src_id
+                        OFFSET :off ROWS FETCH NEXT 20 ROWS ONLY""",
+                    {**binds, "off": (page - 1) * 20})
+        rows = [{"src_id": r[0], "title": (r[1] or "").strip()[:120],
+                 "status": r[2] or "pending", "note": r[3] or ""}
+                for r in cur.fetchall()]
+    return {"docs": rows, "total": total, "page": page,
+            "pages": max(1, (total + 19) // 20)}
 
 
 # ── 드라이런 ──────────────────────────────────────────────────

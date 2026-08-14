@@ -29,10 +29,12 @@ def _auto_merge_ok(a: str, b: str) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= config.DEDUP_CHAR_RATIO
 
 
-def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True):
+def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True,
+                  run_id="-"):
     """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
 
-    ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'."""
+    ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'.
+    run_id: 문서 증거의 구조화 실행 귀속 (세션은 '-') — B-full 버저닝."""
     # 임베딩 엔드포인트가 죽어도 구조화는 계속 — 벡터 없으면(vec=None) dedup은 이름/LLM만
     # 사용(과병합만 줄고 진행은 됨). 무한 대기·전체 실패보다 낫다.
     vec = None
@@ -86,8 +88,8 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
         # ponytail: weight=raw_count. 노출 대비 채택률 보정은 제안 기능이 생긴 뒤에
     # 같은 출처가 같은 노드에 두 번 기여해도 안전 (PK 중복 방지)
     cur.execute("""MERGE INTO node_evidence e USING dual
-                   ON (e.node_id = :n AND e.kind = :k AND e.ref = :r)
-                   WHEN NOT MATCHED THEN INSERT (node_id, kind, ref)
-                   VALUES (:n, :k, :r)""",
-                {"n": node_id, "k": ev_kind, "r": ev_ref})
+                   ON (e.node_id = :n AND e.kind = :k AND e.ref = :r AND e.run_id = :rid)
+                   WHEN NOT MATCHED THEN INSERT (node_id, kind, ref, run_id)
+                   VALUES (:n, :k, :r, :rid)""",
+                {"n": node_id, "k": ev_kind, "r": ev_ref, "rid": run_id})
     return node_id

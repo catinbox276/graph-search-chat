@@ -12,6 +12,7 @@ import oracledb
 from core import config, settings
 from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
 
+from . import runs
 from .judge import PACK_MAX_DOCS, judge_pack
 
 
@@ -72,7 +73,12 @@ def main():
     for source_name, domain, hint in sources:
         if budget <= 0:
             break
-        budget -= _structure_one(cur, con, source_name, domain, hint, budget, s, stats)
+        rid = runs.current_run(cur, source_name)
+        n = _structure_one(cur, con, source_name, domain, hint, budget, s, stats, rid)
+        if n:
+            runs.finish_run(cur, rid)
+            con.commit()
+        budget -= n
 
     cur.execute("""SELECT NVL(graph_status, '미처리'), COUNT(*) FROM corpus_docs
                    GROUP BY graph_status""")
@@ -80,7 +86,7 @@ def main():
     con.close()
 
 
-def _structure_one(cur, con, source_name, domain, hint, budget, s, stats):
+def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id="-"):
     """소스 1개의 미처리 문서를 최대 budget건 판정·병합. 처리한 문서 수를 반환.
     main()(전 소스 루프)과 run_for_source()(즉시 실행) 공용. s = _load_settings()."""
     cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
@@ -137,15 +143,19 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats):
                                              else "LLM 응답 파싱 실패")
                 elif j.get("fits") and j.get("goal") and j.get("approach"):
                     d = get_or_create(cur, 1, domain, None, "doc", ref,
-                                      use_embedding=False)
-                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref)
-                    get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref)
+                                      use_embedding=False, run_id=run_id)
+                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref,
+                                      run_id=run_id)
+                    get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref,
+                                  run_id=run_id)
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
                 cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
                                WHERE source_name = :3 AND src_id = :4""",
                             [status, (note or "")[:1000] or None, source_name, src_id])
+                if run_id != "-":  # run별 결과 기록 (B-full 버저닝)
+                    runs.record_result(cur, run_id, source_name, src_id, status, note)
                 con.commit()
                 stats[status] += 1
                 pt, ct = (j or {}).get("_usage", (0, 0))   # 입력·출력 토큰
@@ -185,10 +195,14 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False) -> dic
         return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
     stats = {"done": 0, "excluded": 0, "error": 0}
     total = 0
+    rid = runs.current_run(cur, source_name)
+    con.commit()
     while True:
-        n = _structure_one(cur, con, row[0], row[1], row[2], s.limit, s, stats)
+        n = _structure_one(cur, con, row[0], row[1], row[2], s.limit, s, stats, rid)
         total += n
         if not drain or n == 0:  # drain: 미처리가 바닥날 때까지 반복
             break
+    runs.finish_run(cur, rid)
+    con.commit()
     con.close()
     return {"processed": total, **stats}

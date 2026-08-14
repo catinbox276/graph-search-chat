@@ -63,6 +63,8 @@ def ddl(cur):
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE sessions ADD (user_id VARCHAR2(64))")
     ensure_domain_registry(cur)
+    from graph.doc_pipeline.runs import ensure_runs  # 지연 import — 순환 방지
+    ensure_runs(cur)
 
 
 def ensure_domain_registry(cur):
