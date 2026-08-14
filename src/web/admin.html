@@ -195,6 +195,8 @@
 <section class="card" id="sec-status">
   <h3>처리 현황 <small>문서 구조화 진행도 — 5초마다 갱신</small></h3>
   <div id="docstat"><span class="hint">불러오는 중…</span></div>
+  <p class="hint">소스 줄을 클릭하면 <b>구조화 실행(run) 버전 목록</b>과 <b>문서별 결과</b>가 아래에 열립니다.</p>
+  <div id="runpanel"></div>
 </section>
 
 <section class="card" id="sec-pipeline">
@@ -840,13 +842,141 @@ async function loadDocStatus() {
     html += `<details class="domtree" data-dom="${key}"${open}>`
           + `<summary>${pRow(`도메인: ${d}`, agg, true)}</summary>`
           + rows.filter(s => s.domain === d)
-                .map(s => `<div class="treechild">${pRow(`└ ${s.source}`, s)}</div>`).join("")
+                .map(s => `<div class="treechild srcrow" data-src="${encodeURIComponent(s.source)}">${pRow(`└ ${s.source}`, s)}</div>`).join("")
           + `</details>`;
   });
   box.innerHTML = html +
     `<div class="hint" style="margin-top:4px"><i style="color:#16a34a">■</i> 그래프 반영
      <i style="color:#9ca3af">■</i> 기준 미달 제외 <i style="color:#dc2626">■</i> 오류
      <i style="color:#e5e7eb">■</i> 미처리 — 초기화하면 미처리로 돌아가고 다음 배치가 재구조화</div>`;
+  box.querySelectorAll(".srcrow").forEach(el => {
+    el.style.cursor = "pointer";
+    el.onclick = () => openRunPanel(decodeURIComponent(el.dataset.src));
+  });
+}
+
+// ── run 버전 패널 — 소스 클릭 시 열림 (B-full) ─────────────────
+let _runSrc = "";
+async function openRunPanel(src) {
+  _runSrc = (_runSrc === src) ? "" : src;  // 같은 소스 재클릭 = 닫기
+  const p = $("runpanel");
+  p.innerHTML = "";
+  if (!_runSrc) return;
+  p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${src} — 구조화 실행(run) 버전</h4>
+    <div id="runlist">⏳</div><div id="runform"></div>
+    <h4 style="margin:10px 0 4px">📄 문서별 결과</h4>
+    <div id="docfilter"></div><div id="doclist"></div>`;
+  loadRuns(src); loadRunDocs(src, "", 1);
+}
+async function loadRuns(src) {
+  const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/runs`);
+  const box = $("runlist");
+  if (!r.ok) { box.textContent = `run 조회 실패 (${r.status})`; return; }
+  const runs = (await r.json()).runs;
+  box.innerHTML = "";
+  const t = document.createElement("table");
+  t.className = "vertable";
+  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인 버전</th><th>LLM</th>" +
+                "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  runs.forEach(x => {
+    const tr = document.createElement("tr");
+    const pick = document.createElement("input");
+    pick.type = "radio"; pick.name = "runpick"; pick.value = x.run_id;
+    const c0 = document.createElement("td"); c0.appendChild(pick); tr.appendChild(c0);
+    [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`, x.chat_model,
+     x.embed_model, x.settings, x.done, x.excluded, x.error,
+     x.active ? "★ 활성(사용자 노출)" : ""].forEach(v => {
+      const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
+    });
+    if (x.active) tr.classList.add("sel");
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:6px";
+  const mkb = (label, title, fn, cls) => { const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.title = title; b.className = cls || "ghost";
+    b.onclick = fn; return b; };
+  const picked = () => { const el = box.querySelector("input[name=runpick]:checked");
+    if (!el) smsg("run을 먼저 선택(라디오)하세요"); return el?.value; };
+  bar.appendChild(mkb("★ 선택 run 활성 전환", "기존 활성 run 기여를 회수하고 이 run을 사용자 노출로 전환",
+    async () => { const rid = picked(); if (!rid) return;
+      const r2 = await fetch(`/admin/runs/${rid}/activate`, {method: "POST"});
+      const j = await r2.json().catch(() => ({}));
+      smsg(r2.ok ? `✓ ${j.note}` : `전환 실패 — ${j.detail || r2.status}`, r2.ok);
+      loadRuns(src); loadDocStatus(); loadRunDocs(src, "", 1); }));
+  bar.appendChild(mkb("▶ 선택 run으로 구조화(끝까지)", "이 run의 조합(도메인 버전 지침·모델·설정)으로 미판정 문서를 처리 — 비활성 run은 결과만 쌓고 반영 안 됨",
+    async () => { const rid = picked(); if (!rid) return;
+      const r2 = await fetch(`/admin/sources/${encodeURIComponent(src)}/structure?run_id=${rid}`, {method: "POST"});
+      const j = await r2.json().catch(() => ({}));
+      smsg(r2.ok ? `▶ ${j.note}` : `실패 — ${j.detail || r2.status}`, r2.ok); }));
+  bar.appendChild(mkb("✚ 새 조합 run 만들기", "도메인 버전·모델·설정을 골라 새 버전 생성 (비활성)", () => renderRunForm(src)));
+  box.appendChild(bar);
+}
+async function renderRunForm(src) {
+  const f = $("runform");
+  if (f.innerHTML) { f.innerHTML = ""; return; }
+  const models = (await fetch("/models").then(r => r.json()).catch(() => ({llm: []}))).llm || [];
+  f.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
+    <input id="rfVer" type="number" min="1" placeholder="도메인 버전 (빈값=기본)" style="width:150px" title="도메인 시드 탭의 버전 번호 — 빈값이면 현재 기본 버전">
+    <select id="rfModel" title="판정 LLM — 빈값이면 현재 전처리 모델"><option value="">LLM (빈값=현재 기본)</option>
+      ${models.map(m => `<option>${m.name}</option>`).join("")}</select>
+    <input id="rfChars" type="number" min="0" placeholder="본문 길이 (빈값=현재)" style="width:140px">
+    <input id="rfPack" type="number" min="0" placeholder="묶음 토큰 (빈값=현재)" style="width:140px">
+    <button type="button" id="rfGo">생성</button></div>`;
+  $("rfGo").onclick = async () => {
+    const body = {};
+    if ($("rfVer").value) body.domain_version = parseInt($("rfVer").value);
+    if ($("rfModel").value) body.chat_model = $("rfModel").value;
+    if ($("rfChars").value) body.body_chars = parseInt($("rfChars").value);
+    if ($("rfPack").value) body.pack_tokens = parseInt($("rfPack").value);
+    const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/runs`, {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const j = await r.json().catch(() => ({}));
+    smsg(r.ok ? `✓ ${j.note}` : `생성 실패 — ${j.detail || r.status}`, r.ok);
+    if (r.ok) { f.innerHTML = ""; loadRuns(src); }
+  };
+}
+async function loadRunDocs(src, status, page) {
+  const fbox = $("docfilter");
+  fbox.innerHTML = "";
+  [["", "전체"], ["done", "반영"], ["excluded", "제외"], ["error", "오류"], ["pending", "미처리"]]
+    .forEach(([v, label]) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = v === status ? "" : "ghost"; b.textContent = label;
+      b.onclick = () => loadRunDocs(src, v, 1);
+      fbox.appendChild(b);
+    });
+  const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/docs?status=${status}&page=${page}`);
+  const box = $("doclist");
+  if (!r.ok) { box.textContent = `문서 조회 실패 (${r.status})`; return; }
+  const j = await r.json();
+  box.innerHTML = "";
+  const t = document.createElement("table");
+  t.className = "vertable";
+  t.innerHTML = "<thead><tr><th>문서 id</th><th>제목</th><th>상태</th><th>사유</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
+  j.docs.forEach(d => {
+    const tr = document.createElement("tr");
+    [d.src_id, d.title, LB[d.status] || d.status, d.note].forEach(v => {
+      const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  if (j.pages > 1) {
+    const pg = document.createElement("div");
+    pg.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:4px";
+    const mk = (lbl, to, dis) => { const b = document.createElement("button");
+      b.type = "button"; b.className = "ghost"; b.textContent = lbl; b.disabled = dis;
+      b.onclick = () => loadRunDocs(src, status, to); return b; };
+    pg.append(mk("◀", page - 1, page <= 1),
+      Object.assign(document.createElement("span"), {textContent: `${page} / ${j.pages} (총 ${j.total}건)`, className: "hint", style: "margin:0"}),
+      mk("▶", page + 1, page >= j.pages));
+    box.appendChild(pg);
+  }
 }
 
 // ── 전처리 설정 ──────────────────────────────────────────────
