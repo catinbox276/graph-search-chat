@@ -63,6 +63,11 @@
                   border-radius: 4px; padding: 0 4px; }
   #agTools .desc { color: var(--mut); font-size: .74rem; overflow: hidden;
                    text-overflow: ellipsis; white-space: nowrap; }
+  .domtree summary { cursor: pointer; list-style: none; }
+  .domtree summary::-webkit-details-marker { display: none; }
+  .domtree > summary .plabel::before { content: "▸ "; color: var(--mut); }
+  .domtree[open] > summary .plabel::before { content: "▾ "; }
+  .domtree .treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .admtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .admtabs button { background: none; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
                     padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
@@ -731,10 +736,18 @@ async function loadDocStatus() {
   const add = (a, s) => ["total", "done", "excluded", "error", "pending"].forEach(k => a[k] += s[k]);
   const tot = zero(), doms = {};
   rows.forEach(s => { add(tot, s); (doms[s.domain] ??= zero()); add(doms[s.domain], s); });
+  // 트리 갱신 전 도메인별 열림 상태 보존 — 5초 폴링이 토글을 되돌리지 않게 (기본: 펼침)
+  const openState = {};
+  box.querySelectorAll("details[data-dom]").forEach(el => { openState[el.dataset.dom] = el.open; });
   let html = pRow("전체", tot, true);
   Object.entries(doms).forEach(([d, agg]) => {
-    html += pRow(`도메인: ${d}`, agg, true);
-    rows.filter(s => s.domain === d).forEach(s => { html += pRow(`└ ${s.source}`, s); });
+    const key = encodeURIComponent(d);
+    const open = openState[key] === false ? "" : " open";  // 기본 전부 펼침
+    html += `<details class="domtree" data-dom="${key}"${open}>`
+          + `<summary>${pRow(`도메인: ${d}`, agg, true)}</summary>`
+          + rows.filter(s => s.domain === d)
+                .map(s => `<div class="treechild">${pRow(`└ ${s.source}`, s)}</div>`).join("")
+          + `</details>`;
   });
   box.innerHTML = html +
     `<div class="hint" style="margin-top:4px"><i style="color:#16a34a">■</i> 그래프 반영
