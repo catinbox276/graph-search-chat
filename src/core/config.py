@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     SESSION_SECRET: str = ""      # 비면 기동 실패
     SESSION_MAX_AGE: int = 28800  # 로그인 쿠키 수명(초) — 기본 8시간
 
+    # --- 에이전트 정체성·범위 (시스템 프롬프트 placeholder — agent/agent.py) ---
+    AGENT_NAME: str = "지식그래프 챗"   # 어시스턴트 이름
+    AGENT_INTRO: str = ""              # 자기소개 문구 (빈값 = 이름 기반 기본 문구)
+    AGENT_SCOPE: str = ("사내 데이터(테이블·스키마·조인·리니지) 조회, "
+                        "사내 노하우·문제해결 지식 검색")  # 지원 범위 서술
+
     # --- LLM 호출 ---
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT: float = 180.0  # LLM 요청 타임아웃(초) — 멈춘 요청이 파이프라인을 무한 대기시키지 않게
