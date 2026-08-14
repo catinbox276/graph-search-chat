@@ -25,7 +25,8 @@ def graph_data(request: Request):
                 WHERE ev.node_id = n.id AND ev.kind = 'session'
                   AND s.verdict = 'fail') AS fc,
                (SELECT COUNT(*) FROM node_evidence ev
-                WHERE ev.node_id = n.id AND ev.kind = 'doc') AS dc
+                WHERE ev.node_id = n.id AND ev.kind = 'doc'
+                  AND ev.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')) AS dc
         FROM nodes n""")
     nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail_reason": r[3],
               "uses": r[4], "success": r[5], "fail_cnt": r[6], "docs": r[7],

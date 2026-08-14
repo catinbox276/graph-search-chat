@@ -86,10 +86,23 @@ def main():
     con.close()
 
 
-def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id="-"):
+def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id="-",
+                   count=True, by_run=False):
     """소스 1개의 미처리 문서를 최대 budget건 판정·병합. 처리한 문서 수를 반환.
-    main()(전 소스 루프)과 run_for_source()(즉시 실행) 공용. s = _load_settings()."""
-    cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
+    main()(전 소스 루프)과 run_for_source()(즉시 실행) 공용. s = _load_settings().
+    by_run=True: '이 run이 아직 판정 안 한 문서'가 대상 (활성 캐시와 무관 — 재판정용).
+    count=False: 비활성 run — 엣지 가중치를 올리지 않고 corpus_docs 캐시도 안 건드림."""
+    if by_run:
+        cur.execute("""SELECT c.src_id, NVL(c.title, ' '), NVL(c.kind, ' '), c.body
+                       FROM corpus_docs c
+                       WHERE c.source_name = :1
+                         AND NOT EXISTS (SELECT 1 FROM doc_results r
+                                         WHERE r.run_id = :2 AND r.source_name = c.source_name
+                                           AND r.src_id = c.src_id)
+                       ORDER BY c.src_id
+                       FETCH FIRST :3 ROWS ONLY""", [source_name, run_id, budget])
+    else:
+        cur.execute("""SELECT src_id, NVL(title, ' '), NVL(kind, ' '), body
                    FROM corpus_docs
                    WHERE source_name = :1 AND graph_status IS NULL
                    ORDER BY src_id
@@ -143,15 +156,16 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                              else "LLM 응답 파싱 실패")
                 elif j.get("fits") and j.get("goal") and j.get("approach"):
                     d = get_or_create(cur, 1, domain, None, "doc", ref,
-                                      use_embedding=False, run_id=run_id)
+                                      use_embedding=False, run_id=run_id, count=count)
                     g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref,
-                                      run_id=run_id)
+                                      run_id=run_id, count=count)
                     get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref,
-                                  run_id=run_id)
+                                  run_id=run_id, count=count)
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
-                cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
+                if count:  # 활성 run만 corpus_docs 캐시 갱신 (비활성은 결과만 기록)
+                    cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
                                WHERE source_name = :3 AND src_id = :4""",
                             [status, (note or "")[:1000] or None, source_name, src_id])
                 if run_id != "-":  # run별 결과 기록 (B-full 버저닝)
@@ -169,13 +183,38 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     return len(docs)
 
 
-def run_for_source(source_name: str, limit: int = 0, drain: bool = False) -> dict:
+def _run_overrides(cur, run_id: str, s):
+    """run 조합 스냅샷을 설정에 덮어씀 — (hint, count, by_run) 반환."""
+    import json as _json
+    cur.execute("""SELECT domain, domain_version, chat_model, settings, active
+                   FROM doc_runs WHERE run_id = :1""", [run_id])
+    r = cur.fetchone()
+    if not r:
+        raise ValueError(f"run이 없습니다: {run_id}")
+    domain, dver, model, st_json, active = r
+    st = _json.loads(st_json or "{}")
+    s.model = (model or "").strip()
+    s.body_chars = st.get("body_chars", s.body_chars)
+    s.pack_tokens = st.get("pack_tokens", s.pack_tokens)
+    s.no_think = bool(st.get("no_think", s.no_think))
+    cur.execute("""SELECT extract_hint FROM domain_versions
+                   WHERE name = :1 AND version = :2""", [domain, dver])
+    h = cur.fetchone()
+    return (h[0] if h and h[0] else ""), active == "Y"
+
+
+def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
+                   run_id: str = "") -> dict:
     """소스 1개를 즉시 구조화 (관리 UI '지금 구조화'). 자체 커넥션으로 동작 —
     HTTP 요청은 이걸 백그라운드 스레드로 돌리고, 진행은 처리 현황이 폴링한다.
 
     drain=True면 미처리가 0이 될 때까지 limit건씩 반복 (즉시 버튼은 '끝까지'가 기대 —
     야간 배치 main()만 회당 limit 상한 유지). 커밋은 _structure_one 안에서 건별로 돼
-    중간에 죽어도 진행분은 남는다."""
+    중간에 죽어도 진행분은 남는다.
+
+    run_id 지정 시: 그 run의 조합(도메인 버전 지침·모델·설정)으로 그 run에 미판정인
+    문서를 처리한다. 비활성 run이면 가중치를 올리지 않고(count=False) 증거·결과만
+    축적 — 반영은 활성 전환(activate_run) 시 델타로."""
     con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD,
                            dsn=config.ORACLE_DSN)
     cur = con.cursor()
@@ -195,10 +234,17 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False) -> dic
         return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
     stats = {"done": 0, "excluded": 0, "error": 0}
     total = 0
-    rid = runs.current_run(cur, source_name)
+    hint, count, by_run = row[2], True, False
+    if run_id:
+        rid = run_id
+        h2, count = _run_overrides(cur, rid, s)
+        hint, by_run = (h2 or hint), True
+    else:
+        rid = runs.current_run(cur, source_name)
     con.commit()
     while True:
-        n = _structure_one(cur, con, row[0], row[1], row[2], s.limit, s, stats, rid)
+        n = _structure_one(cur, con, row[0], row[1], hint, s.limit, s, stats, rid,
+                           count=count, by_run=by_run)
         total += n
         if not drain or n == 0:  # drain: 미처리가 바닥날 때까지 반복
             break

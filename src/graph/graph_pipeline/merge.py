@@ -30,11 +30,13 @@ def _auto_merge_ok(a: str, b: str) -> bool:
 
 
 def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True,
-                  run_id="-"):
+                  run_id="-", count=True):
     """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
 
     ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'.
-    run_id: 문서 증거의 구조화 실행 귀속 (세션은 '-') — B-full 버저닝."""
+    run_id: 문서 증거의 구조화 실행 귀속 (세션은 '-') — B-full 버저닝.
+    count: False면 엣지 가중치를 올리지 않는다 (비활성 run 구조화 — 구조·증거만
+           만들어 두고, 가중치는 활성 전환 시 증거 기반 델타로 가산)."""
     # 임베딩 엔드포인트가 죽어도 구조화는 계속 — 벡터 없으면(vec=None) dedup은 이름/LLM만
     # 사용(과병합만 줄고 진행은 됨). 무한 대기·전체 실패보다 낫다.
     vec = None
@@ -81,10 +83,11 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
              json.dumps(vec).encode() if vec is not None else None])
     if parent_id:
         cur.execute("""MERGE INTO edges e USING dual ON (e.src=:src AND e.dst=:dst)
-                       WHEN MATCHED THEN UPDATE SET raw_count = raw_count+1, weight = weight+1
+                       WHEN MATCHED THEN UPDATE SET raw_count = raw_count+:inc,
+                            weight = weight+:inc
                        WHEN NOT MATCHED THEN INSERT (src, dst, weight, raw_count)
-                       VALUES (:src, :dst, 1, 1)""",
-                    {"src": parent_id, "dst": node_id})
+                       VALUES (:src, :dst, :inc, :inc)""",
+                    {"src": parent_id, "dst": node_id, "inc": 1 if count else 0})
         # ponytail: weight=raw_count. 노출 대비 채택률 보정은 제안 기능이 생긴 뒤에
     # 같은 출처가 같은 노드에 두 번 기여해도 안전 (PK 중복 방지)
     cur.execute("""MERGE INTO node_evidence e USING dual

@@ -371,7 +371,7 @@ def admin_source_reingest(sname: str):
 
 
 @router.post("/admin/sources/{sname}/structure")
-def admin_source_structure(sname: str):
+def admin_source_structure(sname: str, run_id: str = ""):
     """관리자: 지금 구조화 — 야간 03:40 배치를 안 기다리고 미처리 문서를 즉시 판정·그래프 반영.
 
     즉시 버튼은 미처리가 0이 될 때까지 끝까지 처리(drain) — '또 클릭'이 필요 없게.
@@ -382,7 +382,15 @@ def admin_source_structure(sname: str):
 
     # 미처리 문서가 없으면 "시작했다"고만 하고 100%에 머무는 혼란 방지 — 명확히 안내.
     with db_cursor() as cur:
-        cur.execute("""SELECT COUNT(*) FROM corpus_docs
+        if run_id:  # run 지정: 그 run이 아직 판정 안 한 문서 기준
+            cur.execute("""SELECT COUNT(*) FROM corpus_docs c
+                           WHERE c.source_name = :1
+                             AND NOT EXISTS (SELECT 1 FROM doc_results r
+                                             WHERE r.run_id = :2
+                                               AND r.source_name = c.source_name
+                                               AND r.src_id = c.src_id)""", [sname, run_id])
+        else:
+            cur.execute("""SELECT COUNT(*) FROM corpus_docs
                        WHERE source_name = :1 AND graph_status IS NULL""", [sname])
         pending = cur.fetchone()[0]
     if not pending:
@@ -394,7 +402,7 @@ def admin_source_structure(sname: str):
     def _run():
         t0 = time.time()
         try:
-            r = doc_pipeline.run_for_source(sname, drain=True)  # 끝까지 처리
+            r = doc_pipeline.run_for_source(sname, drain=True, run_id=run_id)  # 끝까지 처리
             events.log("batch", source="doc-structure-now", level="info", status="ok",
                        actor=sname, duration_ms=int((time.time() - t0) * 1000),
                        summary=f"지금 구조화 [{sname}]: {r}")
@@ -673,6 +681,49 @@ def admin_source_runs(sname: str):
                  "done": int(r[9] or 0), "excluded": int(r[10] or 0),
                  "error": int(r[11] or 0)} for r in cur.fetchall()]
     return {"runs": rows}
+
+
+class RunCreateIn(BaseModel):
+    domain_version: int | None = None  # 미지정=현재 기본 버전
+    chat_model: str = ""               # 미지정=현재 전처리 모델
+    embed_model: str = ""
+    body_chars: int | None = None
+    pack_tokens: int | None = None
+    no_think: int | None = None
+
+
+@router.post("/admin/sources/{sname}/runs")
+def admin_source_run_create(sname: str, inp: RunCreateIn):
+    """관리자: 새 조합 run 생성 (비활성) — 도메인 버전·모델·설정을 골라 버전을 만든다.
+    이후 [이 run으로 구조화]→ 결과 확인 → [활성 전환]으로 반영."""
+    from graph.doc_pipeline.runs import create_run
+    with db_cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM source_registry WHERE source_name = :1", [sname])
+        if not cur.fetchone()[0]:  # 원천 테이블 실존은 불필요 — 등록 여부만 (이관 시드 소스 포함)
+            raise HTTPException(404, f"소스가 없습니다: {sname}")
+        rid = create_run(cur, sname, domain_version=inp.domain_version,
+                         chat_model=inp.chat_model, embed_model=inp.embed_model,
+                         body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
+                         no_think=inp.no_think)
+    return {"ok": True, "run_id": rid,
+            "note": "run 생성됨(비활성) — [이 run으로 구조화] 후 결과를 보고 활성 전환하세요"}
+
+
+@router.post("/admin/runs/{run_id}/activate")
+def admin_run_activate(run_id: str):
+    """관리자: run 활성 전환 — 기존 활성 run의 그래프 기여를 감산하고 이 run을 가산.
+    경로 제안·그래프 뷰·처리 현황이 즉시 이 run 기준으로 바뀐다."""
+    from graph.doc_pipeline.runs import activate_run
+    with db_cursor() as cur:
+        cur.execute("SELECT source_name FROM doc_runs WHERE run_id = :1", [run_id])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"run이 없습니다: {run_id}")
+        _guard_not_structuring(r[0])
+        out = activate_run(cur, run_id)
+    return {"ok": True, **out,
+            "note": ("이 run이 활성 버전 — 사용자 노출(경로 제안·그래프)이 전환됨"
+                     if out.get("changed") else out.get("note", ""))}
 
 
 @router.get("/admin/sources/{sname}/docs")

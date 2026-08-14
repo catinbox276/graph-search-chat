@@ -83,7 +83,8 @@ def suggest_paths(problem: str) -> str:
                         WHERE ev.node_id = n.id AND ev.kind = 'session'
                           AND s.verdict = 'fail') AS fc,
                        (SELECT COUNT(*) FROM node_evidence ev
-                        WHERE ev.node_id = n.id AND ev.kind = 'doc') AS dc,
+                        WHERE ev.node_id = n.id AND ev.kind = 'doc'
+                          AND ev.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')) AS dc,
                        e.weight
                 FROM edges e JOIN nodes n ON n.id = e.dst
                 WHERE e.src = :1 AND n.layer = 3""", [gid])
@@ -100,8 +101,9 @@ def suggest_paths(problem: str) -> str:
                 # 근거 문서 id 노출 — 답변 인용·footer 수집·read_doc 열람이 가능해진다
                 ev_line = ""
                 if dc:
-                    cur.execute("""SELECT ref FROM node_evidence
-                                   WHERE node_id = :1 AND kind = 'doc'
+                    cur.execute("""SELECT DISTINCT ref FROM node_evidence ev
+                                   WHERE ev.node_id = :1 AND ev.kind = 'doc'
+                                     AND ev.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')
                                    FETCH FIRST 3 ROWS ONLY""", [aid])
                     pids = " ".join(f"[{r[0]}]" for r in cur.fetchall())
                     if pids:

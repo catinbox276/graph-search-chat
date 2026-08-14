@@ -110,6 +110,86 @@ def record_result(cur, run_id: str, source_name: str, src_id: str,
                  "st": status, "nt": (note or "")[:1000] or None})
 
 
+def create_run(cur, source_name: str, domain_version=None, chat_model="",
+               embed_model="", body_chars=None, pack_tokens=None, no_think=None) -> str:
+    """새 조합 run 생성 (비활성) — 지정 안 한 항목은 현재 기본값 스냅샷.
+    구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
+    ensure_runs(cur)
+    c = _combo(cur, source_name)
+    st = json.loads(c["settings"])
+    if body_chars is not None:
+        st["body_chars"] = body_chars
+    if pack_tokens is not None:
+        st["pack_tokens"] = pack_tokens
+    if no_think is not None:
+        st["no_think"] = no_think
+    rid = uuid.uuid4().hex
+    cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
+                     chat_model, embed_model, settings, active)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, 'N')""",
+                [rid, source_name, c["domain"],
+                 domain_version or c["domain_version"],
+                 (chat_model or c["chat_model"]).strip(),
+                 (embed_model or c["embed_model"]).strip(),
+                 json.dumps(st, ensure_ascii=False)])
+    return rid
+
+
+def _run_edge_delta(cur, run_id: str, sign: int) -> int:
+    """run의 문서 증거 기여를 엣지 가중치에 가산(+1)/감산(-1).
+
+    ref(문서)마다 그 문서가 만든 노드 집합 내부 엣지에 ±1 — _reset_source와 같은
+    근사식이라 활성 전환의 가산/감산이 대칭으로 상쇄된다."""
+    cur.execute("""SELECT DISTINCT ref FROM node_evidence
+                   WHERE kind = 'doc' AND run_id = :1""", [run_id])
+    refs = [r[0] for r in cur.fetchall()]
+    op = "+" if sign > 0 else "-"
+    for ref in refs:
+        cur.execute("""SELECT node_id FROM node_evidence
+                       WHERE kind = 'doc' AND ref = :1 AND run_id = :2""", [ref, run_id])
+        nids = [r[0] for r in cur.fetchall()]
+        for j in range(0, len(nids), 100):
+            chunk = nids[j:j + 100]
+            src_marks = ",".join(f":s{k}" for k in range(len(chunk)))
+            dst_marks = ",".join(f":d{k}" for k in range(len(chunk)))
+            binds = {f"s{k}": v for k, v in enumerate(chunk)}
+            binds.update({f"d{k}": v for k, v in enumerate(chunk)})
+            cur.execute(
+                f"""UPDATE edges SET raw_count = GREATEST(raw_count {op} 1, 0),
+                                     weight = GREATEST(weight {op} 1, 0)
+                    WHERE src IN ({src_marks}) AND dst IN ({dst_marks})""", binds)
+    return len(refs)
+
+
+def activate_run(cur, run_id: str) -> dict:
+    """이 run을 소스의 활성 버전으로 전환 — 사용자에게 반영되는 그래프 기여 스위칭.
+
+    ① 기존 활성 run의 기여 감산 → ② 이 run의 기여 가산 → ③ 플래그 교체
+    → ④ corpus_docs 상태 캐시를 이 run의 doc_results로 교체."""
+    cur.execute("SELECT source_name, active FROM doc_runs WHERE run_id = :1", [run_id])
+    r = cur.fetchone()
+    if not r:
+        raise ValueError(f"run이 없습니다: {run_id}")
+    source_name, already = r
+    if already == "Y":
+        return {"source": source_name, "note": "이미 활성 run입니다", "changed": False}
+    cur.execute("""SELECT run_id FROM doc_runs
+                   WHERE source_name = :1 AND active = 'Y'""", [source_name])
+    old = cur.fetchone()
+    subtracted = _run_edge_delta(cur, old[0], -1) if old else 0
+    added = _run_edge_delta(cur, run_id, +1)
+    cur.execute("UPDATE doc_runs SET active = 'N' WHERE source_name = :1", [source_name])
+    cur.execute("UPDATE doc_runs SET active = 'Y' WHERE run_id = :1", [run_id])
+    # 상태 캐시 교체 — 이 run이 판정한 문서는 그 상태로, 나머지는 미처리로
+    cur.execute("""UPDATE corpus_docs d SET (graph_status, graph_note) =
+                     (SELECT r.status, r.note FROM doc_results r
+                      WHERE r.run_id = :rid AND r.source_name = d.source_name
+                        AND r.src_id = d.src_id)
+                   WHERE d.source_name = :s""", {"rid": run_id, "s": source_name})
+    return {"source": source_name, "changed": True,
+            "subtracted_refs": subtracted, "added_refs": added}
+
+
 def finish_run(cur, run_id: str):
     cur.execute("UPDATE doc_runs SET finished = SYSTIMESTAMP WHERE run_id = :1", [run_id])
 
