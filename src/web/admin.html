@@ -63,6 +63,11 @@
                   border-radius: 4px; padding: 0 4px; }
   #agTools .desc { color: var(--mut); font-size: .74rem; overflow: hidden;
                    text-overflow: ellipsis; white-space: nowrap; }
+  .admtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+  .admtabs button { background: none; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
+                    padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
+  .admtabs button.on { color: var(--ink); border-bottom: 2px solid var(--acc, #4a7dff);
+                       font-weight: 700; background: var(--card, transparent); }
 </style>
 </head>
 <body>
@@ -78,7 +83,16 @@
 </header>
 
 <main>
-<section class="card">
+<nav id="admtabs" class="admtabs">
+  <button data-tab="users">계정 관리</button>
+  <button data-tab="domains">도메인 시드</button>
+  <button data-tab="sources">원천 테이블·구조화</button>
+  <button data-tab="models">모델</button>
+  <button data-tab="mcp">MCP 서버</button>
+  <button data-tab="agent">에이전트</button>
+  <button data-tab="events">활동 로그</button>
+</nav>
+<section class="card" id="sec-users">
   <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
   <table id="ulist"><thead><tr><th>아이디</th><th>상태</th><th>권한</th><th>가입일</th><th></th></tr></thead>
     <tbody></tbody></table>
@@ -87,7 +101,7 @@
   <p class="hint err" id="uerr"></p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-domains">
   <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
   <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
     <tbody></tbody></table>
@@ -115,7 +129,7 @@
   <p class="hint err" id="derr"></p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-sources">
   <h3>구조화 원천 테이블 <small>접점 2 — 저쪽 테이블은 읽기 전용, 등록은 사람 전용</small></h3>
   <table id="slist"><thead><tr><th style="width:26px"><input type="checkbox" id="sall" title="현재 페이지 전체 선택/해제"></th>
     <th>소스</th><th>테이블</th><th>id</th><th>시간</th>
@@ -164,12 +178,12 @@
   <p class="hint err" id="serr"></p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-status">
   <h3>처리 현황 <small>문서 구조화 진행도 — 5초마다 갱신</small></h3>
   <div id="docstat"><span class="hint">불러오는 중…</span></div>
 </section>
 
-<section class="card">
+<section class="card" id="sec-pipeline">
   <h3>전처리 설정 <small>전역 — 저장하면 다음 배치(야간 03:40 또는 수동)부터, 재배포 불필요</small></h3>
   <form id="psform">
     <input id="psLimit" type="number" min="1" placeholder="실행당 건수" title="배치 1회에 처리할 문서 수" style="width:110px">
@@ -198,7 +212,7 @@
     <b>생각 끄기</b>: 추론 모델의 생각(thinking) 출력 생략 — 실측 7~8배 빠르고 판정 품질 동일 (끄는 게 기본).</p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-models">
   <h3>모델 레지스트리 <small>LLM·임베딩·리랭커 등록과 역할별 선택</small></h3>
   <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th>기본</th><th>활성</th><th></th></tr></thead>
     <tbody></tbody></table>
@@ -216,7 +230,7 @@
      <b>리랭커</b>: 슬롯만 (리랭크 단계 미구현). 삭제 대신 활성 해제.</p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-mcp">
   <h3>MCP 서버 <small>주소를 등록하면 그 서버의 도구들이 에이전트에 자동 조립됩니다</small></h3>
   <table id="mcplist"><thead><tr><th>이름</th><th>transport</th><th>주소/command</th><th>활성</th><th></th></tr></thead>
     <tbody></tbody></table>
@@ -236,7 +250,7 @@
      같은 이름으로 저장하면 수정(upsert), 삭제 대신 활성 해제.</p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-agent">
   <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
   <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
   <textarea id="agPrompt" spellcheck="false"></textarea>
@@ -254,7 +268,7 @@
      MCP 서버 주소(DATAHUB_GMS_URL)는 인프라 값이라 .env/ConfigMap에서 관리합니다.</p>
 </section>
 
-<section class="card">
+<section class="card" id="sec-events">
   <h3>활동 로그 <small>정상·비정상 전부 (요청·도구·배치·오류) — 최신순, 보관 180일</small></h3>
   <form id="evform" style="margin-bottom:10px">
     <select id="evkind">
@@ -349,7 +363,6 @@ async function userAct(uid, action, label) {
   $("uerr").textContent = r.ok ? "" : `${label} 실패 (${r.status})`;
   loadUsers();
 }
-loadUsers();
 
 // ── 도메인 시드 관리 ──────────────────────────────────────────
 async function loadDomains(selName) {
@@ -399,6 +412,7 @@ $("dform").onsubmit = async (e) => {
     return;
   }
   await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
+  loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
   dmsg(`✓ 저장 완료 — "${name}" (다음 파이프라인 실행부터 반영)`, true);
 };
 $("dreset").onclick = async () => {
@@ -503,8 +517,8 @@ async function loadTables() {
   (await r.json()).tables.forEach(t => sel.add(new Option(t, t)));
   sel.value = cur;
 }
-async function loadDomainOptions() {
-  if ($("sdomain").options.length > 1) return;
+async function loadDomainOptions(force) {
+  if (!force && $("sdomain").options.length > 1) return;
   const r = await fetch("/admin/domains");
   if (!r.ok) return;
   const sel = $("sdomain"), cur = sel.value;
@@ -675,7 +689,7 @@ $("ddelete").onclick = async () => {
   const j = await r.json();
   dmsg(`✓ ${j.note}` + (j.deleted_nodes ? ` (노드 ${j.deleted_nodes}개 삭제)` : ""), true);
   $("dname").value = "";
-  loadDomains(); loadSources(); loadDocStatus();
+  loadDomains(); loadSources(); loadDocStatus(); loadDomainOptions(true);
 };
 $("sretry").onclick = () => reprocess("errors", "실패 재시도");
 $("sreset").onclick = () => reprocess("reset", "초기화 재처리");
@@ -990,11 +1004,34 @@ $("evsearch").onclick = () => { evPage = 1; loadEvents(); };
 $("evq").addEventListener("keydown", e => { if (e.key === "Enter") { evPage = 1; loadEvents(); } });
 $("evkind").onchange = $("evlevel").onchange = () => { evPage = 1; loadEvents(); };
 
-// 페이지 초기 로드 + 현황 폴링
-loadDomains(); loadSources(); loadTables(); loadDomainOptions();
-loadPipelineSettings(); loadDocStatus(); loadModels(); loadMcp(); loadAgentSettings();
-loadEvents();
-setInterval(loadDocStatus, 5000);
+// ── 탭 라우터 — 탭 진입 시마다 해당 섹션 데이터를 새로 로드 (동기화 문제 원천 차단) ──
+const TABS = {
+  users:   {secs: ["sec-users"], load: () => loadUsers()},
+  domains: {secs: ["sec-domains"], load: () => loadDomains()},
+  sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
+            load: () => { loadDomainOptions(true); loadSources(); loadTables();
+                          loadPipelineSettings(); loadDocStatus(); }},
+  models:  {secs: ["sec-models"], load: () => loadModels()},
+  mcp:     {secs: ["sec-mcp"], load: () => loadMcp()},
+  agent:   {secs: ["sec-agent"], load: () => loadAgentSettings()},
+  events:  {secs: ["sec-events"], load: () => loadEvents()},
+};
+let _tab = "";
+function showTab(name) {
+  _tab = name;
+  document.querySelectorAll("#admtabs button").forEach(b =>
+    b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll("main > section.card").forEach(sec => {
+    sec.style.display = TABS[name].secs.includes(sec.id) ? "" : "none";
+  });
+  TABS[name].load();  // 진입 시마다 fresh 로드 — 다른 탭에서 바꾼 내용 즉시 반영
+  location.hash = name;
+}
+document.querySelectorAll("#admtabs button").forEach(b => {
+  b.onclick = () => showTab(b.dataset.tab);
+});
+showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "users");
+setInterval(() => { if (_tab === "sources") loadDocStatus(); }, 5000);  // 폴링은 해당 탭에서만
 </script>
 </body>
 </html>
