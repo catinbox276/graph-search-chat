@@ -81,6 +81,14 @@ def admin_domain_add(inp: DomainIn):
                        VALUES (:n, :t, :p, :h, :s)""",
                     {"n": inp.name, "t": inp.tools or None, "p": inp.priority,
                      "h": inp.extract_hint or None, "s": inp.scope})
+        _ensure_domain_versions(cur)  # 직접 저장 = 새 버전 생성 + 즉시 기본
+        cur.execute("UPDATE domain_versions SET is_default = 'N' WHERE name = :1", [inp.name])
+        cur.execute("""INSERT INTO domain_versions
+                         (name, version, tools, priority, extract_hint, scope, is_default)
+                       SELECT :n, NVL(MAX(version), 0) + 1, :t, :p, :h, :s, 'Y'
+                       FROM domain_versions WHERE name = :n""",
+                    {"n": inp.name, "t": inp.tools or None, "p": inp.priority,
+                     "h": inp.extract_hint or None, "s": inp.scope})
     note = {"doc": "문서 전용 — 소스(📚)에 지정하면 문서 구조화에 사용 (대화 분류엔 안 낌)",
             "chat": "대화 전용 — 다음 파이프라인 실행부터 신규 세션 분류에 반영",
             "both": "대화+문서 — 세션 분류와 소스 문서 구조화 양쪽에 사용"}[inp.scope]
@@ -431,6 +439,94 @@ def _reset_source(cur, sname: str):
     return cur.rowcount, len(refs)
 
 
+def _ensure_domain_versions(cur):
+    """도메인 버전 테이블 + 기존 도메인의 v1 시드 (멱등).
+
+    domain_registry는 '현재 기본 버전의 캐시' — 파이프라인(classify_domain·doc_pipeline)은
+    registry만 읽으므로 코드 수정 없이 항상 기본 버전 기준으로 동작한다."""
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOMAIN_VERSIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE domain_versions (
+            name         VARCHAR2(100) NOT NULL,
+            version      NUMBER NOT NULL,
+            tools        VARCHAR2(2000),
+            priority     NUMBER DEFAULT 100,
+            extract_hint VARCHAR2(2000),
+            scope        VARCHAR2(10) DEFAULT 'both',
+            is_default   CHAR(1) DEFAULT 'N',
+            created      TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT domain_versions_pk PRIMARY KEY (name, version))""")
+    # 버전이 하나도 없는 기존 도메인 → 현재 registry 값을 v1(기본)으로 시드
+    cur.execute("""INSERT INTO domain_versions
+                     (name, version, tools, priority, extract_hint, scope, is_default)
+                   SELECT r.name, 1, r.tools, r.priority, r.extract_hint,
+                          NVL(r.scope, 'both'), 'Y'
+                   FROM domain_registry r
+                   WHERE NOT EXISTS (SELECT 1 FROM domain_versions v WHERE v.name = r.name)""")
+
+
+@router.get("/admin/domains/{dname}/versions")
+def admin_domain_versions(dname: str, page: int = 1):
+    """관리자: 도메인 버전 목록 — 최신순, 10개 페이지네이션."""
+    page = max(1, page)
+    with db_cursor() as cur:
+        ensure_domain_registry(cur)
+        _ensure_domain_versions(cur)
+        cur.execute("SELECT COUNT(*) FROM domain_versions WHERE name = :1", [dname])
+        total = cur.fetchone()[0]
+        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'), tools,
+                              priority, extract_hint, NVL(scope, 'both'), is_default
+                       FROM domain_versions WHERE name = :1
+                       ORDER BY version DESC
+                       OFFSET :2 ROWS FETCH NEXT 10 ROWS ONLY""",
+                    [dname, (page - 1) * 10])
+        rows = [{"version": int(r[0]), "created": r[1], "tools": r[2] or "",
+                 "priority": int(r[3] or 100), "extract_hint": r[4] or "",
+                 "scope": r[5], "is_default": r[6] == "Y"} for r in cur.fetchall()]
+    return {"versions": rows, "total": total, "page": page,
+            "pages": max(1, (total + 9) // 10)}
+
+
+@router.post("/admin/domains/{dname}/versions")
+def admin_domain_version_add(dname: str, inp: DomainIn):
+    """관리자: 버전 업 — 새 버전 생성만 하고 기본으로 지정하지 않는다 (별도 선택)."""
+    with db_cursor() as cur:
+        ensure_domain_registry(cur)
+        _ensure_domain_versions(cur)
+        cur.execute("SELECT COUNT(*) FROM domain_registry WHERE name = :1", [dname])
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"도메인이 없습니다: {dname} (버전 업은 기존 도메인에만)")
+        cur.execute("""INSERT INTO domain_versions
+                         (name, version, tools, priority, extract_hint, scope)
+                       SELECT :n, NVL(MAX(version), 0) + 1, :t, :p, :h, :s
+                       FROM domain_versions WHERE name = :n""",
+                    {"n": dname, "t": inp.tools or None, "p": inp.priority,
+                     "h": inp.extract_hint or None, "s": inp.scope})
+        cur.execute("SELECT MAX(version) FROM domain_versions WHERE name = :1", [dname])
+        v = int(cur.fetchone()[0])
+    return {"ok": True, "version": v,
+            "note": f"v{v} 생성됨 — 아직 기본이 아닙니다. 버전 목록에서 체크 후 [기본으로 지정]"}
+
+
+@router.post("/admin/domains/{dname}/versions/{v}/default")
+def admin_domain_version_default(dname: str, v: int):
+    """관리자: 선택 버전을 기본으로 — registry에 값을 복사해 파이프라인에 즉시 반영."""
+    with db_cursor() as cur:
+        _ensure_domain_versions(cur)
+        cur.execute("""SELECT tools, priority, extract_hint, NVL(scope, 'both')
+                       FROM domain_versions WHERE name = :1 AND version = :2""", [dname, v])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"버전이 없습니다: {dname} v{v}")
+        cur.execute("UPDATE domain_versions SET is_default = 'N' WHERE name = :1", [dname])
+        cur.execute("UPDATE domain_versions SET is_default = 'Y' "
+                    "WHERE name = :1 AND version = :2", [dname, v])
+        cur.execute("""UPDATE domain_registry SET tools = :t, priority = :p,
+                            extract_hint = :h, scope = :s WHERE name = :n""",
+                    {"t": r[0], "p": r[1], "h": r[2], "s": r[3], "n": dname})
+    return {"ok": True, "note": f"v{v}이(가) 기본 버전 — 다음 분류·구조화부터 이 기준으로 동작"}
+
+
 class ConfirmIn(BaseModel):
     confirm: str = ""  # 파괴적 삭제는 "delete" 타이핑 확인 (연결 데이터 있을 때)
 
@@ -476,6 +572,7 @@ def admin_domain_delete(dname: str, inp: ConfirmIn):
                              START WITH src = :1 CONNECT BY PRIOR dst = src)
                            OR id = :1""", [did])
         cur.execute("UPDATE source_registry SET domain = NULL WHERE domain = :1", [dname])
+        cur.execute("DELETE FROM domain_versions WHERE name = :1", [dname])
         cur.execute("DELETE FROM domain_registry WHERE name = :1", [dname])
     return {"ok": True, "deleted_nodes": (desc + 1) if did else 0,
             "detached_sources": sources,

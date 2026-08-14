@@ -73,6 +73,10 @@
   .toolgrp > summary::before { content: "▸ "; color: var(--mut); }
   .toolgrp[open] > summary::before { content: "▾ "; }
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
+  .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
+  .vertable { width: 100%; font-size: .78rem; }
+  .vertable th, .vertable td { padding: 3px 6px; text-align: left; }
+  .vertable td:nth-child(7) { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .admtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .admtabs button { background: none; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
                     padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
@@ -399,9 +403,94 @@ async function loadDomains(selName) {
       $("dname").value = d.name; $("dscope").value = d.scope || "both";
       $("dtools").value = d.tools; $("dprio").value = d.priority;
       $("dhint").value = d.extract_hint || "";
+      toggleDomainVersions(d.name, tr);  // 행 바로 아래 버전 패널 펼침/접힘
     };
     tb.appendChild(tr);
   });
+}
+// ── 도메인 버전 패널 — 행 아래 토글, 10개 페이지네이션, 버전 업/기본 지정 ──
+function toggleDomainVersions(dname, tr) {
+  const next = tr.nextElementSibling;
+  const wasOpen = next && next.classList.contains("verrow");
+  document.querySelectorAll("#dlist .verrow").forEach(x => x.remove());
+  if (wasOpen) return;  // 같은 행 재클릭 = 접기
+  const row = document.createElement("tr");
+  row.className = "verrow";
+  const td = document.createElement("td");
+  td.colSpan = 5;
+  row.appendChild(td);
+  tr.after(row);
+  renderDomainVersions(dname, 1, td);
+}
+async function renderDomainVersions(dname, page, td) {
+  td.innerHTML = "⏳ 버전 조회 중…";
+  const r = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions?page=${page}`);
+  if (!r.ok) { td.textContent = `버전 조회 실패 (${r.status})`; return; }
+  const j = await r.json();
+  td.innerHTML = "";
+  const t = document.createElement("table");
+  t.className = "vertable";
+  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성일</th><th>용도</th>" +
+                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
+  j.versions.forEach(v => {
+    const vr = document.createElement("tr");
+    const sel = document.createElement("input");
+    sel.type = "radio"; sel.name = "verpick"; sel.value = v.version;
+    sel.onclick = () => {  // 버전 선택 = 그 버전 값으로 폼 로드 (편집 기반)
+      $("dname").value = dname; $("dscope").value = v.scope;
+      $("dtools").value = v.tools; $("dprio").value = v.priority;
+      $("dhint").value = v.extract_hint;
+      dmsg(`v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기] 또는 [등록/수정(=기본 반영)]`);
+    };
+    const c0 = document.createElement("td"); c0.appendChild(sel); vr.appendChild(c0);
+    [`v${v.version}`, v.created, SCOPE_LABEL[v.scope] || v.scope, v.tools,
+     v.priority, v.extract_hint, v.is_default ? "★ 기본" : ""].forEach(x => {
+      const c = document.createElement("td"); c.textContent = x ?? ""; vr.appendChild(c);
+    });
+    if (v.is_default) vr.classList.add("sel");
+    tb.appendChild(vr);
+  });
+  t.appendChild(tb);
+  td.appendChild(t);
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
+  const mkBtn = (label, title, fn, cls) => { const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.title = title; b.className = cls || "ghost";
+    b.onclick = fn; return b; };
+  bar.appendChild(mkBtn("✚ 새 버전 만들기 (현재 폼 값)",
+    "위 폼의 도구·우선순위·지침으로 새 버전을 생성합니다 — 생성만 하고 기본으로 지정하지 않음",
+    async () => {
+      const r2 = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name: dname, tools: $("dtools").value.trim(),
+                              priority: parseInt($("dprio").value) || 100,
+                              extract_hint: $("dhint").value.trim(),
+                              scope: $("dscope").value})});
+      const j2 = await r2.json().catch(() => ({}));
+      dmsg(r2.ok ? `✓ ${j2.note}` : `버전 생성 실패 — ${j2.detail || r2.status}`, r2.ok);
+      if (r2.ok) renderDomainVersions(dname, 1, td);
+    }));
+  bar.appendChild(mkBtn("★ 선택 버전을 기본으로", "체크(라디오)한 버전을 기본으로 지정 — 다음 분류·구조화부터 적용",
+    async () => {
+      const pick = td.querySelector("input[name=verpick]:checked");
+      if (!pick) { dmsg("기본으로 지정할 버전을 먼저 선택하세요"); return; }
+      const r2 = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions/${pick.value}/default`,
+                             {method: "POST"});
+      const j2 = await r2.json().catch(() => ({}));
+      dmsg(r2.ok ? `✓ ${j2.note}` : `기본 지정 실패 — ${j2.detail || r2.status}`, r2.ok);
+      if (r2.ok) { renderDomainVersions(dname, page, td); loadDomains(dname); loadDomainOptions(true); }
+    }));
+  if (j.pages > 1) {
+    if (page > 1) bar.appendChild(mkBtn("◀", "이전", () => renderDomainVersions(dname, page - 1, td)));
+    const info = document.createElement("span");
+    info.className = "hint"; info.style.margin = "0";
+    info.textContent = `${page} / ${j.pages} (총 ${j.total}버전)`;
+    bar.appendChild(info);
+    if (page < j.pages) bar.appendChild(mkBtn("▶", "다음", () => renderDomainVersions(dname, page + 1, td)));
+  }
+  td.appendChild(bar);
 }
 $("dform").onsubmit = async (e) => {
   e.preventDefault();
@@ -423,7 +512,7 @@ $("dform").onsubmit = async (e) => {
   }
   await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
   loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
-  dmsg(`✓ 저장 완료 — "${name}" (다음 파이프라인 실행부터 반영)`, true);
+  dmsg(`✓ 저장 완료 — "${name}" 새 버전 생성 + 기본 반영 (다음 파이프라인부터)`, true);
 };
 $("dreset").onclick = async () => {
   const name = $("dname").value.trim();
