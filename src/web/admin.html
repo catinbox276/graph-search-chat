@@ -68,6 +68,11 @@
   .domtree > summary .plabel::before { content: "▸ "; color: var(--mut); }
   .domtree[open] > summary .plabel::before { content: "▾ "; }
   .domtree .treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
+  .toolgrp { margin: 4px 0; }
+  .toolgrp > summary { cursor: pointer; list-style: none; font-size: .85rem; }
+  .toolgrp > summary::before { content: "▸ "; color: var(--mut); }
+  .toolgrp[open] > summary::before { content: "▾ "; }
+  .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .admtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
   .admtabs button { background: none; border: 1px solid var(--line); border-radius: 8px 8px 0 0;
                     padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
@@ -932,21 +937,46 @@ async function loadAgentSettings() {
   $("agPrompt").placeholder = s.default_prompt;
   $("agMcp").checked = s.mcp_enabled;
   const box = $("agTools");
+  // 갱신 전 그룹 열림 상태 보존 (기본: 전부 펼침)
+  const openState = {};
+  box.querySelectorAll("details[data-grp]").forEach(el => { openState[el.dataset.grp] = el.open; });
   box.innerHTML = "";
-  s.tools.forEach(t => {
-    const lab = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.value = t.name; cb.className = "agtool";
-    cb.checked = !s.disabled_tools.includes(t.name);
-    const nm = document.createElement("b"); nm.textContent = t.name;
-    const src = document.createElement("span"); src.className = "src";
-    src.textContent = t.source === "builtin" ? "내장"
-                    : t.source === "source" ? "소스 검색"
-                    : t.source.replace("mcp:", "MCP: ");
-    const desc = document.createElement("span"); desc.className = "desc";
-    desc.textContent = t.description || ""; desc.title = t.description || "";
-    lab.append(cb, nm, src, desc);
-    box.appendChild(lab);
+  // 출처별 그룹핑 — 내장 / 소스별 검색(원천 테이블 단위) / MCP·REST 서버별
+  const groupOf = t => t.source === "builtin" ? "🧩 내장 도구 (경로 제안·문서 검색)"
+                     : t.source === "source" ? "📚 소스별 검색 (원천 테이블 단위 — 소스 등록 시 자동 생성)"
+                     : t.source.startsWith("mcp:") ? `🔌 MCP 서버: ${t.source.slice(4)}`
+                     : t.source.startsWith("rest:") ? `🔌 REST 도구 서버: ${t.source.slice(5)}`
+                     : t.source;
+  const groups = {};
+  s.tools.forEach(t => (groups[groupOf(t)] ??= []).push(t));
+  Object.entries(groups).forEach(([g, tools]) => {
+    const det = document.createElement("details");
+    det.className = "toolgrp"; det.dataset.grp = g;
+    det.open = openState[g] !== false;  // 기본 펼침, 사용자가 접은 건 유지
+    const sum = document.createElement("summary");
+    const gcb = document.createElement("input");  // 그룹 일괄 on/off
+    gcb.type = "checkbox"; gcb.title = "이 그룹 전체 켜기/끄기";
+    gcb.onclick = (e) => { e.stopPropagation();
+      det.querySelectorAll(".agtool").forEach(c => { c.checked = gcb.checked; }); };
+    const gname = document.createElement("b"); gname.textContent = g;
+    const gcnt = document.createElement("span"); gcnt.className = "src";
+    gcnt.textContent = `${tools.length}개`;
+    sum.append(gcb, " ", gname, " ", gcnt);
+    det.appendChild(sum);
+    tools.forEach(t => {
+      const lab = document.createElement("label");
+      lab.className = "treechild";
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.value = t.name; cb.className = "agtool";
+      cb.checked = !s.disabled_tools.includes(t.name);
+      const nm = document.createElement("b"); nm.textContent = t.name;
+      const desc = document.createElement("span"); desc.className = "desc";
+      desc.textContent = t.description || ""; desc.title = t.description || "";
+      lab.append(cb, nm, desc);
+      det.appendChild(lab);
+    });
+    gcb.checked = tools.every(t => !s.disabled_tools.includes(t.name));
+    box.appendChild(det);
   });
 }
 $("agForm").onsubmit = async (e) => {
