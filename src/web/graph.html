@@ -198,10 +198,12 @@ function build() {
     vedges = new vis.DataSet(wantE);
     net = new vis.Network(document.getElementById("net"), {nodes: vnodes, edges: vedges}, {
       /* 물리는 상시 켜둠 — 필터·검색으로 노드가 바뀌면 힘 계산이 다시 돌아
-         재배치가 애니메이션으로 보이고, 드래그하면 이웃이 따라 움직인다 */
+         재배치가 애니메이션으로 보이고, 드래그하면 이웃이 따라 움직인다.
+         damping↑·minVelocity↑ = 출렁임 억제 + 빨리 정지 (갱신 애니메이션은 유지) */
       physics: {
         barnesHut: {gravitationalConstant: -6000, springLength: 130,
-                    springConstant: 0.02, damping: 0.4},
+                    springConstant: 0.02, damping: 0.7},
+        minVelocity: 2,
         stabilization: {iterations: 200},
       },
       interaction: {hover: true, tooltipDelay: 120},
@@ -296,7 +298,9 @@ document.getElementById("find").addEventListener("keydown", async e => {
   const kw = e.target.value.trim();
   if (!kw) { SEARCH_IDS = null; build(); return; }  // 빈값 Enter → 전체 복귀
   // 서버 하이브리드 검색 (문서 검색과 동일: Kiwi 형태소 BM25 + 임베딩 코사인 RRF)
-  const r = await fetch("/graph/search?q=" + encodeURIComponent(kw));
+  // n = "최대 노드" 설정과 연동 — 상한을 올리면 검색 결과도 그만큼
+  const r = await fetch("/graph/search?q=" + encodeURIComponent(kw) +
+                        "&n=" + (+document.getElementById("maxN").value || 100));
   const {ids} = await r.json();
   SEARCH_IDS = new Set(ids);
   build();  // diff 갱신이라 애니메이션으로 전환

@@ -15,6 +15,7 @@ def graph_search(q: str, request: Request, n: int = 40):
     auth.require_user(request)
     from search import inmemory_index as ix
     ix.ensure_fresh()
+    n = max(1, min(n, 500))
     sem = ix.node_semantic(q, n, config.PATH_SIM_ENTRY)
     lex = ix.node_lexical(q, n)
     rrf = {}
