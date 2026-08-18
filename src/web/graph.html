@@ -203,9 +203,9 @@ function build() {
          damping↑·minVelocity↑ = 출렁임 억제 + 빨리 정지 (갱신 애니메이션은 유지) */
       physics: {
         barnesHut: {gravitationalConstant: -6000, springLength: 130,
-                    springConstant: 0.02, damping: 0.7},
-        minVelocity: 2,
-        stabilization: {iterations: 200},
+                    springConstant: 0.02, damping: 0.6},
+        minVelocity: 0.75,   /* 너무 높으면 시뮬이 즉시 잠들어 재정렬·드래그가 안 먹음 */
+        stabilization: {iterations: 300},
       },
       interaction: {hover: true, tooltipDelay: 120},
     });
@@ -291,16 +291,12 @@ function focusNode(id) {
   showPanel(id);
 }
 
-// 펼치기 — 접히고 꺾인 배치를 흩뿌린 뒤 물리로 다시 정렬 (움직임이 보이는 재배치)
+// 펼치기 — 현재 표시 노드로 레이아웃을 처음부터 다시 계산 (setData가 물리 안정화를 재실행)
 function spread() {
   if (!net) return;
-  const ids = vnodes.getIds();
-  const R = 60 * Math.sqrt(ids.length + 1);   // 노드 수에 비례한 반경으로 산포
-  vnodes.update(ids.map(id => ({id, x: (Math.random() - .5) * R * 2,
-                                    y: (Math.random() - .5) * R * 2})));
-  net.once("stabilized", () =>
+  net.setData({nodes: vnodes, edges: vedges});
+  net.once("stabilizationIterationsDone", () =>
     net.fit({animation: {duration: 600, easingFunction: "easeInOutQuad"}}));
-  net.fit({animation: {duration: 600, easingFunction: "easeInOutQuad"}});
 }
 document.getElementById("spreadBtn").onclick = spread;
 
