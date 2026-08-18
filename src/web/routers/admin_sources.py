@@ -15,6 +15,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from core import config, events, settings
 from graph import doc_pipeline
+from graph.doc_pipeline import scheduler
 from graph.graph_pipeline import ensure_domain_registry
 from ingestion import chunk_corpus, ingest_sources, source_registry
 from web.deps import check_admin, db_cursor
@@ -379,6 +380,8 @@ def admin_source_structure(sname: str, run_id: str = ""):
     돌린다. 진행은 처리 현황(5초 폴링)에서 실시간으로 보인다. 도메인 지정 소스만 대상."""
     if sname in _structuring:
         raise HTTPException(409, "이미 이 소스를 구조화 중입니다 — 처리 현황에서 진행 확인")
+    if scheduler.is_running():
+        raise HTTPException(409, "예약 구조화가 실행 중입니다 — 처리 현황에서 확인하세요")
 
     # 미처리 문서가 없으면 "시작했다"고만 하고 100%에 머무는 혼란 방지 — 명확히 안내.
     with db_cursor() as cur:
@@ -419,6 +422,47 @@ def admin_source_structure(sname: str, run_id: str = ""):
     return {"ok": True,
             "note": "구조화를 시작했습니다 — 미처리가 0이 될 때까지 끝까지 처리합니다(다시 클릭 불필요). "
                     "진행은 아래 처리 현황(5초 갱신)에서 실시간으로 올라갑니다."}
+
+
+# ── 예약 스케줄러 (문서 구조화 — graph/doc_pipeline/scheduler.py) ─────────────
+class ScheduleIn(BaseModel):
+    enabled: bool = False
+    time: str = "03:40"   # HH:MM (KST)
+
+
+@router.get("/admin/schedule")
+def admin_schedule_get():
+    """예약 상태 — 활성/시각/중지/실행중/진행 소스·건수. 처리 현황이 5초 폴링."""
+    return scheduler.status()
+
+
+@router.post("/admin/schedule")
+def admin_schedule_set(inp: ScheduleIn):
+    """예약 시각·활성 저장 (app_settings 영속)."""
+    scheduler.set_schedule(inp.enabled, inp.time)
+    return {"ok": True, **scheduler.status()}
+
+
+@router.post("/admin/schedule/stop")
+def admin_schedule_stop():
+    """중지 — 실행 중이면 배치 경계에서 멈추고, 영속 플래그로 유지된다."""
+    scheduler.stop()
+    return {"ok": True, "note": "중지했습니다 — 실행 중이면 곧 멈춥니다. '다시 시작'까지 유지됩니다."}
+
+
+@router.post("/admin/schedule/resume")
+def admin_schedule_resume():
+    """다시 시작 — 중지 해제. 이후 예약 시각에 다시 실행되고 수동 실행도 가능."""
+    scheduler.resume()
+    return {"ok": True, "note": "다시 시작했습니다 — 예약 시각에 다시 실행됩니다."}
+
+
+@router.post("/admin/schedule/run-now")
+def admin_schedule_run_now():
+    """지금 전체 구조화 — 예약과 같은 경로(모든 대상 소스 drain). 중복·중지면 거절."""
+    if not scheduler.run_all("manual"):
+        raise HTTPException(409, "이미 처리 중이거나 중지 상태입니다 (중지면 '다시 시작' 먼저).")
+    return {"ok": True, "note": "전체 소스 구조화를 시작했습니다 — 아래 처리 현황에서 진행 확인."}
 
 
 def _reset_source(cur, sname: str):

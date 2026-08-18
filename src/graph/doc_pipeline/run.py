@@ -204,7 +204,7 @@ def _run_overrides(cur, run_id: str, s):
 
 
 def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
-                   run_id: str = "") -> dict:
+                   run_id: str = "", should_stop=None) -> dict:
     """소스 1개를 즉시 구조화 (관리 UI '지금 구조화'). 자체 커넥션으로 동작 —
     HTTP 요청은 이걸 백그라운드 스레드로 돌리고, 진행은 처리 현황이 폴링한다.
 
@@ -242,7 +242,11 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
     else:
         rid = runs.current_run(cur, source_name)
     con.commit()
+    stopped = False
     while True:
+        if should_stop and should_stop():  # 예약/수동 중지 — 배치 경계에서 협조적 취소
+            stopped = True
+            break
         n = _structure_one(cur, con, row[0], row[1], hint, s.limit, s, stats, rid,
                            count=count, by_run=by_run)
         total += n
@@ -251,4 +255,4 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
     runs.finish_run(cur, rid)
     con.commit()
     con.close()
-    return {"processed": total, **stats}
+    return {"processed": total, "stopped": stopped, **stats}

@@ -54,6 +54,14 @@
                    overflow: hidden; background: #e5e7eb; }
   #docstat .pbar i { display: block; height: 100%; }
   #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
+  #schedbox { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+              margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .schedrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: .82rem; }
+  .schedrow label { display: flex; align-items: center; gap: 5px; color: var(--ink); }
+  .schedrow input[type=time] { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .schedstate { font-size: .76rem; color: var(--mut); }
+  .schedstate .run { color: #16a34a; font-weight: 600; }
+  .schedstate .stop { color: var(--fail); font-weight: 600; }
   /* 문서별 결과: 한 줄 고정 — 긴 제목·사유는 …로 자르고 클릭하면 원본 모달 */
   #doclist table td { white-space: nowrap; }
   #doclist table td:nth-child(2), #doclist table td:nth-child(4) {
@@ -254,6 +262,20 @@
 
 <section class="card" id="sec-status">
   <h3>처리 현황 <small>문서 구조화 진행도 — 5초마다 갱신</small></h3>
+  <div id="schedbox">
+    <div class="schedrow">
+      <label><input type="checkbox" id="scEnabled"> 예약 활성</label>
+      <label>시각(KST) <input type="time" id="scTime" value="03:40"></label>
+      <button type="button" id="scSave">예약 저장</button>
+      <span class="schedstate" id="scState"></span>
+    </div>
+    <div class="schedrow">
+      <button type="button" id="scRun">지금 전체 구조화</button>
+      <button type="button" id="scStop" class="warn">■ 중지</button>
+      <button type="button" id="scResume">▶ 다시 시작</button>
+      <span class="hint" id="scMsg" style="margin:0"></span>
+    </div>
+  </div>
   <div id="docstat"><span class="hint">불러오는 중…</span></div>
   <p class="hint">소스 줄을 클릭하면 <b>구조화 실행(run) 버전 목록</b>과 <b>문서별 결과</b>가 아래에 열립니다.</p>
   <div id="runpanel"></div>
@@ -918,6 +940,36 @@ function pRow(label, s, agg) {
     <span class="pnum">${pct}% — 반영 ${s.done} · 제외 ${s.excluded}${s.error ? ` · <b style="color:#dc2626">오류 ${s.error}</b>` : ""} · 미처리 ${s.pending}</span>
   </div>`;
 }
+// ── 예약 스케줄러 (문서 구조화) ──
+async function loadSchedule() {
+  const r = await fetch("/admin/schedule").catch(() => null);
+  if (!r?.ok) return;
+  const s = await r.json();
+  if (document.activeElement !== $("scEnabled")) $("scEnabled").checked = s.enabled;
+  if (document.activeElement !== $("scTime")) $("scTime").value = s.time || "03:40";
+  const parts = [];
+  parts.push(s.running
+    ? `<span class="run">● 처리 중</span>${s.current ? " · " + esc(s.current) : ""} · ${s.processed}건${s.trigger ? " (" + esc(s.trigger) + ")" : ""}`
+    : "○ 대기");
+  if (s.stopped) parts.push(`<span class="stop">■ 중지됨 (다시 시작 필요)</span>`);
+  parts.push(`예약 ${s.enabled ? "활성" : "비활성"} ${esc(s.time || "")}`);
+  if (s.last_run) parts.push(`최근 ${esc(s.last_run)}`);
+  $("scState").innerHTML = parts.join(" · ");
+}
+const _scPost = async (url, okmsg) => {
+  $("scMsg").textContent = "";
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"},
+    body: url === "/admin/schedule"
+      ? JSON.stringify({enabled: $("scEnabled").checked, time: $("scTime").value}) : "{}"});
+  const j = await r.json().catch(() => ({}));
+  $("scMsg").textContent = r.ok ? (okmsg || j.note || "✓") : (j.detail || `실패 (${r.status})`);
+  loadSchedule(); loadDocStatus();
+};
+$("scSave").onclick = () => _scPost("/admin/schedule", "✓ 예약 저장됨 — 지정 시각에 자동 실행");
+$("scRun").onclick = () => _scPost("/admin/schedule/run-now");
+$("scStop").onclick = () => _scPost("/admin/schedule/stop");
+$("scResume").onclick = () => _scPost("/admin/schedule/resume");
+
 async function loadDocStatus() {
   const box = $("docstat");
   const r = await fetch("/admin/doc-status").catch(() => null);
@@ -1470,7 +1522,7 @@ const TABS = {
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources(); loadTables();
-                          loadPipelineSettings(); loadDocStatus(); }},
+                          loadPipelineSettings(); loadDocStatus(); loadSchedule(); }},
   models:  {secs: ["sec-models"], load: () => loadModels()},
   mcp:     {secs: ["sec-mcp"], load: () => loadMcp()},
   agent:   {secs: ["sec-agent"], load: () => loadAgentSettings()},
@@ -1491,7 +1543,7 @@ document.querySelectorAll("#admtabs button").forEach(b => {
   b.onclick = () => showTab(b.dataset.tab);
 });
 showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "users");
-setInterval(() => { if (_tab === "sources") loadDocStatus(); }, 5000);  // 폴링은 해당 탭에서만
+setInterval(() => { if (_tab === "sources") { loadDocStatus(); loadSchedule(); } }, 5000);  // 폴링은 해당 탭에서만
 </script>
 </body>
 </html>

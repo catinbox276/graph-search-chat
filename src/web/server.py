@@ -169,6 +169,9 @@ async def startup():
     deps.set_saver(OracleSaver())  # 멀티턴 기억 — Oracle 외부화
     await deps.get_agent(None)   # 기본 LLM 예열
     _probe_models_bg()           # 설정된 모델 서빙 연결 점검 (비블로킹 — 서버 기동은 안 막음)
+    from graph.doc_pipeline import scheduler   # 문서 구조화 예약 데몬(단일 워커 전제)
+    scheduler.external_busy = lambda: bool(admin_sources._structuring)  # 수동 '지금 구조화'와 겹침 방지
+    scheduler.start_scheduler()
 
 
 def _probe_models_bg():
