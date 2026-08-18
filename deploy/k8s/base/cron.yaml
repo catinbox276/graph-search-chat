@@ -85,6 +85,9 @@ kind: CronJob
 metadata:
   name: doc-pipeline
 spec:
+  # 문서 구조화는 인앱 예약 스케줄러로 이관(관리 → 처리 현황). 크론 중복 실행 방지로 정지.
+  # 다시 크론으로 돌리려면 suspend를 false로. (scheduler: graph/doc_pipeline/scheduler.py)
+  suspend: true
   schedule: "40 3 * * *"   # 매일 03:40 — 도메인 지정 소스의 문서를 LLM 판정·그래프화 (실행당 DOC_EXTRACT_LIMIT건)
   timeZone: "Asia/Seoul"   # 미지정 시 UTC로 돌아 정오(KST)에 실행되는 문제 방지
   concurrencyPolicy: Forbid
