@@ -101,25 +101,24 @@ def search_multi(queries: list, limit: int = 6) -> str:
     합친다. 중복 키워드는 자동 제거된다. search_docs를 반복 호출하는 것보다 빠르고 낭비가 없다.
 
     Args:
-        queries: 검색어 목록 (한국어/영어). 중복은 자동 제거, 최대 8개.
+        queries: 검색어 목록 (한국어/영어). 개수 제한 없음(N개), 중복은 자동 제거.
         limit: 최종 결과 수 (기본 6)
     """
     from concurrent.futures import ThreadPoolExecutor
     from search import inmemory_index as ix
     seen, qs = set(), []
-    for q in (queries or []):                    # 순서 보존 중복 제거 + 상한
+    for q in (queries or []):                    # 순서 보존 중복 제거 — 개수는 N개 허용
         q = (q or "").strip()
         if q and q.lower() not in seen:
             seen.add(q.lower())
             qs.append(q)
-        if len(qs) >= 8:
-            break
     if not qs:
         return "검색어가 없습니다."
     if len(qs) == 1:
         return _search(qs[0], limit)
     ix.ensure_fresh()                            # 병렬 진입 전 1회 (스레드별 리로드 방지)
-    with ThreadPoolExecutor(max_workers=len(qs)) as ex:
+    # N개 모두 처리하되 동시 실행은 상한 — 임베딩 서버 과부하 방지(ponytail: 동시 8, 필요시 조정)
+    with ThreadPoolExecutor(max_workers=min(8, len(qs))) as ex:
         ranked = list(ex.map(lambda q: _rank(q), qs))   # 임베딩 HTTP 병렬, sqlite는 lock 직렬
     fused, lex_all, sem_all, best_all = {}, set(), set(), {}
     for scores, lex, sem, best in ranked:        # 쿼리 간 융합 — 여러 키워드 매칭 = 상위
