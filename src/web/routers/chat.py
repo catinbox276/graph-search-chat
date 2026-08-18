@@ -183,6 +183,22 @@ def _on_tool_result(m, uid, sid, refs: dict) -> dict:
             "result": prettify_result(result)[:3000]}
 
 
+def _log_router(tri: dict, msg: str, uid, sid: str, ms: int):
+    """라우터 판정 1건을 활동로그(events)에 기록 — 오탐(정상인데 숏컷) 추적용.
+    지연(ms)도 남겨 라우터 비용을 관찰한다. out_of_scope·clarify는 오탐 시 실제
+    질문을 막으므로 level=warn으로 눈에 띄게."""
+    intent = tri["intent"]
+    nq = tri.get("normalized_query") or ""
+    changed = intent == "normal" and bool(nq) and nq != msg  # 오타 교정 발생 여부
+    detail = json.dumps({"message": msg, "intent": intent,
+                         "normalized_query": nq if changed else None,
+                         "reply": tri.get("reply") or None}, ensure_ascii=False)
+    events.log("router", source=intent,
+               level="warn" if intent in ("out_of_scope", "clarify") else "info",
+               actor=uid, ref=sid, status=intent, duration_ms=ms,
+               summary=(("[교정] " if changed else "") + msg)[:300], detail=detail)
+
+
 @router.post("/chat/stream")
 async def chat_stream(inp: ChatIn, request: Request):
     """SSE: 툴 호출을 실시간으로 내보내고 마지막에 답변 전송."""
@@ -196,8 +212,12 @@ async def chat_stream(inp: ChatIn, request: Request):
         t0 = time.time()
         yield sse({"type": "session", "session_id": sid})
         # 앞단 라우터 — 지원밖·잡담·자기소개·되묻기는 에이전트·검색 없이 즉시 응답(숏컷)
-        tri = await triage(inp.message) if config.ROUTER_ENABLED \
-            else {"intent": "normal", "normalized_query": inp.message, "reply": ""}
+        if config.ROUTER_ENABLED:
+            t_r = time.time()
+            tri = await triage(inp.message)
+            _log_router(tri, inp.message, uid, sid, int((time.time() - t_r) * 1000))
+        else:
+            tri = {"intent": "normal", "normalized_query": inp.message, "reply": ""}
         if tri["intent"] != "normal":
             reply = tri["reply"]
             log_turn(sid, inp.message, [], reply, user=uid)
@@ -259,8 +279,13 @@ async def chat(inp: ChatIn, request: Request):
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
     current_session.set(sid)
-    tri = await triage(inp.message) if config.ROUTER_ENABLED \
-        else {"intent": "normal", "normalized_query": inp.message, "reply": ""}
+    if config.ROUTER_ENABLED:
+        t_r = time.time()
+        tri = await triage(inp.message)
+        _log_router(tri, inp.message, (u or {}).get("user"), sid,
+                    int((time.time() - t_r) * 1000))
+    else:
+        tri = {"intent": "normal", "normalized_query": inp.message, "reply": ""}
     if tri["intent"] != "normal":  # 숏컷 — 에이전트 없이 즉시 응답
         log_turn(sid, inp.message, [], tri["reply"], user=(u or {}).get("user"))
         return {"session_id": sid, "answer": tri["reply"], "tool_calls": [],
