@@ -141,19 +141,18 @@ function visible(n, sub) {
   return true;
 }
 
-// 표시할 노드 집합: 필터 → (검색어면 매칭+1홉 이웃) → 사용횟수 상위 max → 조상 사슬 보충
+// 표시할 노드 집합: 필터 → (검색 결과면 매칭+1홉 이웃) → 사용횟수 상위 max → 조상 사슬 보충
+let SEARCH_IDS = null;  // 하이브리드 검색 결과 노드 id 집합 (null = 검색 안 함)
 function currentSet() {
   const sub = domainSubtree();
   let cand = NODES.filter(n => visible(n, sub));
-  const kw = document.getElementById("find").value.trim().toLowerCase();
-  if (kw) {
-    const hits = new Set(cand.filter(n => n.name.toLowerCase().includes(kw)).map(n => n.id));
+  if (SEARCH_IDS) {
     const nbr = new Set();
     EDGES.forEach(e => {
-      if (hits.has(e.src)) nbr.add(e.dst);
-      if (hits.has(e.dst)) nbr.add(e.src);
+      if (SEARCH_IDS.has(e.src)) nbr.add(e.dst);
+      if (SEARCH_IDS.has(e.dst)) nbr.add(e.src);
     });
-    cand = cand.filter(n => hits.has(n.id) || nbr.has(n.id));
+    cand = cand.filter(n => SEARCH_IDS.has(n.id) || nbr.has(n.id));
   }
   const max = Math.max(10, +document.getElementById("maxN").value || 100);
   cand.sort((a, b) => b.uses - a.uses);
@@ -292,13 +291,18 @@ function focusNode(id) {
 ["domSel", "layerSel", "failOnly"].forEach(id =>
   document.getElementById(id).onchange = build);
 document.getElementById("maxN").onchange = build;
-document.getElementById("find").addEventListener("keydown", e => {
+document.getElementById("find").addEventListener("keydown", async e => {
   if (e.key !== "Enter") return;
-  build();  // 검색어(빈값이면 전체 복귀) 반영 — diff 갱신이라 애니메이션으로 전환
-  const kw = e.target.value.trim().toLowerCase();
-  if (!kw) return;
-  const hit = NODES.find(n => vnodes.get(n.id) && n.name.toLowerCase().includes(kw));
-  if (hit) { net.selectNodes([hit.id]); showPanel(hit.id); }
+  const kw = e.target.value.trim();
+  if (!kw) { SEARCH_IDS = null; build(); return; }  // 빈값 Enter → 전체 복귀
+  // 서버 하이브리드 검색 (문서 검색과 동일: Kiwi 형태소 BM25 + 임베딩 코사인 RRF)
+  const r = await fetch("/graph/search?q=" + encodeURIComponent(kw));
+  const {ids} = await r.json();
+  SEARCH_IDS = new Set(ids);
+  build();  // diff 갱신이라 애니메이션으로 전환
+  const top = ids.find(id => vnodes.get(id));  // 순위 1위 노드 선택·패널
+  if (top) { net.selectNodes([top]); showPanel(top); }
+  else if (!ids.length) hidePanel();
 });
 </script>
 </body>

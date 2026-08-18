@@ -44,12 +44,12 @@ def suggest_paths(problem: str) -> str:
     """
     # 진입 매칭 = 문서 검색과 같은 인메모리 SQLite 하이브리드(FTS5 BM25 + sqlite-vec)를
     # 목표 노드에 재사용. 렉시컬(정확 용어) + 시맨틱(유사 의미)을 RRF로 융합.
-    # 임베딩 미서빙/차원 불일치 시 goal_semantic이 빈 결과 → 렉시컬 단독 폴백(그래프 진입 유지).
+    # 임베딩 미서빙/차원 불일치 시 node_semantic이 빈 결과 → 렉시컬 단독 폴백(그래프 진입 유지).
     from search import inmemory_index as ix
     ix.ensure_fresh()
     N = 8
-    sem_ids = ix.goal_semantic(problem, N, SIM_ENTRY)   # 코사인 ≥ SIM_ENTRY만
-    lex_ids = ix.goal_lexical(problem, N)
+    sem_ids = ix.node_semantic(problem, N, SIM_ENTRY, layers={2})   # 목표 노드, 코사인 ≥ SIM_ENTRY만
+    lex_ids = ix.node_lexical(problem, N, layers={2})
     if not sem_ids and not lex_ids:
         return ("이 문제와 유사한 과거 해결 이력이 그래프에 없습니다. "
                 "새로운 유형의 문제이니 자유롭게 접근하세요 (해결하면 그래프에 새 경로로 축적됩니다).")

@@ -1,10 +1,27 @@
 """지식그래프 뷰 데이터 — 노드·엣지·출처 증거 (provenance)."""
 from fastapi import APIRouter, Request
 
+from core import config
 from web import auth
 from web.deps import db
 
 router = APIRouter()
+
+
+@router.get("/graph/search")
+def graph_search(q: str, request: Request, n: int = 40):
+    """그래프 뷰 노드 검색 — 문서 검색과 같은 하이브리드(Kiwi FTS5 BM25 + 임베딩
+    코사인, RRF 융합). 임베딩 미서빙 시 렉시컬 단독 폴백. 반환: 노드 id 순위 목록."""
+    auth.require_user(request)
+    from search import inmemory_index as ix
+    ix.ensure_fresh()
+    sem = ix.node_semantic(q, n, config.PATH_SIM_ENTRY)
+    lex = ix.node_lexical(q, n)
+    rrf = {}
+    for ids in (sem, lex):
+        for r, nid in enumerate(ids):
+            rrf[nid] = rrf.get(nid, 0.0) + 1.0 / (config.RRF_K + r + 1)
+    return {"ids": sorted(rrf, key=rrf.get, reverse=True)}
 
 
 @router.get("/graph/data")
