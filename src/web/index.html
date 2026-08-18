@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>지식그래프 챗</title>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script type="module">
+  // marked를 CJK 친화 emphasis로 설정: `**라벨:**값`처럼 닫는 `**` 뒤에 공백 없이
+  // 한글이 붙으면 CommonMark flanking 규칙상 굵게 처리 안 되는 문제를 고친다.
+  // 확장이 marked 내부 토크나이저에 결합돼 있어 버전을 18로 고정한다 (확장 테스트 기준).
+  import { marked } from "https://cdn.jsdelivr.net/npm/marked@18/+esm";
+  import cjkFriendly from "https://cdn.jsdelivr.net/npm/marked-cjk-friendly@0.1/+esm";
+  marked.use(cjkFriendly());
+  window.marked = marked;
+</script>
 <link rel="stylesheet" href="/static/shell.css">
 <style>
   main { max-width: 820px; margin: 0 auto; padding: 16px; min-height: calc(100vh - 110px); }
