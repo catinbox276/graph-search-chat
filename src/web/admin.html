@@ -47,7 +47,7 @@
   #dryout { font-size: .76rem; line-height: 1.55; margin-top: 8px; }
   #dryout .ok { color: var(--ok); } #dryout .no { color: var(--fail); }
   #docstat .prow { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: .78rem; }
-  #docstat .prow .plabel { width: 200px; text-align: right; color: var(--mut);
+  #docstat .prow .plabel { width: 200px; text-align: left; color: var(--mut);
                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #docstat .prow.agg .plabel { font-weight: 600; color: var(--ink); }
   #docstat .pbar { flex: 1; display: flex; height: 12px; border-radius: 6px;
@@ -96,11 +96,38 @@
   dialog#evModal::backdrop { background: rgba(0,0,0,.45); }
   #evmHead { display: flex; justify-content: space-between; align-items: center; gap: 10px;
              padding: 10px 14px; border-bottom: 1px solid var(--bd, #eee); font-size: .85rem; }
-  #evmBody { margin: 0; padding: 14px; max-height: 70vh; overflow: auto;
-             white-space: pre-wrap; word-break: break-word;
-             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-             font-size: .8rem; line-height: 1.5; }
+  #evmBody { margin: 0; padding: 14px; max-height: 72vh; overflow: auto; }
+  #evmBody .evsum { font-size: .82rem; color: var(--ink); margin-bottom: 12px; word-break: break-word; }
+  #evmBody .evsec { margin-bottom: 14px; }
+  #evmBody .evseclabel { font-weight: 700; font-size: .78rem; margin-bottom: 5px; }
+  #evmBody .evseclabel.req { color: #4a7dff; }
+  #evmBody .evseclabel.res { color: #12b886; }
+  #evmBody pre { margin: 0; padding: 10px 12px; border-radius: 8px;
+                 background: color-mix(in srgb, var(--mut) 12%, transparent);
+                 white-space: pre-wrap; word-break: break-word;
+                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                 font-size: .78rem; line-height: 1.5; }
   #evmClose { cursor: pointer; }
+  /* 활동 로그 테이블 — 컬럼폭 고정 + 긴 셀 말줄임(툴팁) + 종류/수준 배지 */
+  #evlist { table-layout: fixed; }
+  #evlist th, #evlist td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #evlist th:nth-child(1), #evlist td.c-ts { width: 132px; }
+  #evlist th:nth-child(2) { width: 84px; }   /* 종류 */
+  #evlist th:nth-child(3) { width: 66px; }   /* 수준 */
+  #evlist th:nth-child(5) { width: 96px; }   /* 사용자 */
+  #evlist th:nth-child(6) { width: 60px; }   /* 상태 */
+  #evlist th:nth-child(7) { width: 58px; }   /* ms */
+  #evlist td.c-ts { font-family: ui-monospace, monospace; color: var(--mut); }
+  #evlist td.c-user { color: var(--mut); }
+  #evlist td.c-num { text-align: right; font-family: ui-monospace, monospace; }
+  #evlist th:nth-child(6), #evlist th:nth-child(7) { text-align: right; }
+  #evlist tbody tr.everr td { background: color-mix(in srgb, var(--fail) 8%, transparent); }
+  .evbadge { display: inline-block; padding: 1px 8px; border-radius: 999px;
+             font-size: .72rem; font-weight: 600; line-height: 1.6; }
+  .evbadge.evk { background: color-mix(in srgb, var(--mut) 22%, transparent); color: var(--ink); }
+  .evbadge.evl-info  { background: color-mix(in srgb, #4a7dff 16%, transparent); color: #4a7dff; }
+  .evbadge.evl-warn  { background: color-mix(in srgb, #f08c00 22%, transparent); color: #e8590c; }
+  .evbadge.evl-error { background: color-mix(in srgb, var(--fail) 16%, transparent); color: var(--fail); }
 </style>
 </head>
 <body>
@@ -348,7 +375,7 @@
 
 <dialog id="evModal">
   <div id="evmHead"><span id="evmTitle"></span><button id="evmClose" type="button">닫기 ✕</button></div>
-  <pre id="evmBody"></pre>
+  <div id="evmBody"></div>
 </dialog>
 </main>
 
@@ -1274,14 +1301,31 @@ async function loadEvents() {
   if (!events.length) { tb.innerHTML = "<tr><td colspan=8 style='color:var(--mut)'>이벤트 없음</td></tr>"; }
   events.forEach(e => {
     const tr = document.createElement("tr");
-    [e.ts, e.kind, e.level, e.source, e.actor || "", e.status || "",
-     e.duration_ms ?? "", e.summary || ""].forEach((v, i) => {
+    const cells = [
+      {v: e.ts, cls: "c-ts"},
+      {v: e.kind, badge: "evk"},
+      {v: e.level, badge: "evl-" + e.level},
+      {v: e.source, title: true},
+      {v: e.actor || "", cls: "c-user"},
+      {v: e.status ?? "", cls: "c-num"},
+      {v: e.duration_ms ?? "", cls: "c-num"},
+      {v: e.summary || "", title: true},
+    ];
+    cells.forEach(c => {
       const td = document.createElement("td");
-      td.textContent = v;
-      if (i === 2) td.style.color = EV_LVL_COLOR[e.level] || "inherit";
+      if (c.cls) td.className = c.cls;
+      if (c.badge) {
+        const b = document.createElement("span");
+        b.className = "evbadge " + c.badge;
+        b.textContent = c.v;
+        td.appendChild(b);
+      } else {
+        td.textContent = c.v;
+        if (c.title && c.v) td.title = c.v;   // 긴 셀 전체는 툴팁으로
+      }
       tr.appendChild(td);
     });
-    if (e.level === "error") tr.style.background = "color-mix(in srgb, var(--fail) 8%, transparent)";
+    if (e.level === "error") tr.classList.add("everr");
     tr.onclick = () => showEvent(e.id);
     tb.appendChild(tr);
   });
@@ -1303,9 +1347,40 @@ async function showEvent(id) {
     `[${e.ts}] ${e.kind}/${e.level} · ${e.source} · 사용자 ${e.actor || "-"}`
     + ` · ref ${e.ref || "-"} · 상태 ${e.status || "-"}`
     + (e.duration_ms != null ? ` · ${e.duration_ms}ms` : "");
-  // detail은 미들웨어가 "▶ 요청 … ◀ 응답 …" 전문 저장 — 절단 없이 스크롤로 표시
-  $("evmBody").textContent =
-    (e.summary ? e.summary + "\n\n" : "") + (e.detail || "(상세 없음)");
+  // detail = 미들웨어가 "▶ 요청 … ◀ 응답 …" 전문 저장 → 파트별로 JSON 들여쓰기 펼침
+  const box = $("evmBody");
+  box.innerHTML = "";
+  if (e.summary) {
+    const s = document.createElement("div");
+    s.className = "evsum"; s.textContent = e.summary;
+    box.appendChild(s);
+  }
+  const detail = e.detail || "";
+  if (!detail) {
+    const d = document.createElement("div");
+    d.className = "hint"; d.textContent = "(상세 없음)";
+    box.appendChild(d);
+  } else {
+    detail.split(/(?=▶ 요청\n|◀ 응답\n)/).forEach(part => {
+      let label = "", body = part;
+      if (part.startsWith("▶ 요청\n")) { label = "req"; body = part.slice(5); }
+      else if (part.startsWith("◀ 응답\n")) { label = "res"; body = part.slice(5); }
+      body = body.trim();
+      if (!body) return;
+      let pretty = body;
+      try { pretty = JSON.stringify(JSON.parse(body), null, 2); } catch { /* JSON 아니면 원문 */ }
+      const sec = document.createElement("div"); sec.className = "evsec";
+      if (label) {
+        const h = document.createElement("div");
+        h.className = "evseclabel " + label;
+        h.textContent = label === "req" ? "▶ 요청" : "◀ 응답";
+        sec.appendChild(h);
+      }
+      const pre = document.createElement("pre"); pre.textContent = pretty;
+      sec.appendChild(pre);
+      box.appendChild(sec);
+    });
+  }
   $("evModal").showModal();
 }
 $("evmClose").onclick = () => $("evModal").close();
