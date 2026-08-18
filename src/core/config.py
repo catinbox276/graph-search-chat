@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     EMBED_MODEL: str = "text-embedding-qwen3-embedding-0.6b"
     RERANK_MODEL: str = ""
 
+    # --- 입력 라우터(triage — agent/triage.py) ---
+    ROUTER_ENABLED: bool = True   # 앞단 분류 on/off (off면 모든 질문이 에이전트로 직행)
+    ROUTER_MODEL: str = ""        # 라우터 전용 모델명 (비면 기본 LLM 재사용 — 작은 모델 생기면 지정)
+    ROUTER_URL: str = ""          # 라우터 모델 서빙 URL (비면 CHAT_URL 재사용)
+
     # --- DataHub (배치 적재 전용 — ingestion/ingest_bird.py) ---
     # 에이전트 연결은 GMS 직결이 아니라 MCP-over-REST(관리 페이지 등록) — 여긴 시드 스크립트용
     DATAHUB_GMS_URL: str = "http://localhost:8080"

@@ -196,7 +196,8 @@ async def chat_stream(inp: ChatIn, request: Request):
         t0 = time.time()
         yield sse({"type": "session", "session_id": sid})
         # 앞단 라우터 — 지원밖·잡담·자기소개·되묻기는 에이전트·검색 없이 즉시 응답(숏컷)
-        tri = await triage(inp.message)
+        tri = await triage(inp.message) if config.ROUTER_ENABLED \
+            else {"intent": "normal", "normalized_query": inp.message, "reply": ""}
         if tri["intent"] != "normal":
             reply = tri["reply"]
             log_turn(sid, inp.message, [], reply, user=uid)
@@ -258,7 +259,8 @@ async def chat(inp: ChatIn, request: Request):
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
     current_session.set(sid)
-    tri = await triage(inp.message)
+    tri = await triage(inp.message) if config.ROUTER_ENABLED \
+        else {"intent": "normal", "normalized_query": inp.message, "reply": ""}
     if tri["intent"] != "normal":  # 숏컷 — 에이전트 없이 즉시 응답
         log_turn(sid, inp.message, [], tri["reply"], user=(u or {}).get("user"))
         return {"session_id": sid, "answer": tri["reply"], "tool_calls": [],

@@ -48,10 +48,15 @@ _client = None
 
 def _chat():
     global _client
-    if _client is None:  # 에이전트와 동일 엔드포인트(config.CHAT_URL) 재사용
-        _client = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY,
-                         timeout=config.LLM_TIMEOUT)
+    if _client is None:  # ROUTER_URL 지정 시 그 엔드포인트, 비면 CHAT_URL 재사용
+        _client = OpenAI(base_url=config.ROUTER_URL or config.CHAT_URL,
+                         api_key=config.MODEL_API_KEY, timeout=config.LLM_TIMEOUT)
     return _client
+
+
+def _model() -> str:
+    """라우터 모델 — ROUTER_MODEL 지정 시 그것, 비면 기본 LLM 재사용."""
+    return config.ROUTER_MODEL or model_registry.get_default("llm", config.CHAT_MODEL)
 
 
 def _parse(text: str) -> dict:
@@ -67,7 +72,7 @@ def _parse(text: str) -> dict:
 
 def _call(msg: str) -> dict:
     r = _chat().chat.completions.create(
-        model=model_registry.get_default("llm", config.CHAT_MODEL),
+        model=_model(),
         temperature=0, max_tokens=400,
         messages=[{"role": "system", "content": _SYS},
                   {"role": "user", "content": msg}])
