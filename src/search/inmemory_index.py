@@ -154,9 +154,10 @@ def lexical(query: str, n: int, source: str = "") -> list:
     if not q:
         return []
     prefix = f"{source}:" if source else ""
-    rows = _con.execute(
-        "SELECT cid FROM fts WHERE fts MATCH ? ORDER BY bm25(fts) LIMIT ?",
-        (q, n * 5)).fetchall()  # 청크→문서 집계 고려해 여유있게
+    with _lock:  # 공유 :memory: 연결 — 병렬 검색(search_multi) 시 직렬화
+        rows = _con.execute(
+            "SELECT cid FROM fts WHERE fts MATCH ? ORDER BY bm25(fts) LIMIT ?",
+            (q, n * 5)).fetchall()  # 청크→문서 집계 고려해 여유있게
     out = []
     for (cid,) in rows:
         pid = _meta[cid][0]
@@ -181,9 +182,10 @@ def semantic(query: str, n: int, source: str = "") -> tuple:
     except Exception:   # 임베딩 엔드포인트 장애/미서빙 → 렉시컬 단독 폴백(§8 조건)
         return [], {}   # ponytail: 매 검색 1회 연결시도 비용 감수(미서빙 지속 시 캐시-차단은 추후)
     prefix = f"{source}:" if source else ""
-    rows = _con.execute(   # sqlite-vec KNN은 LIMIT? 대신 k=? 제약 필요
-        "SELECT cid, distance FROM vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (sqlite_vec.serialize_float32(q), n * 5)).fetchall()
+    with _lock:  # 공유 :memory: 연결 — 병렬 검색 시 직렬화 (임베딩 HTTP는 위에서 이미 병렬)
+        rows = _con.execute(   # sqlite-vec KNN은 LIMIT? 대신 k=? 제약 필요
+            "SELECT cid, distance FROM vec WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (sqlite_vec.serialize_float32(q), n * 5)).fetchall()
     best = {}
     for cid, dist in rows:
         pid, no = _meta[cid]

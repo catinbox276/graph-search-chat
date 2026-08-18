@@ -20,7 +20,7 @@ from langchain_openai import ChatOpenAI
 
 from core import config
 from agent.identity import identity
-from search.corpus_search import read_doc, search_docs
+from search.corpus_search import read_doc, search_docs, search_multi
 from search.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
@@ -49,7 +49,9 @@ def default_system_prompt(st: dict | None = None) -> str:
    검증된 경로가 있으면 그 방법을 우선 쓰고 "이전에 N회 검증된 방법"임을 언급한다.
    실패 이력이 경고되면 그 접근을 쓰기 전에 사실과 이유를 먼저 알린다.
 6. 지식·문제해결 질문은 search_docs로 찾고, 필요하면 read_doc으로 전문을 읽어 실제
-   내용으로 답한다. 경로 요약만 보고 절차를 지어내지 않는다. 근거로 쓴 문장 끝에는
+   내용으로 답한다. 여러 키워드로 넓게 찾아야 하면 search_docs를 여러 번 부르지 말고
+   search_multi에 키워드들을 모아 "한 번에" 검색한다(중복 키워드·같은 검색 반복 금지 —
+   병렬로 빠르게 융합된다). 경로 요약만 보고 절차를 지어내지 않는다. 근거로 쓴 문장 끝에는
    문서 id를 대괄호 그대로 붙인다 (예: "...메뉴에서 확인할 수 있습니다 [blog_posts:kin-1507]"
    — 화면에서 자동으로 [1] 각주와 하단 참고 문서 목록으로 변환된다). suggest_paths가
    근거 문서 id를 제시하면 read_doc으로 열람해 실제 내용 기반으로 답한다.
@@ -72,7 +74,7 @@ def default_system_prompt(st: dict | None = None) -> str:
 - 근거 없이 답하기, 지원 범위 밖 질문에 아는 척 답하거나 되묻기, 빈 응답, 한국어 외
   언어로 답하기, 답 대신 "참고하세요"로 미루기."""
 
-BUILTIN_TOOLS = (suggest_paths, search_docs, read_doc)
+BUILTIN_TOOLS = (suggest_paths, search_docs, search_multi, read_doc)
 
 # DeepAgents가 create_deep_agent에서 미들웨어로 자동 부착하는 내장 도구 — 우리가 등록한
 # 게 아니라 프레임워크 스캐폴딩이라 agent_disabled_tools 필터가 닿지 않는다(항상 켜짐).

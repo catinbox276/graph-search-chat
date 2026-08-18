@@ -40,18 +40,21 @@ def search_docs(query: str, limit: int = 5) -> str:
     return _search(query, limit)
 
 
-def _search(query: str, limit: int = 5, source: str = "") -> str:
+def _rank(query: str, source: str = "") -> tuple:
+    """하이브리드 랭킹만 — (scores{pid:점수}, lex set, sem set, best_chunk{pid:chunk}).
+    인덱스 신선도(ensure_fresh)는 호출자가 1회 보장 — 병렬 시 중복 리로드 방지."""
     from search import inmemory_index as ix
-    ix.ensure_fresh()
     lex = ix.lexical(query, config.SEARCH_TOP_LEXICAL, source)
     sem, best_chunk = ix.semantic(query, config.SEARCH_TOP_SEMANTIC, source)
     scores = {}
     for rank_list in (lex, sem):
         for r, pid in enumerate(rank_list):
             scores[pid] = scores.get(pid, 0.0) + 1.0 / (RRF_K + r + 1)
-    top = sorted(scores, key=scores.get, reverse=True)[:limit]
-    if not top:
-        return "검색 결과가 없습니다."
+    return scores, set(lex), set(sem), best_chunk
+
+
+def _format(top: list, lex: set, sem: set, best_chunk: dict) -> str:
+    """상위 pid 목록을 제목·스니펫·링크로 포맷 (Oracle 원본 조회)."""
     out = []
     with _pool.acquire() as con:
         cur = con.cursor()
@@ -78,6 +81,58 @@ def _search(query: str, limit: int = 5, source: str = "") -> str:
             out.append(f"[{pid}] {t} (유형: {kind or src}, 매칭: {tag})\n{snip}"
                        + (f"\n링크: {url}" if url else ""))
     return "\n\n".join(out)
+
+
+def _search(query: str, limit: int = 5, source: str = "") -> str:
+    from search import inmemory_index as ix
+    ix.ensure_fresh()
+    scores, lex, sem, best_chunk = _rank(query, source)
+    top = sorted(scores, key=scores.get, reverse=True)[:limit]
+    if not top:
+        return "검색 결과가 없습니다."
+    return _format(top, lex, sem, best_chunk)
+
+
+def search_multi(queries: list, limit: int = 6) -> str:
+    """여러 키워드를 한 번에 병렬로 하이브리드 검색한다 — 같은 검색을 여러 번 반복하지 말고
+    이 도구로 키워드들을 모아 한 번에 검색하라.
+
+    각 키워드를 동시에 검색하고, 여러 키워드에 걸쳐 잡힌 문서를 상위로 올려(교차 RRF) 하나로
+    합친다. 중복 키워드는 자동 제거된다. search_docs를 반복 호출하는 것보다 빠르고 낭비가 없다.
+
+    Args:
+        queries: 검색어 목록 (한국어/영어). 중복은 자동 제거, 최대 8개.
+        limit: 최종 결과 수 (기본 6)
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from search import inmemory_index as ix
+    seen, qs = set(), []
+    for q in (queries or []):                    # 순서 보존 중복 제거 + 상한
+        q = (q or "").strip()
+        if q and q.lower() not in seen:
+            seen.add(q.lower())
+            qs.append(q)
+        if len(qs) >= 8:
+            break
+    if not qs:
+        return "검색어가 없습니다."
+    if len(qs) == 1:
+        return _search(qs[0], limit)
+    ix.ensure_fresh()                            # 병렬 진입 전 1회 (스레드별 리로드 방지)
+    with ThreadPoolExecutor(max_workers=len(qs)) as ex:
+        ranked = list(ex.map(lambda q: _rank(q), qs))   # 임베딩 HTTP 병렬, sqlite는 lock 직렬
+    fused, lex_all, sem_all, best_all = {}, set(), set(), {}
+    for scores, lex, sem, best in ranked:        # 쿼리 간 융합 — 여러 키워드 매칭 = 상위
+        for r, pid in enumerate(sorted(scores, key=scores.get, reverse=True)):
+            fused[pid] = fused.get(pid, 0.0) + 1.0 / (RRF_K + r + 1)
+        lex_all |= lex
+        sem_all |= sem
+        for pid, cn in best.items():
+            best_all.setdefault(pid, cn)
+    top = sorted(fused, key=fused.get, reverse=True)[:limit]
+    if not top:
+        return "검색 결과가 없습니다."
+    return f"[병렬 검색 {len(qs)}개: {', '.join(qs)}]\n" + _format(top, lex_all, sem_all, best_all)
 
 
 def source_search_tools() -> list:
