@@ -11,6 +11,8 @@
          padding: 8px 18px; font-size: .82rem; border-bottom: 1px solid var(--line); }
   #bar input[type=search] { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
                             background: #fff; color: var(--ink); width: 220px; }
+  #bar select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line);
+                background: #fff; color: var(--ink); font-size: .82rem; }
   #bar label { display: flex; align-items: center; gap: 4px; color: var(--mut); cursor: pointer; }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
   #wrap { display: flex; height: calc(100vh - 140px); }
@@ -70,7 +72,17 @@ fetch("/me").then(r => r.json()).then(m => {
 
 <div id="bar">
   <input type="search" id="find" placeholder="노드 검색 (Enter)">
-  <label><input type="checkbox" id="showTools"> 행동(도구) 노드 표시</label>
+  <select id="domSel"><option value="">도메인: 전체</option></select>
+  <select id="layerSel">
+    <option value="base">계층: 기본 (도구 제외)</option>
+    <option value="all">계층: 전체</option>
+    <option value="1">도메인만</option>
+    <option value="2">목표만</option>
+    <option value="3">접근법만</option>
+    <option value="4">행동(도구)만</option>
+  </select>
+  <label>최대 <input type="number" id="maxN" value="100" min="10" max="2000" step="10"
+                     style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"> 노드</label>
   <label><input type="checkbox" id="failOnly"> 실패 이력만</label>
   <span class="spacer"></span>
   <span><i class="dot" style="background:#1e40af"></i>도메인</span>
@@ -93,24 +105,70 @@ const FAIL = getComputedStyle(document.documentElement).getPropertyValue("--fail
 const COLORS = {1: "#1e40af", 2: "#0891b2", 3: OK, 4: "#9ca3af"};
 const LAYER_NAME = {1: "도메인", 2: "목표", 3: "접근법", 4: "행동/도구"};
 let NODES = [], EDGES = [], net, vnodes, vedges;
+let PARENTS = {}, CHILDREN = {};  // 인접 맵 (조상 연결·도메인 서브트리용)
 
 fetch("/graph/data").then(r => r.json()).then(({nodes, edges}) => {
   NODES = nodes; EDGES = edges;
-  document.getElementById("stats").innerHTML =
-    `<span>노드 <b>${nodes.length}</b></span><span>연결 <b>${edges.length}</b></span>` +
-    `<span>실패 우세 <b>${nodes.filter(n => n.fail).length}</b></span>`;
+  edges.forEach(e => {
+    (PARENTS[e.dst] = PARENTS[e.dst] || []).push(e.src);
+    (CHILDREN[e.src] = CHILDREN[e.src] || []).push(e.dst);
+  });
+  const sel = document.getElementById("domSel");
+  nodes.filter(n => n.layer === 1).forEach(n => {
+    const o = document.createElement("option");
+    o.value = n.id; o.textContent = "도메인: " + n.name;
+    sel.appendChild(o);
+  });
   build();
 });
 
-function visible(n) {
-  if (!document.getElementById("showTools").checked && n.layer === 4) return false;
+// 선택 도메인의 서브트리 (BFS) — 없으면 null(전체)
+function domainSubtree() {
+  const root = document.getElementById("domSel").value;
+  if (!root) return null;
+  const seen = new Set([root]), q = [root];
+  while (q.length) (CHILDREN[q.shift()] || []).forEach(c => {
+    if (!seen.has(c)) { seen.add(c); q.push(c); }
+  });
+  return seen;
+}
+
+function visible(n, sub) {
+  const lay = document.getElementById("layerSel").value;
+  if (lay === "base" ? n.layer === 4 : lay !== "all" && n.layer !== +lay) return false;
+  if (sub && !sub.has(n.id)) return false;
   if (document.getElementById("failOnly").checked && !(n.fail || n.layer <= 2)) return false;
   return true;
 }
 
-function build() {
-  const shown = new Set(NODES.filter(visible).map(n => n.id));
-  vnodes = new vis.DataSet(NODES.filter(n => shown.has(n.id)).map(n => ({
+// 표시할 노드 집합: 필터 → (검색어면 매칭+1홉 이웃) → 사용횟수 상위 max → 조상 사슬 보충
+function currentSet() {
+  const sub = domainSubtree();
+  let cand = NODES.filter(n => visible(n, sub));
+  const kw = document.getElementById("find").value.trim().toLowerCase();
+  if (kw) {
+    const hits = new Set(cand.filter(n => n.name.toLowerCase().includes(kw)).map(n => n.id));
+    const nbr = new Set();
+    EDGES.forEach(e => {
+      if (hits.has(e.src)) nbr.add(e.dst);
+      if (hits.has(e.dst)) nbr.add(e.src);
+    });
+    cand = cand.filter(n => hits.has(n.id) || nbr.has(n.id));
+  }
+  const max = Math.max(10, +document.getElementById("maxN").value || 100);
+  cand.sort((a, b) => b.uses - a.uses);
+  const shown = new Set(cand.slice(0, max).map(n => n.id));
+  // 잘린 그래프가 공중에 뜨지 않게 부모 사슬을 보충 (계층 단일 필터 땐 visible이 걸러줌)
+  const byId = Object.fromEntries(NODES.map(n => [n.id, n]));
+  const q = [...shown];
+  while (q.length) (PARENTS[q.pop()] || []).forEach(p => {
+    if (!shown.has(p) && byId[p] && visible(byId[p], sub)) { shown.add(p); q.push(p); }
+  });
+  return shown;
+}
+
+function nodeSpec(n) {
+  return {
     id: n.id,
     label: n.name.length > 24 ? n.name.slice(0, 24) + "…" : n.name,
     color: {background: n.fail ? FAIL : COLORS[n.layer],
@@ -120,25 +178,50 @@ function build() {
     shape: n.layer === 1 ? "box" : "dot",
     size: Math.min(10 + n.uses * 3, 34),   /* 크기 = 사용 횟수 (Obsidian 방식) */
     mass: n.layer === 1 ? 3 : 1,
-  })));
-  vedges = new vis.DataSet(EDGES.filter(e => shown.has(e.src) && shown.has(e.dst))
-    .map((e, i) => ({
-      id: i, from: e.src, to: e.dst,
-      width: Math.min(1 + e.count, 9),
-      color: {opacity: .45}, arrows: {to: {scaleFactor: .5}},
-      smooth: {type: "continuous"},
-    })));
-  net = new vis.Network(document.getElementById("net"), {nodes: vnodes, edges: vedges}, {
-    physics: {  /* force-directed 배치 계산용 — 안정화 후 끔 */
-      barnesHut: {gravitationalConstant: -6000, springLength: 130,
-                  springConstant: 0.02, damping: 0.4},
-      stabilization: {iterations: 200},
-    },
-    interaction: {hover: true, tooltipDelay: 120},
-  });
-  /* 배치가 끝나면 물리 정지 — 출렁임 없이 고정, 드래그하면 그 노드만 이동 */
-  net.once("stabilizationIterationsDone", () => net.setOptions({physics: false}));
-  net.on("click", p => p.nodes.length ? showPanel(p.nodes[0]) : hidePanel());
+  };
+}
+
+function edgeSpec(e) {
+  return {
+    id: e.src + "|" + e.dst, from: e.src, to: e.dst,
+    width: Math.min(1 + e.count, 9),
+    color: {opacity: .45}, arrows: {to: {scaleFactor: .5}},
+    smooth: {type: "continuous"},
+  };
+}
+
+function build() {
+  const shown = currentSet();
+  const wantN = NODES.filter(n => shown.has(n.id)).map(nodeSpec);
+  const wantE = EDGES.filter(e => shown.has(e.src) && shown.has(e.dst)).map(edgeSpec);
+  if (!net) {
+    vnodes = new vis.DataSet(wantN);
+    vedges = new vis.DataSet(wantE);
+    net = new vis.Network(document.getElementById("net"), {nodes: vnodes, edges: vedges}, {
+      /* 물리는 상시 켜둠 — 필터·검색으로 노드가 바뀌면 힘 계산이 다시 돌아
+         재배치가 애니메이션으로 보이고, 드래그하면 이웃이 따라 움직인다 */
+      physics: {
+        barnesHut: {gravitationalConstant: -6000, springLength: 130,
+                    springConstant: 0.02, damping: 0.4},
+        stabilization: {iterations: 200},
+      },
+      interaction: {hover: true, tooltipDelay: 120},
+    });
+    net.on("click", p => p.nodes.length ? showPanel(p.nodes[0]) : hidePanel());
+  } else {
+    // 데이터셋 diff 갱신 — 남는 노드는 자리 유지, 신규만 물리로 흘러들어와 부드럽다
+    const haveN = new Set(vnodes.getIds()), keepN = new Set(wantN.map(n => n.id));
+    vnodes.remove([...haveN].filter(id => !keepN.has(id)));
+    vnodes.update(wantN.filter(n => !haveN.has(n.id)));
+    const haveE = new Set(vedges.getIds()), keepE = new Set(wantE.map(e => e.id));
+    vedges.remove([...haveE].filter(id => !keepE.has(id)));
+    vedges.update(wantE.filter(e => !haveE.has(e.id)));
+    net.fit({animation: {duration: 600, easingFunction: "easeInOutQuad"}});
+  }
+  document.getElementById("stats").innerHTML =
+    `<span>표시 <b>${wantN.length}</b> / 전체 <b>${NODES.length}</b> 노드</span>` +
+    `<span>연결 <b>${wantE.length}</b></span>` +
+    `<span>실패 우세 <b>${NODES.filter(n => n.fail).length}</b></span>`;
 }
 
 function showPanel(id) {
@@ -193,20 +276,29 @@ async function loadEvidence(id) {
 }
 function hidePanel() { document.getElementById("panel").classList.remove("show"); }
 function focusNode(id) {
-  if (!vnodes.get(id)) { document.getElementById("showTools").checked = true; build(); }
+  // 필터에 걸러진 노드면 필터를 건드리지 않고 그 노드+연결 엣지만 즉석 추가
+  if (!vnodes.get(id)) {
+    const n = NODES.find(x => x.id === id);
+    if (!n) return;
+    vnodes.update(nodeSpec(n));
+    vedges.update(EDGES.filter(e => (e.src === id && vnodes.get(e.dst)) ||
+                                    (e.dst === id && vnodes.get(e.src))).map(edgeSpec));
+  }
   net.selectNodes([id]);
-  net.focus(id, {scale: 1.1, animation: true});
+  net.focus(id, {scale: 1.1, animation: {duration: 600, easingFunction: "easeInOutQuad"}});
   showPanel(id);
 }
 
-document.getElementById("showTools").onchange = build;
-document.getElementById("failOnly").onchange = build;
+["domSel", "layerSel", "failOnly"].forEach(id =>
+  document.getElementById(id).onchange = build);
+document.getElementById("maxN").onchange = build;
 document.getElementById("find").addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
+  build();  // 검색어(빈값이면 전체 복귀) 반영 — diff 갱신이라 애니메이션으로 전환
   const kw = e.target.value.trim().toLowerCase();
   if (!kw) return;
-  const hit = NODES.find(n => n.name.toLowerCase().includes(kw));
-  if (hit) focusNode(hit.id);
+  const hit = NODES.find(n => vnodes.get(n.id) && n.name.toLowerCase().includes(kw));
+  if (hit) { net.selectNodes([hit.id]); showPanel(hit.id); }
 });
 </script>
 </body>
