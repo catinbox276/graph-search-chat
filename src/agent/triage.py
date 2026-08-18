@@ -74,6 +74,9 @@ def _call(msg: str) -> dict:
     r = _chat().chat.completions.create(
         model=_model(),
         temperature=0, max_tokens=400,
+        # 분류엔 추론이 불필요 — 추론(생각) 출력을 꺼 지연을 크게 줄인다.
+        # Qwen3 계열 chat_template_kwargs. 다른 서빙이면 무시될 수 있음(graph_pipeline/llm.py와 동일).
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
         messages=[{"role": "system", "content": _SYS},
                   {"role": "user", "content": msg}])
     return _parse(r.choices[0].message.content or "")
