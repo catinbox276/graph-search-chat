@@ -59,8 +59,17 @@
   #doclist table td:nth-child(2), #doclist table td:nth-child(4) {
     max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
   #doclist tbody tr { cursor: pointer; }
-  #agPrompt { width: 100%; min-height: 220px; font-family: ui-monospace, monospace;
+  #agPrompt, #agTriage { width: 100%; font-family: ui-monospace, monospace;
               font-size: .8rem; line-height: 1.55; resize: vertical; box-sizing: border-box; }
+  #agPrompt { min-height: 220px; } #agTriage { min-height: 150px; }
+  .idgrid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px;
+            align-items: center; margin: 6px 0; }
+  .idgrid > label { font-size: .78rem; color: var(--mut); }
+  .idgrid > input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
+                    font-size: .82rem; box-sizing: border-box; }
+  .agtool.fixed { opacity: .8; }
+  .agtool.fixed .fixnote { font-size: .68rem; color: var(--mut); border: 1px solid var(--line);
+            border-radius: 4px; padding: 0 4px; margin-left: 4px; }
   #agTools { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   #agTools label { font-size: .8rem; color: var(--ink); display: flex; gap: 6px;
                    align-items: baseline; }
@@ -335,8 +344,16 @@
 
 <section class="card" id="sec-agent">
   <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
+  <h4>정체성 <small>이름·소개·지원범위 — 비우면 코드 기본값(회색). 시스템 프롬프트·라우터에 함께 반영</small></h4>
+  <div class="idgrid">
+    <label>이름</label><input id="agName" type="text">
+    <label>지원범위</label><input id="agScope" type="text">
+    <label>자기소개</label><input id="agIntro" type="text">
+  </div>
   <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
   <textarea id="agPrompt" spellcheck="false"></textarea>
+  <h4>라우터 지침 <small>입력 분류(triage) 프롬프트 — 비우면 코드 기본값(회색 placeholder)</small></h4>
+  <textarea id="agTriage" spellcheck="false"></textarea>
   <h4>답변 생성 <small>추론(생각하기) 모델의 생각 출력 — 검색·답변 에이전트에 적용</small></h4>
   <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
     <input type="checkbox" id="agThink" checked><b>생각하기(thinking) 사용</b>
@@ -1239,6 +1256,11 @@ async function loadAgentSettings() {
   $("agPrompt").placeholder = s.default_prompt;
   $("agMcp").checked = s.mcp_enabled;
   $("agThink").checked = !s.no_think;  // no_think=true면 체크 해제(생각 끔)
+  $("agName").value = s.agent_name || "";   $("agName").placeholder = s.default_name || "";
+  $("agScope").value = s.agent_scope || "";  $("agScope").placeholder = s.default_scope || "";
+  $("agIntro").value = s.agent_intro || "";  $("agIntro").placeholder = s.default_intro || "";
+  $("agTriage").value = s.triage_prompt || "";
+  $("agTriage").placeholder = s.default_triage_prompt || "";
   const box = $("agTools");
   // 갱신 전 그룹 열림 상태 보존 (기본: 전부 펼침)
   const openState = {};
@@ -1246,6 +1268,7 @@ async function loadAgentSettings() {
   box.innerHTML = "";
   // 출처별 그룹핑 — 내장 / 소스별 검색(원천 테이블 단위) / MCP·REST 서버별
   const groupOf = t => t.source === "builtin" ? "🧩 내장 도구 (경로 제안·문서 검색)"
+                     : t.source === "deepagents" ? "🔧 DeepAgents 내장 (프레임워크 자동 — 끌 수 없음)"
                      : t.source === "source" ? "📚 소스별 검색 (원천 테이블 단위 — 소스 등록 시 자동 생성)"
                      : t.source.startsWith("mcp:") ? `🔌 MCP 서버: ${t.source.slice(4)}`
                      : t.source.startsWith("rest:") ? `🔌 REST 도구 서버: ${t.source.slice(5)}`
@@ -1259,8 +1282,8 @@ async function loadAgentSettings() {
     const sum = document.createElement("summary");
     const gcb = document.createElement("input");  // 그룹 일괄 on/off
     gcb.type = "checkbox"; gcb.title = "이 그룹 전체 켜기/끄기";
-    gcb.onclick = (e) => { e.stopPropagation();
-      det.querySelectorAll(".agtool").forEach(c => { c.checked = gcb.checked; }); };
+    gcb.onclick = (e) => { e.stopPropagation();  // 내장(fixed=disabled)은 건드리지 않음
+      det.querySelectorAll(".agtool:not(:disabled)").forEach(c => { c.checked = gcb.checked; }); };
     const gname = document.createElement("b"); gname.textContent = g;
     const gcnt = document.createElement("span"); gcnt.className = "src";
     gcnt.textContent = `${tools.length}개`;
@@ -1268,28 +1291,35 @@ async function loadAgentSettings() {
     det.appendChild(sum);
     tools.forEach(t => {
       const lab = document.createElement("label");
-      lab.className = "treechild";
+      lab.className = "treechild" + (t.fixed ? " agtool fixed" : "");
       const cb = document.createElement("input");
-      cb.type = "checkbox"; cb.value = t.name; cb.className = "agtool";
-      cb.checked = !s.disabled_tools.includes(t.name);
+      cb.type = "checkbox"; cb.value = t.name; cb.className = "agtool" + (t.fixed ? " fixed" : "");
+      if (t.fixed) { cb.checked = true; cb.disabled = true; }  // 내장 = 항상 켬·끌 수 없음
+      else cb.checked = !s.disabled_tools.includes(t.name);
       const nm = document.createElement("b"); nm.textContent = t.name;
       const desc = document.createElement("span"); desc.className = "desc";
       desc.textContent = t.description || ""; desc.title = t.description || "";
       lab.append(cb, nm, desc);
+      if (t.fixed) { const fn = document.createElement("span");
+        fn.className = "fixnote"; fn.textContent = "내장"; lab.appendChild(fn); }
       det.appendChild(lab);
     });
-    gcb.checked = tools.every(t => !s.disabled_tools.includes(t.name));
+    gcb.checked = tools.filter(t => !t.fixed).every(t => !s.disabled_tools.includes(t.name));
     box.appendChild(det);
   });
 }
 $("agForm").onsubmit = async (e) => {
   e.preventDefault();
   $("agmsg").textContent = "";
-  const disabled = [...document.querySelectorAll("#agTools .agtool")]
+  const disabled = [...document.querySelectorAll("#agTools .agtool:not(.fixed)")]
     .filter(cb => !cb.checked).map(cb => cb.value);
   const r = await fetch("/admin/agent-settings", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({system_prompt: $("agPrompt").value,
+                          triage_prompt: $("agTriage").value,
+                          agent_name: $("agName").value,
+                          agent_intro: $("agIntro").value,
+                          agent_scope: $("agScope").value,
                           mcp_enabled: $("agMcp").checked,
                           no_think: !$("agThink").checked,
                           disabled_tools: disabled}),

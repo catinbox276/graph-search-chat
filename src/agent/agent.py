@@ -19,24 +19,26 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 
 from core import config
+from agent.identity import identity
 from search.corpus_search import read_doc, search_docs
 from search.path_suggest import suggest_paths
 
 MODEL_URL = config.CHAT_URL
 MODEL_NAME = config.CHAT_MODEL
 
-_INTRO = config.AGENT_INTRO or \
-    f"사내 데이터와 지식 검색을 돕는 어시스턴트 '{config.AGENT_NAME}'입니다"
-
-SYSTEM_PROMPT = f"""당신은 사내 데이터 분석가를 돕는 어시스턴트 "{config.AGENT_NAME}"다.
+def default_system_prompt(st: dict | None = None) -> str:
+    """코드 기본 시스템 프롬프트 — 정체성(이름·소개·지원범위)을 런타임에 주입한다.
+    관리에서 agent_system_prompt를 지정하면 build_agent가 그걸 우선 쓴다."""
+    name, intro, scope = identity(st)
+    return f"""당신은 사내 데이터 분석가를 돕는 어시스턴트 "{name}"다.
 사내 지식(블로그·VoC·FAQ) 검색과 검증된 해결 경로, 데이터 메타데이터 도구를 사용해
 정확하게, 되도록 직접 답한다. 질문이 영어·혼용이든 상관없이 답변은 반드시 한국어로만
 쓴다(고유명사·코드·식별자·urn·표 안의 값은 원문 유지).
 
 [첫 판단 — 무엇을 다루는 질문인가]
 1. 인사·감사·잡담(안녕, 고마워, 오늘 날씨 같은 것)이면 도구 없이 짧고 친근하게 화답한다.
-2. 나 자신에 대한 질문(넌 뭐야, 누구야, 이름, 정체)이면 "{_INTRO}"로 소개하고 마친다.
-3. 지원 범위({config.AGENT_SCOPE}) 밖이면 도구를 호출하지도 되묻지도 말고, 즉시
+2. 나 자신에 대한 질문(넌 뭐야, 누구야, 이름, 정체)이면 "{intro}"로 소개하고 마친다.
+3. 지원 범위({scope}) 밖이면 도구를 호출하지도 되묻지도 말고, 즉시
    "죄송하지만 그 주제는 지원하지 않습니다"라고 명시한 뒤 사유와 지원 가능한 주제를
    안내한다. 이 판단은 아래 8·9의 되묻기·유사 제안보다 우선한다.
 4. "아까", "전에", "직전 질문" 등 대화 회고·요약 요청이면 새로 검색하지 말고
@@ -71,6 +73,21 @@ SYSTEM_PROMPT = f"""당신은 사내 데이터 분석가를 돕는 어시스턴�
   언어로 답하기, 답 대신 "참고하세요"로 미루기."""
 
 BUILTIN_TOOLS = (suggest_paths, search_docs, read_doc)
+
+# DeepAgents가 create_deep_agent에서 미들웨어로 자동 부착하는 내장 도구 — 우리가 등록한
+# 게 아니라 프레임워크 스캐폴딩이라 agent_disabled_tools 필터가 닿지 않는다(항상 켜짐).
+# 관리 페이지에 "이런 게 켜져 있다"를 보여주기 위한 가시화용 목록(fixed=끌 수 없음).
+DEEPAGENTS_BUILTIN = (
+    ("write_todos", "할 일 목록 관리(플래너)"),
+    ("task", "서브에이전트에 하위 작업 위임"),
+    ("ls", "작업공간 파일 목록"),
+    ("read_file", "파일 읽기"),
+    ("write_file", "파일 쓰기"),
+    ("edit_file", "파일 부분 수정"),
+    ("glob", "이름 패턴으로 파일 찾기"),
+    ("grep", "내용으로 파일 검색"),
+    ("execute", "셸 실행(샌드박스 백엔드 없으면 비활성)"),
+)
 
 
 def load_agent_settings() -> dict:
@@ -155,6 +172,9 @@ async def discover_tools() -> list:
     {name, description, source} — source: builtin / source / mcp:서버명."""
     out = [{"name": _tool_name(t), "description": (t.__doc__ or "").strip().split("\n")[0],
             "source": "builtin"} for t in BUILTIN_TOOLS]
+    # DeepAgents 내장 도구 — 가시화만(끌 수 없음). fixed=True로 UI가 읽기전용 처리.
+    out += [{"name": n, "description": d, "source": "deepagents", "fixed": True}
+            for n, d in DEEPAGENTS_BUILTIN]
     out += [{"name": _tool_name(t),
              "description": (t.__doc__ or "").strip().split("\n")[0],
              "source": "source"} for t in _source_tools()]
@@ -198,7 +218,7 @@ async def build_agent(checkpointer=None, model_name=None):
         **extra,
     )
     return create_deep_agent(model=model, tools=tools,
-                             system_prompt=ag["system_prompt"] or SYSTEM_PROMPT,
+                             system_prompt=ag["system_prompt"] or default_system_prompt(),
                              checkpointer=checkpointer)
 
 

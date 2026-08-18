@@ -121,10 +121,19 @@ def admin_mcp_upsert(inp: McpIn, request: Request):
 async def admin_agent_settings_get(request: Request):
     """관리자: 에이전트 전역 설정 조회 — 시스템 프롬프트·MCP 사용·도구별 활성."""
     check_admin(request)
-    from agent.agent import SYSTEM_PROMPT, discover_tools
+    from agent.agent import default_system_prompt, discover_tools
+    from agent.triage import default_triage_prompt
+    from agent.identity import identity
     st = settings.get_all()
+    dname, dintro, dscope = identity({})  # 설정 무시한 config 기본값(placeholder용)
     return {"system_prompt": (st.get("agent_system_prompt") or ""),
-            "default_prompt": SYSTEM_PROMPT,
+            "default_prompt": default_system_prompt(st),
+            "triage_prompt": (st.get("agent_triage_prompt") or ""),
+            "default_triage_prompt": default_triage_prompt(),
+            "agent_name": (st.get("agent_name") or ""),
+            "agent_intro": (st.get("agent_intro") or ""),
+            "agent_scope": (st.get("agent_scope") or ""),
+            "default_name": dname, "default_intro": dintro, "default_scope": dscope,
             "mcp_enabled": st.get("agent_mcp_enabled", "1") != "0",
             "no_think": st.get("agent_no_think", "") == "1",
             "disabled_tools": [t.strip() for t in
@@ -135,6 +144,10 @@ async def admin_agent_settings_get(request: Request):
 
 class AgentSettingsIn(BaseModel):
     system_prompt: str = ""      # 빈값 = 코드 기본 프롬프트 사용
+    triage_prompt: str = ""      # 빈값 = 코드 기본 라우터 프롬프트 사용
+    agent_name: str = ""         # 빈값 = config 기본(정체성 — 이름/소개/지원범위)
+    agent_intro: str = ""
+    agent_scope: str = ""
     mcp_enabled: bool = True     # DataHub MCP 전역 on/off
     no_think: bool = False       # True=추론(생각) 출력 끔 — 빠르지만 복잡한 추론엔 품질↓
     disabled_tools: list[str] = []  # 비활성 도구 이름 목록 (builtin·MCP 공통)
@@ -145,10 +158,14 @@ def admin_agent_settings_set(inp: AgentSettingsIn, request: Request):
     """관리자: 에이전트 전역 설정 저장 — 캐시를 비워 다음 질문부터 재조립."""
     check_admin(request)
     from core import settings
-    if len(inp.system_prompt) > 8000:
-        raise HTTPException(400, "시스템 프롬프트는 8000자 이내여야 합니다")
+    if len(inp.system_prompt) > 8000 or len(inp.triage_prompt) > 8000:
+        raise HTTPException(400, "프롬프트는 각 8000자 이내여야 합니다")
     settings.set_many({
         "agent_system_prompt": inp.system_prompt.strip(),
+        "agent_triage_prompt": inp.triage_prompt.strip(),
+        "agent_name": inp.agent_name.strip(),
+        "agent_intro": inp.agent_intro.strip(),
+        "agent_scope": inp.agent_scope.strip(),
         "agent_mcp_enabled": "" if inp.mcp_enabled else "0",
         "agent_no_think": "1" if inp.no_think else "",
         "agent_disabled_tools": ",".join(

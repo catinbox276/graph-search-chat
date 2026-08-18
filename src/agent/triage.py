@@ -16,21 +16,21 @@ import sys
 from openai import OpenAI
 
 from core import config, model_registry
+from agent.identity import identity
 
 _INTENTS = ("smalltalk", "self", "out_of_scope", "clarify", "normal")
 
-_INTRO = config.AGENT_INTRO or \
-    f"사내 데이터와 지식 검색을 돕는 어시스턴트 '{config.AGENT_NAME}'입니다"
 
-_SYS = f"""너는 사내 어시스턴트 "{config.AGENT_NAME}"의 입력 분류기다.
+def _default_sys(name: str, intro: str, scope: str) -> str:
+    return f"""너는 사내 어시스턴트 "{name}"의 입력 분류기다.
 사용자의 마지막 질문 하나를 읽고 아래 JSON 객체 "하나만" 출력한다(설명·코드펜스 금지).
 
 {{"intent": "<값>", "normalized_query": "<문자열>", "reply": "<문자열>"}}
 
 intent 값과 규칙:
 - "smalltalk": 인사·감사·잡담(안녕, 고마워, 수고 등). reply = 짧고 친근한 한국어 화답.
-- "self": 너의 정체·이름·역할을 묻는 질문. reply = "{_INTRO}".
-- "out_of_scope": 지원 범위({config.AGENT_SCOPE}) 밖(일반 상식, 코딩 대행, 시세·날씨
+- "self": 너의 정체·이름·역할을 묻는 질문. reply = "{intro}".
+- "out_of_scope": 지원 범위({scope}) 밖(일반 상식, 코딩 대행, 시세·날씨
   등 사내 데이터·지식과 무관). reply = "죄송하지만 그 주제는 지원하지 않습니다."로
   시작해 사유와 지원 가능한 주제를 1~2문장으로 안내.
 - "clarify": 지원 범위 안이지만 검색할 대상이 하나도 없을 만큼 막연할 때만("에러 났어"
@@ -42,6 +42,24 @@ normalized_query: intent가 normal일 때만 채운다. 명백한 오타·띄어
 1회 교정한 문장을, 없으면 원문 그대로 둔다. 의미는 절대 바꾸지 않는다. 그 외 intent면 "".
 reply: normal이면 "". 그 외에는 한국어로 채운다.
 확신이 없으면 normal로 둔다. 분류기는 검색을 막아선 안 된다."""
+
+
+def default_triage_prompt() -> str:
+    """코드 기본 라우터 프롬프트 (정체성 주입) — 관리 UI의 편집 시작점/placeholder용."""
+    return _default_sys(*identity())
+
+
+def _sys() -> str:
+    """라우터 시스템 프롬프트 — 관리 override(agent_triage_prompt) 우선, 없으면
+    정체성(이름·소개·지원범위)을 주입한 코드 기본값. 매 호출 시 최신 설정 반영."""
+    st = {}
+    try:
+        from core import settings
+        st = settings.get_all()
+    except Exception:
+        pass
+    override = (st.get("agent_triage_prompt") or "").strip()
+    return override or _default_sys(*identity(st))
 
 _client = None
 
@@ -77,7 +95,7 @@ def _call(msg: str) -> dict:
         # 분류엔 추론이 불필요 — 추론(생각) 출력을 꺼 지연을 크게 줄인다.
         # Qwen3 계열 chat_template_kwargs. 다른 서빙이면 무시될 수 있음(graph_pipeline/llm.py와 동일).
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
-        messages=[{"role": "system", "content": _SYS},
+        messages=[{"role": "system", "content": _sys()},
                   {"role": "user", "content": msg}])
     return _parse(r.choices[0].message.content or "")
 
