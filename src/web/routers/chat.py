@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from web import auth
 from web.deps import db_cursor, get_agent, log_turn, sse
+from agent.triage import triage
 from core import config, events, model_registry
 from core.session_ctx import current_session
 
@@ -192,14 +193,24 @@ async def chat_stream(inp: ChatIn, request: Request):
 
     async def gen():
         current_session.set(sid)  # 도구(노출 기록)까지 세션 id 전파
-        agent = await get_agent(inp.model)
+        t0 = time.time()
         yield sse({"type": "session", "session_id": sid})
-        calls, answer, t0 = [], "", time.time()
+        # 앞단 라우터 — 지원밖·잡담·자기소개·되묻기는 에이전트·검색 없이 즉시 응답(숏컷)
+        tri = await triage(inp.message)
+        if tri["intent"] != "normal":
+            reply = tri["reply"]
+            log_turn(sid, inp.message, [], reply, user=uid)
+            yield sse({"type": "answer", "text": reply, "route": tri["intent"],
+                       "elapsed_sec": round(time.time() - t0, 1)})
+            return
+        question = tri["normalized_query"]  # 오타·문법 1회 교정된 질문으로 검색
+        agent = await get_agent(inp.model)
+        calls, answer = [], ""
         refs = {}  # 이 턴의 참고 문서: pid -> '열람'|'검색' (footer용, 도구 기록 기반)
         lg_cfg = {"configurable": {"thread_id": sid}}
         try:
             async for mode, chunk in agent.astream(
-                {"messages": [{"role": "user", "content": inp.message}]},
+                {"messages": [{"role": "user", "content": question}]},
                 lg_cfg, stream_mode=["updates", "messages"],
             ):
                 if mode == "messages":
@@ -247,10 +258,15 @@ async def chat(inp: ChatIn, request: Request):
     sid = inp.session_id or str(uuid.uuid4())
     t0 = time.time()
     current_session.set(sid)
+    tri = await triage(inp.message)
+    if tri["intent"] != "normal":  # 숏컷 — 에이전트 없이 즉시 응답
+        log_turn(sid, inp.message, [], tri["reply"], user=(u or {}).get("user"))
+        return {"session_id": sid, "answer": tri["reply"], "tool_calls": [],
+                "elapsed_sec": round(time.time() - t0, 1), "route": tri["intent"]}
     agent = await get_agent(inp.model)
     try:
         result = await agent.ainvoke(
-            {"messages": [{"role": "user", "content": inp.message}]},
+            {"messages": [{"role": "user", "content": tri["normalized_query"]}]},
             {"configurable": {"thread_id": sid}})
     except Exception as e:
         return {"session_id": sid, "answer": f"[모델 오류] {e}", "tool_calls": [],

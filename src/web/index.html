@@ -18,6 +18,9 @@
   main { max-width: 820px; margin: 0 auto; padding: 16px; min-height: calc(100vh - 110px); }
   #log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
   .msg { padding: 10px 14px; border-radius: 12px; line-height: 1.55; }
+  .route-clarify { border-left: 3px solid #4a9eff; padding-left: 10px; }
+  .route-clarify::before { content: "💬 되묻기"; display: block; font-size: .72rem; color: #4a9eff; margin-bottom: 4px; }
+  .route-out_of_scope { color: #8892a6; }
   .user { background: var(--path); color: #fff; align-self: flex-end; max-width: 85%; white-space: pre-wrap; }
   .bot  { background: var(--card); align-self: flex-start; max-width: 95%; }
   .steps { font-size: .8rem; border-left: 3px solid var(--path); padding-left: 8px; margin-bottom: 8px; }
@@ -468,6 +471,8 @@ f.onsubmit = async (e) => {
         else if (ev.type === "answer") {
           body.classList.remove("streaming");
           mdRender(ev.text || "(빈 답변)");
+          if (ev.route === "clarify" || ev.route === "out_of_scope")
+            body.classList.add("route-" + ev.route);  // 되묻기/지원밖 = 구분 표시
           if (srcs?.length) {  // 결정적 footer — 이 턴에 실제 검색·열람된 문서 (서버 도구 기록 기반)
             // 답변 속 [문서id] 인용 토큰 → [n] 번호 각주로 치환.
             // 답변에 인용된 문서가 앞 번호를 받도록 정렬 (인용 안 된 문서는 뒤에)
