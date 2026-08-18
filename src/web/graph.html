@@ -84,6 +84,7 @@ fetch("/me").then(r => r.json()).then(m => {
   <label>최대 <input type="number" id="maxN" value="100" min="10" max="2000" step="10"
                      style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"> 노드</label>
   <label><input type="checkbox" id="failOnly"> 실패 이력만</label>
+  <button class="ghost" id="spreadBtn" title="얽힌 배치를 다시 정렬">펼치기</button>
   <span class="spacer"></span>
   <span><i class="dot" style="background:#1e40af"></i>도메인</span>
   <span><i class="dot" style="background:#0891b2"></i>목표</span>
@@ -290,6 +291,19 @@ function focusNode(id) {
   showPanel(id);
 }
 
+// 펼치기 — 접히고 꺾인 배치를 흩뿌린 뒤 물리로 다시 정렬 (움직임이 보이는 재배치)
+function spread() {
+  if (!net) return;
+  const ids = vnodes.getIds();
+  const R = 60 * Math.sqrt(ids.length + 1);   // 노드 수에 비례한 반경으로 산포
+  vnodes.update(ids.map(id => ({id, x: (Math.random() - .5) * R * 2,
+                                    y: (Math.random() - .5) * R * 2})));
+  net.once("stabilized", () =>
+    net.fit({animation: {duration: 600, easingFunction: "easeInOutQuad"}}));
+  net.fit({animation: {duration: 600, easingFunction: "easeInOutQuad"}});
+}
+document.getElementById("spreadBtn").onclick = spread;
+
 ["domSel", "layerSel", "failOnly"].forEach(id =>
   document.getElementById(id).onchange = build);
 document.getElementById("maxN").onchange = build;
@@ -303,7 +317,8 @@ document.getElementById("find").addEventListener("keydown", async e => {
                         "&n=" + (+document.getElementById("maxN").value || 100));
   const {ids} = await r.json();
   SEARCH_IDS = new Set(ids);
-  build();  // diff 갱신이라 애니메이션으로 전환
+  build();
+  spread();  // 검색 결과는 옛 자리에 뭉쳐 보일 수 있어 자동으로 다시 정렬
   const top = ids.find(id => vnodes.get(id));  // 순위 1위 노드 선택·패널
   if (top) { net.selectNodes([top]); showPanel(top); }
   else if (!ids.length) hidePanel();
