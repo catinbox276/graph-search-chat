@@ -332,6 +332,11 @@
   <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
   <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
   <textarea id="agPrompt" spellcheck="false"></textarea>
+  <h4>답변 생성 <small>추론(생각하기) 모델의 생각 출력 — 검색·답변 에이전트에 적용</small></h4>
+  <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
+    <input type="checkbox" id="agThink" checked><b>생각하기(thinking) 사용</b>
+    <span class="hint" style="margin:0">— 끄면 enable_thinking=false로 더 빠름 (복잡한 추론엔 품질↓)</span>
+  </label>
   <h4>도구 사용 여부 <small>끄면 에이전트가 그 도구를 아예 받지 않습니다 (builtin·MCP 공통)</small></h4>
   <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
     <input type="checkbox" id="agMcp" checked><b>DataHub MCP 사용</b>
@@ -1224,6 +1229,7 @@ async function loadAgentSettings() {
   $("agPrompt").value = s.system_prompt;
   $("agPrompt").placeholder = s.default_prompt;
   $("agMcp").checked = s.mcp_enabled;
+  $("agThink").checked = !s.no_think;  // no_think=true면 체크 해제(생각 끔)
   const box = $("agTools");
   // 갱신 전 그룹 열림 상태 보존 (기본: 전부 펼침)
   const openState = {};
@@ -1276,6 +1282,7 @@ $("agForm").onsubmit = async (e) => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({system_prompt: $("agPrompt").value,
                           mcp_enabled: $("agMcp").checked,
+                          no_think: !$("agThink").checked,
                           disabled_tools: disabled}),
   });
   if (!r.ok) {

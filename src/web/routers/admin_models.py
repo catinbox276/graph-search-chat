@@ -126,6 +126,7 @@ async def admin_agent_settings_get(request: Request):
     return {"system_prompt": (st.get("agent_system_prompt") or ""),
             "default_prompt": SYSTEM_PROMPT,
             "mcp_enabled": st.get("agent_mcp_enabled", "1") != "0",
+            "no_think": st.get("agent_no_think", "") == "1",
             "disabled_tools": [t.strip() for t in
                                (st.get("agent_disabled_tools") or "").split(",")
                                if t.strip()],
@@ -135,6 +136,7 @@ async def admin_agent_settings_get(request: Request):
 class AgentSettingsIn(BaseModel):
     system_prompt: str = ""      # 빈값 = 코드 기본 프롬프트 사용
     mcp_enabled: bool = True     # DataHub MCP 전역 on/off
+    no_think: bool = False       # True=추론(생각) 출력 끔 — 빠르지만 복잡한 추론엔 품질↓
     disabled_tools: list[str] = []  # 비활성 도구 이름 목록 (builtin·MCP 공통)
 
 
@@ -148,6 +150,7 @@ def admin_agent_settings_set(inp: AgentSettingsIn, request: Request):
     settings.set_many({
         "agent_system_prompt": inp.system_prompt.strip(),
         "agent_mcp_enabled": "" if inp.mcp_enabled else "0",
+        "agent_no_think": "1" if inp.no_think else "",
         "agent_disabled_tools": ",".join(
             t.strip() for t in inp.disabled_tools if t.strip()),
     })
