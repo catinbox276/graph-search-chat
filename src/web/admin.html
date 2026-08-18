@@ -104,6 +104,12 @@
                     padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
   .admtabs button.on { color: var(--ink); border-bottom: 2px solid var(--acc, #4a7dff);
                        font-weight: 700; background: var(--card, transparent); }
+  .structprompts { margin: 8px 0; }
+  .structprompts > summary { cursor: pointer; font-size: .82rem; color: var(--mut); }
+  .structprompts .k2 { display: block; font-size: .8rem; margin: 8px 0 3px; }
+  .structprompts .k2 small { color: var(--mut); font-weight: 400; }
+  .psta { width: 100%; min-height: 150px; box-sizing: border-box; font-family: ui-monospace, monospace;
+          font-size: .78rem; line-height: 1.5; resize: vertical; }
   /* 전처리 설정 — 옵션이름 / 값입력 / 설명 라벨 그리드 */
   .psgrid { display: grid; grid-template-columns: max-content minmax(110px,170px) 1fr;
             gap: 8px 12px; align-items: center; margin: 4px 0 12px; }
@@ -317,6 +323,15 @@
       <input type="checkbox" id="psThink" checked>
       <span class="d">추론 모델의 생각(thinking) 출력을 끄고 판정 (기본 켜짐 — 실측 7~8배 빠르고 판정 품질 동일)</span>
     </div>
+    <details class="structprompts">
+      <summary>구조화 프롬프트 (고급) — 문서 판정/추출 지침. 비우면 코드 기본값(회색)</summary>
+      <label class="k2" for="psDocPrompt">문서 판정 프롬프트
+        <small>자리표시자 {domain} {hint} {kind} {title} {body} — <b>{body} 필수</b></small></label>
+      <textarea id="psDocPrompt" class="psta" spellcheck="false"></textarea>
+      <label class="k2" for="psPackPrompt">묶음 판정 프롬프트
+        <small>여러 문서를 한 번에 판정 · 자리표시자 {domain} {hint} {docs} — <b>{docs} 필수</b></small></label>
+      <textarea id="psPackPrompt" class="psta" spellcheck="false"></textarea>
+    </details>
     <div class="psbtns">
       <button id="pssave">설정 저장</button>
       <button type="button" class="warn" id="psresetall"
@@ -1146,6 +1161,10 @@ async function loadPipelineSettings() {
     (m?.llm || []).forEach(x => sel.add(new Option(x.name, x.name)));
   }
   sel.value = s.doc_extract_model || "";
+  $("psDocPrompt").value = s.struct_doc_prompt || "";
+  $("psDocPrompt").placeholder = s.default_doc_prompt || "";
+  $("psPackPrompt").value = s.struct_pack_prompt || "";
+  $("psPackPrompt").placeholder = s.default_pack_prompt || "";
 }
 $("psform").onsubmit = async (e) => {
   e.preventDefault();
@@ -1156,7 +1175,9 @@ $("psform").onsubmit = async (e) => {
                           doc_body_chars: $("psChars").value, doc_pack_tokens: $("psPack").value,
                           doc_no_think: $("psThink").checked ? "1" : "0",
                           doc_extract_model: $("psModel").value,
-                          chunk_chars: $("psChunkC").value, chunk_overlap: $("psChunkO").value}),
+                          chunk_chars: $("psChunkC").value, chunk_overlap: $("psChunkO").value,
+                          struct_doc_prompt: $("psDocPrompt").value,
+                          struct_pack_prompt: $("psPackPrompt").value}),
   });
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;

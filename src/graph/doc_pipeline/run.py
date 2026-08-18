@@ -37,7 +37,9 @@ def _load_settings(limit_override: int = 0) -> SimpleNamespace:
         body_chars=settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS),
         pack_tokens=settings.get_int(st, "doc_pack_tokens", config.DOC_PACK_TOKENS),
         no_think=bool(settings.get_int(st, "doc_no_think", config.DOC_NO_THINK)),
-        model=(st.get("doc_extract_model") or "").strip())
+        model=(st.get("doc_extract_model") or "").strip(),
+        doc_prompt=(st.get("struct_doc_prompt") or "").strip(),    # 빈값=코드 기본(judge)
+        pack_prompt=(st.get("struct_pack_prompt") or "").strip())
 
 
 def main():
@@ -141,14 +143,14 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     for p in packs[:s.conc]:
         next(it)
         pending.add(ex.submit(judge_pack, domain, hint, p, s.model, s.body_chars,
-                              s.no_think))
+                              s.no_think, s.doc_prompt, s.pack_prompt))
     while pending:
         finished, pending = wait(pending, return_when=FIRST_COMPLETED)
         for fut in finished:
             np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
             if np_ is not None:
-                pending.add(ex.submit(judge_pack, domain, hint, np_,
-                                      s.model, s.body_chars, s.no_think))
+                pending.add(ex.submit(judge_pack, domain, hint, np_, s.model,
+                                      s.body_chars, s.no_think, s.doc_prompt, s.pack_prompt))
             for (src_id, title, kind, body), j in fut.result():
                 ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
                 if not j or j.get("_error"):

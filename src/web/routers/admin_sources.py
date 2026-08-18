@@ -16,6 +16,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from core import config, events, settings
 from graph import doc_pipeline
 from graph.doc_pipeline import scheduler
+from graph.doc_pipeline import judge as _judge
 from graph.graph_pipeline import ensure_domain_registry
 from ingestion import chunk_corpus, ingest_sources, source_registry
 from web.deps import check_admin, db_cursor
@@ -239,6 +240,8 @@ class PipelineSettingsIn(BaseModel):
     doc_extract_model: str = ""   # 빈값 = 대화 모델 사용
     chunk_chars: str = ""         # 청크 크기(자)
     chunk_overlap: str = ""       # 인접 청크 겹침(자)
+    struct_doc_prompt: str = ""   # 문서 판정/추출 프롬프트 override (빈값=코드 기본)
+    struct_pack_prompt: str = ""  # 문서 묶음 판정 프롬프트 override (빈값=코드 기본)
 
     @model_validator(mode="after")
     def _ranges(self):
@@ -253,6 +256,14 @@ class PipelineSettingsIn(BaseModel):
                 raise ValueError(f"{key}는 정수여야 합니다")
             if not lo <= v <= hi:
                 raise ValueError(f"{key}는 {lo}~{hi} 범위여야 합니다")
+        # 프롬프트 override — 길이 상한 + 필수 자리표시자(누락 시 문서 내용이 안 들어감)
+        for key in ("struct_doc_prompt", "struct_pack_prompt"):
+            if len(getattr(self, key)) > 8000:
+                raise ValueError(f"{key}는 8000자 이내여야 합니다")
+        if self.struct_doc_prompt.strip() and "{body}" not in self.struct_doc_prompt:
+            raise ValueError("문서 프롬프트에는 {body} 자리표시자가 있어야 합니다")
+        if self.struct_pack_prompt.strip() and "{docs}" not in self.struct_pack_prompt:
+            raise ValueError("묶음 프롬프트에는 {docs} 자리표시자가 있어야 합니다")
         return self
 
 
@@ -272,6 +283,10 @@ def admin_pipeline_settings():
             "doc_extract_model": st.get("doc_extract_model") or "",
             "chunk_chars": settings.get_int(st, "chunk_chars", config.CHUNK_CHARS),
             "chunk_overlap": settings.get_int(st, "chunk_overlap", config.CHUNK_OVERLAP),
+            "struct_doc_prompt": st.get("struct_doc_prompt") or "",
+            "struct_pack_prompt": st.get("struct_pack_prompt") or "",
+            "default_doc_prompt": _judge.DOC_PROMPT,
+            "default_pack_prompt": _judge.PACK_PROMPT,
             "overridden": sorted(st.keys())}
 
 
@@ -280,6 +295,8 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn):
     """관리자: 전처리 설정 저장 — 다음 배치 실행부터 반영 (재배포 불필요)."""
     vals = {key: getattr(inp, key) for key, _lo, _hi in _PIPELINE_LIMITS}
     vals["doc_extract_model"] = inp.doc_extract_model.strip()
+    vals["struct_doc_prompt"] = inp.struct_doc_prompt.strip()
+    vals["struct_pack_prompt"] = inp.struct_pack_prompt.strip()
     settings.set_many(vals)
     return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
 
@@ -885,10 +902,11 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
     st = settings.get_all()
     body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
     model = (st.get("doc_extract_model") or "").strip()
+    doc_prompt = (st.get("struct_doc_prompt") or "").strip()  # 드라이런도 override로 미리보기
     out = []
     for src_id, title, kind, body in docs:
         j = doc_pipeline.judge_doc(domain, hint, kind, title, body,
-                                   model=model, body_chars=body_chars)
+                                   model=model, body_chars=body_chars, doc_prompt=doc_prompt)
         out.append({"src_id": src_id, "title": title.strip()[:120],
                     "fits": bool(j.get("fits")), "reason": j.get("reason") or
                     j.get("_error") or "파싱 실패",

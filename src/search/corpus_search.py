@@ -114,6 +114,12 @@ def search_multi(queries: list, limit: int = 6) -> str:
             qs.append(q)
     if not qs:
         return "검색어가 없습니다."
+    # 안전 상한 — 실사용 N은 작지만(LLM 도구), 폭주 입력의 임베딩 팬아웃 방지
+    # (ponytail: 상한 50, 초과분은 잘라내고 명시. 필요하면 조정).
+    MAX_Q, note = 50, ""
+    if len(qs) > MAX_Q:
+        note = f"\n(참고: 키워드 {len(qs)}개 중 상위 {MAX_Q}개만 검색)"
+        qs = qs[:MAX_Q]
     if len(qs) == 1:
         return _search(qs[0], limit)
     ix.ensure_fresh()                            # 병렬 진입 전 1회 (스레드별 리로드 방지)
@@ -131,7 +137,8 @@ def search_multi(queries: list, limit: int = 6) -> str:
     top = sorted(fused, key=fused.get, reverse=True)[:limit]
     if not top:
         return "검색 결과가 없습니다."
-    return f"[병렬 검색 {len(qs)}개: {', '.join(qs)}]\n" + _format(top, lex_all, sem_all, best_all)
+    return (f"[병렬 검색 {len(qs)}개: {', '.join(qs)}]{note}\n"
+            + _format(top, lex_all, sem_all, best_all))
 
 
 def source_search_tools() -> list:

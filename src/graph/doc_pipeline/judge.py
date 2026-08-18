@@ -18,9 +18,9 @@ DOC_PROMPT = """문서가 도메인 기준에 맞는지 판정하고, 맞으면 
 제목: {title}
 {body}
 
-출력 형식: {{"fits": true|false, "reason": "판정 근거 한 문장",
+출력 형식: {"fits": true|false, "reason": "판정 근거 한 문장",
  "goal": "문서가 다루는 문제/목표 (한 문장, fits=true일 때만)",
- "approach": "핵심 해법/접근법 (한 문장, fits=true일 때만)"}}
+ "approach": "핵심 해법/접근법 (한 문장, fits=true일 때만)"}
 
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
@@ -37,8 +37,8 @@ PACK_PROMPT = """여러 문서 각각이 도메인 기준에 맞는지 판정하
 {docs}
 
 출력 형식: 문서마다 1개씩, 입력 순서대로 JSON 배열.
-[{{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
-  "goal": "문제/목표 한 문장(fits=true일 때만)", "approach": "핵심 해법 한 문장(fits=true일 때만)"}}, ...]
+[{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
+  "goal": "문제/목표 한 문장(fits=true일 때만)", "approach": "핵심 해법 한 문장(fits=true일 때만)"}, ...]
 
 fits=false로 판정할 것: 도메인과 무관 / 문제도 해법도 없음 / 결말·결론 없음 / 내용이 빈약함.
 각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
@@ -64,21 +64,37 @@ def _clip(s: str, n: int) -> str:
     return s if n <= 0 else s[:n]
 
 
+_PLACEHOLDERS = ("domain", "hint", "kind", "title", "body", "docs")
+
+
+def _fill(tmpl: str, **kw) -> str:
+    """지정 플레이스홀더({domain}·{hint}·{kind}·{title}·{body}·{docs})만 치환한다.
+    그 외 중괄호(JSON 예시 등)는 그대로 둬 관리자가 편집한 프롬프트도 안전
+    (.format의 중괄호 이스케이프 footgun 없음)."""
+    out = tmpl
+    for k in _PLACEHOLDERS:
+        if k in kw:
+            out = out.replace("{" + k + "}", str(kw[k]))
+    return out
+
+
 def judge_pack(domain: str, hint: str, pack: list, model: str = "",
-               body_chars: int = 3000, no_think: bool = True) -> list:
+               body_chars: int = 3000, no_think: bool = True,
+               doc_prompt: str = "", pack_prompt: str = "") -> list:
     """문서 묶음을 요청 1건으로 판정 — [(doc, verdict)] 반환.
 
     묶음 응답에서 누락·파싱 실패한 문서는 단건 판정으로 자동 폴백 (유실 없음).
     pack 원소: (src_id, title, kind, body). DB를 만지지 않아 스레드 병렬 안전.
+    doc_prompt/pack_prompt: 관리 override(빈값=코드 기본) — 호출자가 1회 로드해 전달.
     """
     if len(pack) == 1:
         d = pack[0]
         return [(d, judge_doc(domain, hint, d[2], d[1], d[3],
                               model=model, body_chars=body_chars,
-                              no_think=no_think))]
+                              no_think=no_think, doc_prompt=doc_prompt))]
     blocks = [f"===[{d[0]}]===\n제목: {(d[1] or '').strip()[:300]}\n{_clip(d[3], body_chars)}"
               for d in pack]
-    prompt = PACK_PROMPT.format(
+    prompt = _fill((pack_prompt or "").strip() or PACK_PROMPT,
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
         docs="\n\n".join(blocks))
     by_id, pack_usage = {}, (0, 0)
@@ -98,8 +114,8 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
     for d in pack:
         j = by_id.get(str(d[0]))
         if j is None:  # 묶음 응답 누락 → 단건 재판정(자체 _usage 있음)
-            j = judge_doc(domain, hint, d[2], d[1], d[3],
-                          model=model, body_chars=body_chars, no_think=no_think)
+            j = judge_doc(domain, hint, d[2], d[1], d[3], model=model,
+                          body_chars=body_chars, no_think=no_think, doc_prompt=doc_prompt)
         elif not usage_attached:  # 묶음 총 토큰을 첫 문서에 한 번만 귀속(합계 정확)
             j = {**j, "_usage": pack_usage}
             usage_attached = True
@@ -108,9 +124,11 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
 
 
 def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
-              model: str = "", body_chars: int = 3000, no_think: bool = True) -> dict:
-    """문서 1건 LLM 판정 — DB를 만지지 않아 스레드 병렬 안전. 서버 드라이런도 사용."""
-    prompt = DOC_PROMPT.format(
+              model: str = "", body_chars: int = 3000, no_think: bool = True,
+              doc_prompt: str = "") -> dict:
+    """문서 1건 LLM 판정 — DB를 만지지 않아 스레드 병렬 안전. 서버 드라이런도 사용.
+    doc_prompt: 관리 override(빈값=코드 기본 DOC_PROMPT)."""
+    prompt = _fill((doc_prompt or "").strip() or DOC_PROMPT,
         domain=domain, hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
         kind=(kind or "").strip(), title=(title or "").strip()[:300],
         body=_clip(body, body_chars))
