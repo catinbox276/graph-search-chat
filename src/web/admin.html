@@ -54,6 +54,11 @@
                    overflow: hidden; background: #e5e7eb; }
   #docstat .pbar i { display: block; height: 100%; }
   #docstat .pnum { width: 250px; color: var(--mut); white-space: nowrap; }
+  /* 문서별 결과: 한 줄 고정 — 긴 제목·사유는 …로 자르고 클릭하면 원본 모달 */
+  #doclist table td { white-space: nowrap; }
+  #doclist table td:nth-child(2), #doclist table td:nth-child(4) {
+    max-width: 340px; overflow: hidden; text-overflow: ellipsis; }
+  #doclist tbody tr { cursor: pointer; }
   #agPrompt { width: 100%; min-height: 220px; font-family: ui-monospace, monospace;
               font-size: .8rem; line-height: 1.55; resize: vertical; box-sizing: border-box; }
   #agTools { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
@@ -1034,9 +1039,13 @@ async function loadRunDocs(src, status, page) {
   const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
   j.docs.forEach(d => {
     const tr = document.createElement("tr");
-    [d.src_id, d.title, LB[d.status] || d.status, d.note].forEach(v => {
-      const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
+    [d.src_id, d.title, LB[d.status] || d.status, d.note].forEach((v, i) => {
+      const td = document.createElement("td"); td.textContent = v ?? "";
+      if (i === 1 || i === 3) td.title = v ?? "";  // 잘린 제목·사유는 툴팁으로 전체
+      tr.appendChild(td);
     });
+    tr.title = "클릭 = 원본 보기";
+    tr.onclick = () => openDocOriginal(src, d.src_id, d.title);
     tb.appendChild(tr);
   });
   t.appendChild(tb); box.appendChild(t);
@@ -1389,6 +1398,33 @@ async function showEvent(id) {
     });
   }
   $("evModal").showModal();
+}
+
+// 문서별 결과 클릭 → 원본(원천 테이블 역할별 컬럼)을 모달로. 컬럼 2개 이상이면 구분 표시.
+const _ROLE_KO = {title: "제목", body: "본문", question: "질문", answer: "답변",
+                  meta: "메타/태그", url: "링크"};
+async function openDocOriginal(src, srcId, title) {
+  $("evmTitle").textContent = `📄 원본 · ${src} · ${srcId}` + (title ? ` · ${title}` : "");
+  const box = $("evmBody"); box.innerHTML = `<div class="hint">불러오는 중…</div>`;
+  $("evModal").showModal();
+  const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/docs/${encodeURIComponent(srcId)}/original`).catch(() => null);
+  box.innerHTML = "";
+  if (!r?.ok) { box.innerHTML = `<div class="hint">원본을 불러올 수 없습니다 (${r?.status || "네트워크"})</div>`; return; }
+  const j = await r.json();
+  const cols = j.columns || [];
+  if (!cols.length) { box.innerHTML = `<div class="hint">표시할 컬럼이 없습니다</div>`; return; }
+  if (j.from_corpus) {
+    const n = document.createElement("div"); n.className = "evsum";
+    n.textContent = "ℹ 원천 테이블이 이 DB에 없어 조립된 코퍼스 문서를 표시합니다.";
+    box.appendChild(n);
+  }
+  cols.forEach(c => {
+    const sec = document.createElement("div"); sec.className = "evsec";
+    const h = document.createElement("div"); h.className = "evseclabel req";
+    h.textContent = `${_ROLE_KO[c.role] || c.role}  ·  ${c.column}`;
+    const pre = document.createElement("pre"); pre.textContent = c.value || "(빈 값)";
+    sec.append(h, pre); box.appendChild(sec);
+  });
 }
 $("evmClose").onclick = () => $("evModal").close();
 $("evModal").addEventListener("click", ev => {   // 배경 클릭 = 닫기

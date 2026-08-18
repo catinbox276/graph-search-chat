@@ -751,6 +751,60 @@ def admin_source_docs(sname: str, status: str = "", page: int = 1):
             "pages": max(1, (total + 19) // 20)}
 
 
+def _lob_str(v) -> str:
+    v = v.read() if hasattr(v, "read") else v
+    return "" if v is None else str(v)
+
+
+@router.get("/admin/sources/{sname}/docs/{src_id}/original")
+def admin_source_doc_original(sname: str, src_id: str):
+    """관리자: 문서 원본 — 원천 테이블의 역할별 컬럼 값을 조립 전 그대로 반환한다.
+    컬럼(역할)이 2개 이상이면 각각 구분해 볼 수 있게 리스트로 준다.
+    원천 테이블이 이 DB에 없으면(마이그레이션으로 corpus_docs만 있는 경우 등) 조립된
+    코퍼스 문서로 폴백한다 (from_corpus=True)."""
+    import json
+    with db_cursor() as cur:
+        cur.execute("""SELECT table_name, id_column, field_map, NVL(url_enabled, 'Y')
+                       FROM source_registry WHERE source_name = :1""", [sname])
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, f"소스를 찾을 수 없습니다: {sname}")
+        tbl, idc, fmap_json, url_en = row
+        fmap = json.loads(fmap_json)   # {역할: 컬럼명(대문자)}
+        roles = list(fmap)
+        cols = None
+        if source_registry.table_allowed(tbl):
+            try:  # 원천 테이블 직접 조회 — 역할별 컬럼 원본. 없으면(ORA-00942) 폴백.
+                sel = ", ".join(ingest_sources._ident(fmap[r]) for r in roles)
+                cur.execute(f"SELECT {sel} FROM {ingest_sources._ident(tbl)} "
+                            f"WHERE {ingest_sources._ident(idc)} = :1", [src_id])
+                vals = cur.fetchone()
+                if vals is not None:
+                    cols = [{"role": r, "column": fmap[r], "value": _lob_str(vals[i])[:20000]}
+                            for i, r in enumerate(roles)
+                            if not (r == "url" and url_en != "Y")]
+            except Exception:
+                cols = None  # 원천 테이블 부재·접근 불가 → 코퍼스 폴백
+        from_corpus = False
+        if not cols:
+            from_corpus = True   # 폴백: 조립된 코퍼스 문서(항상 존재)
+            cur.execute("""SELECT title, body, url FROM corpus_docs
+                           WHERE source_name = :1 AND src_id = :2""", [sname, src_id])
+            cd = cur.fetchone()
+            if cd is None:
+                raise HTTPException(404, f"문서를 찾을 수 없습니다: {src_id}")
+            title, body, url = _lob_str(cd[0]), _lob_str(cd[1]), _lob_str(cd[2])
+            cols = []
+            if title:
+                cols.append({"role": "title", "column": "제목", "value": title})
+            cols.append({"role": "body", "column": "조립본(질문·답변·태그 포함)",
+                         "value": body[:20000]})
+            if url and url_en == "Y":
+                cols.append({"role": "url", "column": "링크", "value": url})
+    return {"source": sname, "src_id": src_id, "columns": cols,
+            "from_corpus": from_corpus}
+
+
 # ── 드라이런 ──────────────────────────────────────────────────
 
 class DryrunIn(BaseModel):
