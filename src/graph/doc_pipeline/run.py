@@ -195,11 +195,15 @@ def _run_overrides(cur, run_id: str, s):
     if not r:
         raise ValueError(f"run이 없습니다: {run_id}")
     domain, dver, model, st_json, active = r
+    if hasattr(st_json, "read"):     # settings가 CLOB이면 문자열로
+        st_json = st_json.read()
     st = _json.loads(st_json or "{}")
     s.model = (model or "").strip()
     s.body_chars = st.get("body_chars", s.body_chars)
     s.pack_tokens = st.get("pack_tokens", s.pack_tokens)
     s.no_think = bool(st.get("no_think", s.no_think))
+    s.doc_prompt = st.get("doc_prompt", s.doc_prompt)    # 엔티티 추출 프롬프트 스냅샷 적용
+    s.pack_prompt = st.get("pack_prompt", s.pack_prompt)
     cur.execute("""SELECT extract_hint FROM domain_versions
                    WHERE name = :1 AND version = :2""", [domain, dver])
     h = cur.fetchone()

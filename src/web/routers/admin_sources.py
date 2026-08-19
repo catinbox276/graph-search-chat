@@ -749,6 +749,28 @@ def admin_reset_all_docs():
 
 # ── 구조화 실행(run) 버저닝 — B-full ──────────────────────────
 
+def _run_settings_display(sj) -> str:
+    """run settings(JSON, 이제 CLOB)를 표에 넣을 짧은 요약으로 — 긴 엔티티 프롬프트는
+    '엔티티:커스텀'으로만 표기(전문은 안 펼침)."""
+    import json
+    if hasattr(sj, "read"):
+        sj = sj.read()
+    try:
+        d = json.loads(sj or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return str(sj or "")[:80]
+    parts = []
+    if d.get("body_chars") is not None:
+        parts.append(f"본문{d['body_chars']}")
+    if d.get("pack_tokens") is not None:
+        parts.append(f"묶음{d['pack_tokens']}")
+    if d.get("no_think"):
+        parts.append("no-think")
+    if (d.get("doc_prompt") or "").strip() or (d.get("pack_prompt") or "").strip():
+        parts.append("엔티티:커스텀")
+    return " · ".join(parts)
+
+
 @router.get("/admin/sources/{sname}/runs")
 def admin_source_runs(sname: str):
     """관리자: 이 소스의 구조화 실행 이력 — 조합(도메인 버전·모델·설정)·시각·결과 카운트."""
@@ -768,7 +790,8 @@ def admin_source_runs(sname: str):
                      r.settings, r.active, r.started, r.finished
             ORDER BY MAX(r.started) DESC""", [sname])
         rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
-                 "chat_model": r[3], "embed_model": r[4], "settings": r[5],
+                 "chat_model": r[3], "embed_model": r[4],
+                 "settings": _run_settings_display(r[5]),
                  "active": r[6] == "Y", "started": r[7], "finished": r[8],
                  "done": int(r[9] or 0), "excluded": int(r[10] or 0),
                  "error": int(r[11] or 0)} for r in cur.fetchall()]

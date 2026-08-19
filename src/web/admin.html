@@ -1105,7 +1105,8 @@ async function renderRunForm(src) {
       ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
     <input id="rfChars" type="number" min="0" placeholder="본문 길이 (빈값=현재)" style="width:140px">
     <input id="rfPack" type="number" min="0" placeholder="묶음 토큰 (빈값=현재)" style="width:140px">
-    <button type="button" id="rfGo">생성</button></div>`;
+    <button type="button" id="rfGo">생성</button>
+    <span class="hint" style="margin:0">엔티티 추출 프롬프트는 현재 전처리 설정값을 스냅샷합니다 (버전별로 바꾸려면 전처리 설정에서 먼저 변경 후 생성)</span></div>`;
   $("rfGo").onclick = async () => {
     const body = {};
     if ($("rfVer").value) body.domain_version = parseInt($("rfVer").value);

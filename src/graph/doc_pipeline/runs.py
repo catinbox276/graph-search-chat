@@ -29,6 +29,20 @@ def ensure_runs(cur):
             started     TIMESTAMP DEFAULT SYSTIMESTAMP,
             finished    TIMESTAMP)""")
         cur.execute("CREATE INDEX doc_runs_src_ix ON doc_runs (source_name)")
+    # settings VARCHAR2(1000) → CLOB — 긴 엔티티 추출 프롬프트 스냅샷 수용 (멱등).
+    # Oracle은 VARCHAR2→CLOB 직접 MODIFY 불가(ORA-22858) → 새 컬럼 복사 후 교체.
+    cur.execute("""SELECT data_type FROM user_tab_columns
+                   WHERE table_name = 'DOC_RUNS' AND column_name = 'SETTINGS'""")
+    dt = cur.fetchone()
+    if dt and dt[0] != "CLOB":
+        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                       WHERE table_name = 'DOC_RUNS' AND column_name = 'SETTINGS_C'""")
+        if cur.fetchone()[0]:            # 이전 부분 실패 잔재 정리
+            cur.execute("ALTER TABLE doc_runs DROP COLUMN settings_c")
+        cur.execute("ALTER TABLE doc_runs ADD (settings_c CLOB)")
+        cur.execute("UPDATE doc_runs SET settings_c = settings")
+        cur.execute("ALTER TABLE doc_runs DROP COLUMN settings")
+        cur.execute("ALTER TABLE doc_runs RENAME COLUMN settings_c TO settings")
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE doc_results (
@@ -72,7 +86,10 @@ def _combo(cur, source_name: str) -> dict:
             "settings": json.dumps({
                 "body_chars": settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS),
                 "pack_tokens": settings.get_int(st, "doc_pack_tokens", config.DOC_PACK_TOKENS),
-                "no_think": settings.get_int(st, "doc_no_think", config.DOC_NO_THINK)},
+                "no_think": settings.get_int(st, "doc_no_think", config.DOC_NO_THINK),
+                # 엔티티(문서→목표·접근법) 추출 프롬프트 스냅샷 — 빈값=코드 기본
+                "doc_prompt": (st.get("struct_doc_prompt") or ""),
+                "pack_prompt": (st.get("struct_pack_prompt") or "")},
                 ensure_ascii=False)}
 
 
