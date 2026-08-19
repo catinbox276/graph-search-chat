@@ -43,7 +43,7 @@ def ensure_runs(cur):
         cur.execute("UPDATE doc_runs SET settings_c = settings")
         cur.execute("ALTER TABLE doc_runs DROP COLUMN settings")
         cur.execute("ALTER TABLE doc_runs RENAME COLUMN settings_c TO settings")
-    for col in ("ENTITY_VERSION", "CLUSTER_VERSION"):   # 조합이 참조하는 버전 번호 (멱등)
+    for col in ("ENTITY_VERSION", "CLUSTER_VERSION", "JOIN_VERSION", "DATA_VERSION"):   # 조합 참조 버전 (멱등)
         cur.execute("""SELECT COUNT(*) FROM user_tab_columns
                        WHERE table_name = 'DOC_RUNS' AND column_name = :1""", [col])
         if not cur.fetchone()[0]:
@@ -156,8 +156,23 @@ def _default_ver(cur, table: str):
         return None
 
 
+def _default_data_ver(cur, source_name: str):
+    try:
+        cur.execute("SELECT version FROM data_versions WHERE source_name = :1 AND is_default = 'Y'",
+                    [source_name])
+        r = cur.fetchone()
+        if r:
+            return int(r[0])
+        cur.execute("SELECT MAX(version) FROM data_versions WHERE source_name = :1", [source_name])
+        r = cur.fetchone()
+        return int(r[0]) if r and r[0] is not None else None
+    except Exception:
+        return None
+
+
 def create_run(cur, source_name: str, domain_version=None, entity_version=None,
-               cluster_version=None, chat_model="", embed_model="", body_chars=None,
+               cluster_version=None, join_version=None, data_version=None,
+               chat_model="", embed_model="", body_chars=None,
                pack_tokens=None, no_think=None, dedup=None) -> str:
     """새 조합 run 생성 (비활성) — 도메인·엔티티·클러스터 버전 번호를 참조해
     그 버전의 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/기본값.
@@ -191,12 +206,24 @@ def create_run(cur, source_name: str, domain_version=None, entity_version=None,
     elif dedup:   # 버전 없을 때만 raw override (하위호환)
         st["dedup"] = {**st.get("dedup", {}),
                        **{k: v for k, v in dedup.items() if v is not None}}
+    # 테이블 조인 버전 → 관계 스냅샷(추적·향후 다중 테이블 조립용). 데이터 버전 → 기록.
+    jv = join_version or _default_ver(cur, "join_versions")
+    if jv is not None:
+        try:
+            cur.execute("SELECT relations FROM join_versions WHERE version = :1", [jv])
+            r = cur.fetchone()
+            if r:
+                st["join_relations"] = json.loads(_lob(r[0]) or "[]")
+        except Exception:
+            pass
+    dv = data_version or _default_data_ver(cur, source_name)
     rid = uuid.uuid4().hex
     cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
-                     entity_version, cluster_version, chat_model, embed_model, settings, active)
-                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 'N')""",
+                     entity_version, cluster_version, join_version, data_version,
+                     chat_model, embed_model, settings, active)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 'N')""",
                 [rid, source_name, c["domain"], domain_version or c["domain_version"],
-                 ev, cv, (chat_model or c["chat_model"]).strip(),
+                 ev, cv, jv, dv, (chat_model or c["chat_model"]).strip(),
                  (embed_model or c["embed_model"]).strip(),
                  json.dumps(st, ensure_ascii=False)])
     return rid

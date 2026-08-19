@@ -647,6 +647,62 @@ def admin_join_version_default(v: int):
     return {"ok": True}
 
 
+# ── 데이터 신선도 버전 (소스별 적재 시점·문서수 스냅샷) ────────────────────────
+def _ensure_data_versions(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DATA_VERSIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE data_versions (
+            source_name VARCHAR2(100) NOT NULL, version NUMBER NOT NULL,
+            watermark TIMESTAMP, doc_count NUMBER, note VARCHAR2(500),
+            is_default CHAR(1) DEFAULT 'N', created TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT data_versions_pk PRIMARY KEY (source_name, version))""")
+
+
+class DataVersionIn(BaseModel):
+    note: str = ""
+
+
+@router.get("/admin/sources/{sname}/data-versions")
+def admin_data_versions(sname: str):
+    """소스의 데이터 신선도 버전 — 적재 워터마크·문서수 스냅샷 목록."""
+    with db_cursor() as cur:
+        _ensure_data_versions(cur)
+        cur.execute("""SELECT version, TO_CHAR(watermark, 'YYYY-MM-DD HH24:MI'), doc_count,
+                              note, is_default, TO_CHAR(created, 'YYYY-MM-DD HH24:MI')
+                       FROM data_versions WHERE source_name = :1 ORDER BY version DESC""", [sname])
+        rows = [{"version": int(r[0]), "watermark": r[1] or "", "doc_count": int(r[2] or 0),
+                 "note": r[3] or "", "is_default": r[4] == "Y", "created": r[5]}
+                for r in cur.fetchall()]
+    return {"versions": rows}
+
+
+@router.post("/admin/sources/{sname}/data-versions")
+def admin_data_version_snapshot(sname: str, inp: DataVersionIn):
+    """지금 데이터 상태(적재 워터마크·문서수)를 새 버전으로 스냅샷."""
+    with db_cursor() as cur:
+        _ensure_data_versions(cur)
+        cur.execute("SELECT last_ingest_ts FROM source_registry WHERE source_name = :1", [sname])
+        r = cur.fetchone()
+        wm = r[0] if r else None
+        cur.execute("SELECT COUNT(*) FROM corpus_docs WHERE source_name = :1", [sname])
+        cnt = cur.fetchone()[0]
+        cur.execute("""INSERT INTO data_versions (source_name, version, watermark, doc_count, note)
+                       SELECT :s, NVL(MAX(version), 0) + 1, :w, :c, :n
+                       FROM data_versions WHERE source_name = :s""",
+                    {"s": sname, "w": wm, "c": cnt, "n": inp.note.strip() or None})
+    return {"ok": True, "doc_count": cnt}
+
+
+@router.post("/admin/sources/{sname}/data-versions/{v}/default")
+def admin_data_version_default(sname: str, v: int):
+    with db_cursor() as cur:
+        _ensure_data_versions(cur)
+        cur.execute("UPDATE data_versions SET is_default = 'N' WHERE source_name = :1", [sname])
+        cur.execute("UPDATE data_versions SET is_default = 'Y' WHERE source_name = :1 AND version = :2",
+                    [sname, v])
+    return {"ok": True}
+
+
 # ── 예약 스케줄러 (문서 구조화 — graph/doc_pipeline/scheduler.py) ─────────────
 class ScheduleIn(BaseModel):
     enabled: bool = False
@@ -980,12 +1036,12 @@ def admin_source_runs(sname: str):
                    SUM(CASE WHEN d.status = 'done' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN d.status = 'excluded' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END),
-                   r.entity_version, r.cluster_version
+                   r.entity_version, r.cluster_version, r.join_version, r.data_version
             FROM doc_runs r LEFT JOIN doc_results d ON d.run_id = r.run_id
             WHERE r.source_name = :1
             GROUP BY r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
                      r.settings, r.active, r.started, r.finished,
-                     r.entity_version, r.cluster_version
+                     r.entity_version, r.cluster_version, r.join_version, r.data_version
             ORDER BY MAX(r.started) DESC""", [sname])
         rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
                  "chat_model": r[3], "embed_model": r[4],
@@ -994,7 +1050,9 @@ def admin_source_runs(sname: str):
                  "done": int(r[9] or 0), "excluded": int(r[10] or 0),
                  "error": int(r[11] or 0),
                  "entity_version": int(r[12]) if r[12] is not None else None,
-                 "cluster_version": int(r[13]) if r[13] is not None else None}
+                 "cluster_version": int(r[13]) if r[13] is not None else None,
+                 "join_version": int(r[14]) if r[14] is not None else None,
+                 "data_version": int(r[15]) if r[15] is not None else None}
                 for r in cur.fetchall()]
     return {"runs": rows}
 
@@ -1003,6 +1061,8 @@ class RunCreateIn(BaseModel):
     domain_version: int | None = None  # 미지정=현재 기본 버전
     entity_version: int | None = None  # 엔티티(추출 프롬프트) 버전 — 미지정=기본
     cluster_version: int | None = None # 클러스터(dedup) 버전 — 미지정=기본
+    join_version: int | None = None    # 테이블 조인 버전 — 미지정=기본
+    data_version: int | None = None    # 데이터 신선도 버전 — 미지정=기본
     chat_model: str = ""               # 미지정=현재 전처리 모델
     embed_model: str = ""              # 미지정=기본 임베딩
     body_chars: int | None = None
@@ -1027,8 +1087,11 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
             raise HTTPException(404, f"소스가 없습니다: {sname}")
         _ensure_entity_versions(cur)   # 버전 테이블 보장 (create_run이 참조)
         _ensure_cluster_versions(cur)
+        _ensure_join_versions(cur)
+        _ensure_data_versions(cur)
         rid = create_run(cur, sname, domain_version=inp.domain_version,
                          entity_version=inp.entity_version, cluster_version=inp.cluster_version,
+                         join_version=inp.join_version, data_version=inp.data_version,
                          chat_model=inp.chat_model, embed_model=inp.embed_model,
                          body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
                          no_think=inp.no_think,

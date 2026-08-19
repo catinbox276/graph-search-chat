@@ -1100,7 +1100,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>조인</th><th>데이터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1111,6 +1111,8 @@ async function loadRuns(src) {
     [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`,
      x.entity_version != null ? `v${x.entity_version}` : "-",
      x.cluster_version != null ? `v${x.cluster_version}` : "-",
+     x.join_version != null ? `v${x.join_version}` : "-",
+     x.data_version != null ? `v${x.data_version}` : "-",
      x.chat_model, x.embed_model, x.settings, x.done, x.excluded, x.error,
      x.active ? "★ 활성(사용자 노출)" : ""].forEach(v => {
       const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
@@ -1148,13 +1150,18 @@ async function renderRunForm(src) {
   const embeds = allm.filter(m => m.kind === "embedding");
   const entV = (await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
   const clsV = (await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
+  const joinV = (await fetch("/admin/join-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
+  const dataV = (await fetch(`/admin/sources/${encodeURIComponent(src)}/data-versions`).then(r => r.json()).catch(() => ({versions: []}))).versions || [];
   const vopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
+  const dopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""} (${v.watermark || "-"}·${v.doc_count}건)</option>`;
   f.innerHTML = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
       <b style="font-size:.78rem">버전 조합:</b>
       <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
       <select id="rfEntVer" title="엔티티 추출 버전 — 버전 관리 탭"><option value="">엔티티(기본)</option>${entV.map(vopt).join("")}</select>
       <select id="rfClsVer" title="클러스터(dedup) 버전 — 버전 관리 탭"><option value="">클러스터(기본)</option>${clsV.map(vopt).join("")}</select>
+      <select id="rfJoinVer" title="테이블 조인 버전"><option value="">조인(기본)</option>${joinV.map(vopt).join("")}</select>
+      <select id="rfDataVer" title="데이터 신선도 버전(적재 시점)"><option value="">데이터(기본)</option>${dataV.map(dopt).join("")}</select>
       <select id="rfModel" title="판정 LLM"><option value="">LLM(기본)</option>
         ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
       <select id="rfEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option>
@@ -1169,6 +1176,7 @@ async function renderRunForm(src) {
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
     iI("rfVer", "domain_version");
     iI("rfEntVer", "entity_version"); iI("rfClsVer", "cluster_version");
+    iI("rfJoinVer", "join_version"); iI("rfDataVer", "data_version");
     if ($("rfModel").value) body.chat_model = $("rfModel").value;
     if ($("rfEmbed").value) body.embed_model = $("rfEmbed").value;
     iI("rfChars", "body_chars"); iI("rfPack", "pack_tokens");
@@ -1655,19 +1663,30 @@ async function loadVersions() {
   const dbox = $("verData"); const srows = srcs.sources || [];
   dbox.innerHTML = "";
   if (!srows.length) dbox.innerHTML = `<span class="hint">등록된 소스가 없습니다</span>`;
-  else {
-    const t = document.createElement("table"); t.className = "vertable";
-    t.innerHTML = "<thead><tr><th>소스</th><th>도메인</th><th>적재 시점</th><th>문서 수</th></tr></thead>";
-    const tb = document.createElement("tbody");
-    srows.forEach(s => {
-      const c = cnt[s.source_name] || {};
-      const tr = document.createElement("tr");
-      [s.source_name, s.domain || "-", (s.last_ingest_ts || "").replace("T", " ").slice(0, 16) || "-",
-       c.total != null ? `${c.total} (반영 ${c.done || 0})` : "-"].forEach(v => {
-        const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
-      tb.appendChild(tr);
-    });
-    t.appendChild(tb); dbox.appendChild(t);
+  for (const s of srows) {
+    const c = cnt[s.source_name] || {};
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0";
+    const head = document.createElement("div"); head.className = "schedrow";
+    const info = document.createElement("span");
+    info.innerHTML = `<b>${esc(s.source_name)}</b> <span class="hint" style="margin:0">· ${esc(s.domain || "-")} · 현재 적재 ${esc((s.last_ingest_ts || "").replace("T", " ").slice(0, 16) || "-")} · ${c.total != null ? c.total + "건" : "-"}</span>`;
+    const snap = document.createElement("button"); snap.type = "button"; snap.textContent = "📸 현재 스냅샷";
+    snap.onclick = async () => {
+      await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/data-versions`,
+        {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({note: ""})});
+      loadVersions();
+    };
+    head.append(info, snap); wrap.appendChild(head);
+    const dv = await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/data-versions`)
+      .then(r => r.json()).catch(() => ({versions: []}));
+    if ((dv.versions || []).length) {
+      const vl = document.createElement("div");
+      vl.style.cssText = "font-size:.76rem;color:var(--mut);margin-top:4px";
+      vl.textContent = "데이터 버전: " + dv.versions.map(v =>
+        `v${v.version}(${v.watermark || "-"}·${v.doc_count}건${v.is_default ? " ★" : ""})`).join("  ");
+      wrap.appendChild(vl);
+    }
+    dbox.appendChild(wrap);
   }
   const ev = await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}));
   _verList($("verEntity"), ev.versions, "entity",
