@@ -12,7 +12,7 @@ import oracledb
 
 from core import config, settings
 from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
-from graph.graph_pipeline.merge import default_merge_cfg
+from graph.graph_pipeline.merge import default_merge_cfg, upsert_entity
 
 from . import runs
 from .judge import PACK_MAX_DOCS, judge_pack
@@ -169,6 +169,15 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                       run_id=run_id, count=count, mc=mc)
                     get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref,
                                   run_id=run_id, count=count, mc=mc)
+                    # 관리자 정의 타입 엔티티(layer 5) — 목표 노드에 연결.
+                    # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
+                    ej = j.get("entities")
+                    if isinstance(ej, dict):
+                        for ek, ev_ in list(ej.items())[:30]:
+                            if isinstance(ev_, (str, int, float)) and str(ev_).strip():
+                                upsert_entity(cur, str(ek).strip()[:100],
+                                              str(ev_).strip()[:400], g, "doc", ref,
+                                              run_id=run_id, count=count)
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]

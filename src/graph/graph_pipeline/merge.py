@@ -31,6 +31,40 @@ def default_merge_cfg() -> dict:
             "embed_model": ""}   # ""=기본 임베딩 (model_registry)
 
 
+ENTITY_LAYER = 5   # 관리자 정의 타입 엔티티 (time·company 등 — 코어 1~4층과 분리)
+
+
+def upsert_entity(cur, etype: str, value: str, parent_id: str,
+                  ev_kind: str, ev_ref: str, run_id: str = "-", count: bool = True) -> str:
+    """관리자 정의 타입 엔티티 노드 — (entity_type, name) 전역 정확일치 병합.
+
+    시간·회사명 같은 구조화 값이라 임베딩 유사도 병합을 안 쓴다 (2024-03과 2024-04가
+    비슷하다고 합쳐지면 안 됨). 같은 값은 전역에서 노드 1개 — 여러 목표/문서가 같은
+    회사·시점을 공유하며 연결되는 게 이 층의 가치. 엣지·증거는 get_or_create와 동일
+    규약이라 활성 전환(_run_edge_delta)·초기화(_reset_source)가 자동으로 커버한다."""
+    cur.execute("""SELECT id FROM nodes WHERE layer = :1 AND entity_type = :2 AND name = :3""",
+                [ENTITY_LAYER, etype, value])
+    r = cur.fetchone()
+    node_id = r[0] if r else None
+    if node_id is None:
+        node_id = uuid.uuid4().hex[:32]
+        cur.execute("""INSERT INTO nodes (id, layer, name, entity_type)
+                       VALUES (:1, :2, :3, :4)""", [node_id, ENTITY_LAYER, value, etype])
+    if parent_id:
+        cur.execute("""MERGE INTO edges e USING dual ON (e.src=:src AND e.dst=:dst)
+                       WHEN MATCHED THEN UPDATE SET raw_count = raw_count+:inc,
+                            weight = weight+:inc
+                       WHEN NOT MATCHED THEN INSERT (src, dst, weight, raw_count)
+                       VALUES (:src, :dst, :inc, :inc)""",
+                    {"src": parent_id, "dst": node_id, "inc": 1 if count else 0})
+    cur.execute("""MERGE INTO node_evidence e USING dual
+                   ON (e.node_id = :n AND e.kind = :k AND e.ref = :r AND e.run_id = :rid)
+                   WHEN NOT MATCHED THEN INSERT (node_id, kind, ref, run_id)
+                   VALUES (:n, :k, :r, :rid)""",
+                {"n": node_id, "k": ev_kind, "r": ev_ref, "rid": run_id})
+    return node_id
+
+
 def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:
     """임베딩 ≥HIGH 자동 병합 가드 — 짧은 이름 제외 + 문자 유사도 AND 조건.
     임베딩 코사인 단독 즉시 병합은 업계 관행에 없음 (Graphiti 3-gram Jaccard,

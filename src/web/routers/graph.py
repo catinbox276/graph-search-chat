@@ -31,7 +31,7 @@ def graph_data(request: Request):
     con = db()
     cur = con.cursor()
     cur.execute("""
-        SELECT n.id, n.layer, n.name, n.fail_reason,
+        SELECT n.id, n.layer, n.name, n.fail_reason, n.entity_type,
                (SELECT COUNT(*) FROM node_evidence ev
                 WHERE ev.node_id = n.id) AS ev_cnt,
                (SELECT COUNT(*) FROM node_evidence ev
@@ -47,8 +47,9 @@ def graph_data(request: Request):
                   AND ev.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')) AS dc
         FROM nodes n""")
     nodes = [{"id": r[0], "layer": r[1], "name": r[2], "fail_reason": r[3],
-              "uses": r[4], "success": r[5], "fail_cnt": r[6], "docs": r[7],
-              "fail": r[6] > r[5]}  # 실패 우세만 빨강 (카운트 기준)
+              "etype": r[4] or "",
+              "uses": r[5], "success": r[6], "fail_cnt": r[7], "docs": r[8],
+              "fail": r[7] > r[6]}  # 실패 우세만 빨강 (카운트 기준)
              for r in cur.fetchall()]
     cur.execute("SELECT src, dst, raw_count FROM edges")
     edges = [{"src": r[0], "dst": r[1], "count": r[2]} for r in cur.fetchall()]
