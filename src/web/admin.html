@@ -1091,7 +1091,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인 버전</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1099,8 +1099,10 @@ async function loadRuns(src) {
     const pick = document.createElement("input");
     pick.type = "radio"; pick.name = "runpick"; pick.value = x.run_id;
     const c0 = document.createElement("td"); c0.appendChild(pick); tr.appendChild(c0);
-    [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`, x.chat_model,
-     x.embed_model, x.settings, x.done, x.excluded, x.error,
+    [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`,
+     x.entity_version != null ? `v${x.entity_version}` : "-",
+     x.cluster_version != null ? `v${x.cluster_version}` : "-",
+     x.chat_model, x.embed_model, x.settings, x.done, x.excluded, x.error,
      x.active ? "★ 활성(사용자 노출)" : ""].forEach(v => {
       const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
     });
@@ -1135,34 +1137,32 @@ async function renderRunForm(src) {
   const models = (await fetch("/models").then(r => r.json()).catch(() => ({llm: []}))).llm || [];
   const allm = (await fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))).models || [];
   const embeds = allm.filter(m => m.kind === "embedding");
+  const entV = (await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
+  const clsV = (await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
+  const vopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
   f.innerHTML = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
-      <b style="font-size:.78rem">버전 그룹:</b>
-      <input id="rfVer" type="number" min="1" placeholder="도메인 버전 (빈값=기본)" style="width:140px" title="도메인 시드 탭의 버전 번호">
-      <select id="rfModel" title="판정 LLM"><option value="">LLM (빈값=기본)</option>
+      <b style="font-size:.78rem">버전 조합:</b>
+      <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
+      <select id="rfEntVer" title="엔티티 추출 버전 — 버전 관리 탭"><option value="">엔티티(기본)</option>${entV.map(vopt).join("")}</select>
+      <select id="rfClsVer" title="클러스터(dedup) 버전 — 버전 관리 탭"><option value="">클러스터(기본)</option>${clsV.map(vopt).join("")}</select>
+      <select id="rfModel" title="판정 LLM"><option value="">LLM(기본)</option>
         ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
-      <select id="rfEmbed" title="임베딩 모델 — 병합(dedup) 벡터"><option value="">임베딩 (빈값=기본)</option>
+      <select id="rfEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option>
         ${embeds.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
-      <input id="rfChars" type="number" min="0" placeholder="본문 길이" style="width:110px">
-      <input id="rfPack" type="number" min="0" placeholder="묶음 토큰" style="width:110px">
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
-      <b style="font-size:.78rem">클러스터(dedup, 빈값=현재):</b>
-      <input id="rfSimHigh" type="number" step="0.01" min="0" max="1" placeholder="자동병합≥ (0.92)" style="width:140px" title="이 코사인 이상은 LLM 없이 즉시 병합">
-      <input id="rfSimThr" type="number" step="0.01" min="0" max="1" placeholder="후보하한≥ (0.70)" style="width:140px" title="이 이상만 병합 후보로">
-      <input id="rfSelMax" type="number" min="1" placeholder="LLM 후보수 (8)" style="width:130px" title="LLM 선택에 넘길 후보 상한">
+      <input id="rfChars" type="number" min="0" placeholder="본문길이" style="width:90px">
+      <input id="rfPack" type="number" min="0" placeholder="묶음토큰" style="width:90px">
       <button type="button" id="rfGo">생성</button>
     </div>
-    <span class="hint" style="margin:0">엔티티 추출 프롬프트는 현재 전처리 설정을 스냅샷합니다 (버전별로 바꾸려면 전처리 설정에서 먼저 변경 후 생성)</span>`;
+    <span class="hint" style="margin:0">엔티티·클러스터는 [버전 관리] 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 만든 조합은 아래 목록에서 어떤 버전으로 만들었는지 확인됩니다.</span>`;
   $("rfGo").onclick = async () => {
     const body = {};
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
-    const iF = (id, k) => { if ($(id).value !== "") body[k] = parseFloat($(id).value); };
     iI("rfVer", "domain_version");
+    iI("rfEntVer", "entity_version"); iI("rfClsVer", "cluster_version");
     if ($("rfModel").value) body.chat_model = $("rfModel").value;
     if ($("rfEmbed").value) body.embed_model = $("rfEmbed").value;
     iI("rfChars", "body_chars"); iI("rfPack", "pack_tokens");
-    iF("rfSimHigh", "sim_high"); iF("rfSimThr", "sim_threshold"); iI("rfSelMax", "select_max");
     const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/runs`, {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
     const j = await r.json().catch(() => ({}));

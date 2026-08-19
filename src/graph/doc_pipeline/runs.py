@@ -43,6 +43,11 @@ def ensure_runs(cur):
         cur.execute("UPDATE doc_runs SET settings_c = settings")
         cur.execute("ALTER TABLE doc_runs DROP COLUMN settings")
         cur.execute("ALTER TABLE doc_runs RENAME COLUMN settings_c TO settings")
+    for col in ("ENTITY_VERSION", "CLUSTER_VERSION"):   # 조합이 참조하는 버전 번호 (멱등)
+        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                       WHERE table_name = 'DOC_RUNS' AND column_name = :1""", [col])
+        if not cur.fetchone()[0]:
+            cur.execute(f"ALTER TABLE doc_runs ADD ({col} NUMBER)")
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE doc_results (
@@ -133,12 +138,30 @@ def record_result(cur, run_id: str, source_name: str, src_id: str,
                  "st": status, "nt": (note or "")[:1000] or None})
 
 
-def create_run(cur, source_name: str, domain_version=None, chat_model="",
-               embed_model="", body_chars=None, pack_tokens=None, no_think=None,
-               dedup=None) -> str:
-    """새 조합 run 생성 (비활성) — 지정 안 한 항목은 현재 기본값 스냅샷.
-    구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환.
-    dedup: 클러스터 설정 부분 override(지정 키만 덮음)."""
+def _lob(v) -> str:
+    return (v.read() if hasattr(v, "read") else v) or ""
+
+
+def _default_ver(cur, table: str):
+    """버전 테이블의 기본 버전(없으면 최대). 테이블 없으면 None."""
+    try:
+        cur.execute(f"SELECT version FROM {table} WHERE is_default = 'Y'")
+        r = cur.fetchone()
+        if r:
+            return int(r[0])
+        cur.execute(f"SELECT MAX(version) FROM {table}")
+        r = cur.fetchone()
+        return int(r[0]) if r and r[0] is not None else None
+    except Exception:
+        return None
+
+
+def create_run(cur, source_name: str, domain_version=None, entity_version=None,
+               cluster_version=None, chat_model="", embed_model="", body_chars=None,
+               pack_tokens=None, no_think=None, dedup=None) -> str:
+    """새 조합 run 생성 (비활성) — 도메인·엔티티·클러스터 버전 번호를 참조해
+    그 버전의 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/기본값.
+    구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
     ensure_runs(cur)
     c = _combo(cur, source_name)
     st = json.loads(c["settings"])
@@ -148,16 +171,32 @@ def create_run(cur, source_name: str, domain_version=None, chat_model="",
         st["pack_tokens"] = pack_tokens
     if no_think is not None:
         st["no_think"] = no_think
-    if dedup:   # 클러스터 부분 override — None 아닌 키만
+    # 엔티티 버전 선택 → 그 버전의 프롬프트를 스냅샷
+    ev = entity_version or _default_ver(cur, "entity_versions")
+    if ev is not None:
+        cur.execute("SELECT doc_prompt, pack_prompt FROM entity_versions WHERE version = :1", [ev])
+        r = cur.fetchone()
+        if r:
+            st["doc_prompt"], st["pack_prompt"] = _lob(r[0]), _lob(r[1])
+    # 클러스터 버전 선택 → dedup 스냅샷
+    cv = cluster_version or _default_ver(cur, "cluster_versions")
+    if cv is not None:
+        cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio, select_max
+                       FROM cluster_versions WHERE version = :1""", [cv])
+        r = cur.fetchone()
+        if r:
+            st["dedup"] = {"sim_high": float(r[0]), "sim_threshold": float(r[1]),
+                           "short_name_chars": int(r[2]), "char_ratio": float(r[3]),
+                           "select_max": int(r[4])}
+    elif dedup:   # 버전 없을 때만 raw override (하위호환)
         st["dedup"] = {**st.get("dedup", {}),
                        **{k: v for k, v in dedup.items() if v is not None}}
     rid = uuid.uuid4().hex
     cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
-                     chat_model, embed_model, settings, active)
-                   VALUES (:1, :2, :3, :4, :5, :6, :7, 'N')""",
-                [rid, source_name, c["domain"],
-                 domain_version or c["domain_version"],
-                 (chat_model or c["chat_model"]).strip(),
+                     entity_version, cluster_version, chat_model, embed_model, settings, active)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, 'N')""",
+                [rid, source_name, c["domain"], domain_version or c["domain_version"],
+                 ev, cv, (chat_model or c["chat_model"]).strip(),
                  (embed_model or c["embed_model"]).strip(),
                  json.dumps(st, ensure_ascii=False)])
     return rid

@@ -913,23 +913,30 @@ def admin_source_runs(sname: str):
                    TO_CHAR(r.started, 'MM-DD HH24:MI'), TO_CHAR(r.finished, 'MM-DD HH24:MI'),
                    SUM(CASE WHEN d.status = 'done' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN d.status = 'excluded' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END),
+                   r.entity_version, r.cluster_version
             FROM doc_runs r LEFT JOIN doc_results d ON d.run_id = r.run_id
             WHERE r.source_name = :1
             GROUP BY r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
-                     r.settings, r.active, r.started, r.finished
+                     r.settings, r.active, r.started, r.finished,
+                     r.entity_version, r.cluster_version
             ORDER BY MAX(r.started) DESC""", [sname])
         rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
                  "chat_model": r[3], "embed_model": r[4],
                  "settings": _run_settings_display(r[5]),
                  "active": r[6] == "Y", "started": r[7], "finished": r[8],
                  "done": int(r[9] or 0), "excluded": int(r[10] or 0),
-                 "error": int(r[11] or 0)} for r in cur.fetchall()]
+                 "error": int(r[11] or 0),
+                 "entity_version": int(r[12]) if r[12] is not None else None,
+                 "cluster_version": int(r[13]) if r[13] is not None else None}
+                for r in cur.fetchall()]
     return {"runs": rows}
 
 
 class RunCreateIn(BaseModel):
     domain_version: int | None = None  # 미지정=현재 기본 버전
+    entity_version: int | None = None  # 엔티티(추출 프롬프트) 버전 — 미지정=기본
+    cluster_version: int | None = None # 클러스터(dedup) 버전 — 미지정=기본
     chat_model: str = ""               # 미지정=현재 전처리 모델
     embed_model: str = ""              # 미지정=기본 임베딩
     body_chars: int | None = None
@@ -952,7 +959,10 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
         cur.execute("SELECT COUNT(*) FROM source_registry WHERE source_name = :1", [sname])
         if not cur.fetchone()[0]:  # 원천 테이블 실존은 불필요 — 등록 여부만 (이관 시드 소스 포함)
             raise HTTPException(404, f"소스가 없습니다: {sname}")
+        _ensure_entity_versions(cur)   # 버전 테이블 보장 (create_run이 참조)
+        _ensure_cluster_versions(cur)
         rid = create_run(cur, sname, domain_version=inp.domain_version,
+                         entity_version=inp.entity_version, cluster_version=inp.cluster_version,
                          chat_model=inp.chat_model, embed_model=inp.embed_model,
                          body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
                          no_think=inp.no_think,
