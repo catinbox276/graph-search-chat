@@ -9,77 +9,103 @@ import re
 from core import config
 from graph.graph_pipeline import CHAT_MODEL, llm
 
-DOC_PROMPT = """문서가 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
+# ── 추출 스키마 — 관리자가 역할·키·표시명·설명을 정의, 프롬프트는 여기서 생성 ──
+# 역할→저장층 매핑: entry(진입점)→그래프 2층, solution(추천단위)→3층, attr(속성)→5층.
+# 관리자는 이름·키·설명을 자유로 바꾸고(버전 관리), 출력 형식은 코드가 생성해 잠근다.
+DEFAULT_SCHEMA = {
+    "entry":    {"key": "goal", "label": "목표", "desc": "문서가 다루는 문제/목표"},
+    "solution": {"key": "approach", "label": "접근법", "desc": "핵심 해법/접근법"},
+    "attrs": [],
+}
 
-도메인: {domain}
-도메인 기준·추출 지침: {hint}
 
-문서 (유형: {kind}):
-제목: {title}
-{body}
+def norm_schema(etypes) -> dict:
+    """etypes 행([{key,label,desc,role}]) → {entry, solution, attrs[]} 정규화.
+    role 없는 행=attr(하위호환), entry/solution 미정의=기본 goal/approach."""
+    out = {"entry": dict(DEFAULT_SCHEMA["entry"]),
+           "solution": dict(DEFAULT_SCHEMA["solution"]), "attrs": []}
+    for t in (etypes or []):
+        if not (isinstance(t, dict) and str(t.get("key", "")).strip()):
+            continue
+        row = {"key": str(t["key"]).strip(),
+               "label": str(t.get("label", "")).strip() or str(t["key"]).strip(),
+               "desc": str(t.get("desc", "")).strip()}
+        role = str(t.get("role", "")).strip()
+        if role in ("entry", "solution"):
+            out[role] = row
+        else:
+            out["attrs"].append(row)
+    return out
 
-출력 형식: {"fits": true|false, "reason": "판정 근거 한 문장",
- "goal": "문서가 다루는 문제/목표 (한 문장, fits=true일 때만)",
- "approach": "핵심 해법/접근법 (한 문장, fits=true일 때만)"}
+
+def _out_fields(schema: dict, brief: bool = False) -> str:
+    """출력 형식 JSON의 스키마 필드 부분 — desc가 추출 기준으로 들어간다."""
+    e, s = schema["entry"], schema["solution"]
+    suffix = "" if brief else " (한 문장, fits=true일 때만)"
+    lines = [f' "{e["key"]}": "{e["desc"] or e["label"]}{suffix}"',
+             f' "{s["key"]}": "{s["desc"] or s["label"]}{suffix}"']
+    for a in schema["attrs"]:
+        lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
+                     f' (문서에서 확인될 때만 — 없으면 이 키를 생략)"')
+    return ",\n".join(lines)
+
+
+def _crit_block(criteria: str) -> str:
+    criteria = (criteria or "").strip()
+    return f"\n엔티티 판정·추출 지침:\n{criteria}" if criteria else ""
+
+
+def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
+    """단건 판정 프롬프트를 스키마에서 생성 — 출력 형식·placeholder 배선은 코드 잠금."""
+    sc = schema or DEFAULT_SCHEMA
+    e, s = sc["entry"], sc["solution"]
+    return f"""문서가 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
+
+도메인: {{domain}}
+도메인 기준·추출 지침: {{hint}}{_crit_block(criteria)}
+
+문서 (유형: {{kind}}):
+제목: {{title}}
+{{body}}
+
+출력 형식: {{"fits": true|false, "reason": "판정 근거 한 문장",
+{_out_fields(sc)}}}
 
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
-- 문제도 해법도 없는 글, 결말·결론 없이 끝나는 글
+- {e["label"]}도 {s["label"]}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
 - 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
 
 
-PACK_PROMPT = """여러 문서 각각이 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON 배열만 출력.
+def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
+    """묶음 판정 프롬프트 — 단건과 같은 스키마, 배열 포장만 다름."""
+    sc = schema or DEFAULT_SCHEMA
+    e, s = sc["entry"], sc["solution"]
+    return f"""여러 문서 각각이 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON 배열만 출력.
 
-도메인: {domain}
-도메인 기준·추출 지침: {hint}
+도메인: {{domain}}
+도메인 기준·추출 지침: {{hint}}{_crit_block(criteria)}
 
 문서 목록 — 각 문서는 ===[문서id]=== 로 시작한다:
-{docs}
+{{docs}}
 
 출력 형식: 문서마다 1개씩, 입력 순서대로 JSON 배열.
-[{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
-  "goal": "문제/목표 한 문장(fits=true일 때만)", "approach": "핵심 해법 한 문장(fits=true일 때만)"}, ...]
+[{{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
+{_out_fields(sc, brief=True)}}}, ...]
 
-fits=false로 판정할 것: 도메인과 무관 / 문제도 해법도 없음 / 결말·결론 없음 / 내용이 빈약함.
+fits=false로 판정할 것: 도메인과 무관 / {e["label"]}도 {s["label"]}도 없음 / 결말·결론 없음 / 내용이 빈약함.
 각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
 
+
+def build_prompts(schema: dict | None = None, criteria: str = "") -> tuple:
+    return build_doc_prompt(schema, criteria), build_pack_prompt(schema, criteria)
+
+
+# 기본 스키마의 렌더 결과 — 앱설정 override 미지정·세션 무관 경로의 코드 기본값
+DOC_PROMPT = build_doc_prompt()
+PACK_PROMPT = build_pack_prompt()
+
 PACK_MAX_DOCS = 8  # 묶음당 문서 상한 — 출력 길이·판정 품질 보호
-
-_CRIT_ANCHOR = "도메인 기준·추출 지침: {hint}"
-
-
-def with_criteria(tmpl: str, criteria: str) -> str:
-    """엔티티 버전의 판정 지침(criteria)을 스캐폴드의 지정 슬롯에 주입.
-
-    관리자는 지침만 편집하고 출력 형식·placeholder 배선은 코드가 잠근다
-    (스키마를 편집 영역에서 분리 — 원문 전체 편집은 '고급'으로만).
-    criteria 안의 중괄호는 _fill이 이름 있는 키만 치환하므로 안전하다."""
-    criteria = (criteria or "").strip()
-    if not criteria:
-        return tmpl
-    block = f"{_CRIT_ANCHOR}\n엔티티 판정·추출 지침:\n{criteria}"
-    if _CRIT_ANCHOR in tmpl:
-        return tmpl.replace(_CRIT_ANCHOR, block, 1)
-    return f"엔티티 판정·추출 지침:\n{criteria}\n\n{tmpl}"   # 앵커 없는 커스텀 스캐폴드 폴백
-
-
-def with_etypes(tmpl: str, etypes: list) -> str:
-    """관리자 정의 엔티티 타입([{key, desc}])의 추출 지시를 프롬프트 끝에 부착.
-
-    설명(desc)이 분류 기준으로 쓰인다 (Graphiti extract_nodes 방식). 출력은 기존
-    JSON에 "entities" 객체 하나를 더하는 것이라 fits/goal/approach 스캐폴드와 독립 —
-    커스텀 원문(고급) 프롬프트에도 안전하게 붙는다."""
-    rows = [t for t in (etypes or [])
-            if isinstance(t, dict) and str(t.get("key", "")).strip()]
-    if not rows:
-        return tmpl
-    lines = "\n".join(f'- {str(t["key"]).strip()}: {str(t.get("desc", "")).strip() or "(설명 없음)"}'
-                      for t in rows)
-    return (f"{tmpl}\n\n추가 엔티티 추출 — fits=true인 문서는 출력 JSON에 \"entities\" 객체를"
-            f" 함께 넣어라. 아래 타입 각각에 대해, 문서에서 확인되는 값만 넣는다"
-            f" (각 설명이 분류 기준, 값은 문서 원문에 근거한 간결한 문자열 — 없으면 그 키를 생략):\n"
-            f"{lines}\n"
-            f'예: "entities": {{"{str(rows[0]["key"]).strip()}": "..."}}')
 
 
 def _gen_kwargs(no_think: bool, max_tokens: int) -> dict:

@@ -515,17 +515,26 @@ class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
     @field_validator("etypes")
     @classmethod
     def _etypes(cls, v: list) -> list:
-        out, seen = [], set()
+        out, seen, role_cnt = [], set(), {"entry": 0, "solution": 0}
         for t in (v or [])[:30]:   # 상한 30종 — 프롬프트 길이 보호
             key = str(t.get("key", "")).strip()
             if not key:
                 continue
-            if key in ("goal", "approach", "fits", "reason", "id", "entities"):
-                raise ValueError(f"'{key}'는 내장 필드라 타입 이름으로 쓸 수 없습니다")
+            if key in ("fits", "reason", "id"):
+                raise ValueError(f"'{key}'는 판정 예약 필드라 키로 쓸 수 없습니다")
             if key in seen:
-                raise ValueError(f"타입 이름 중복: {key}")
+                raise ValueError(f"키 중복: {key}")
             seen.add(key)
-            out.append({"key": key, "desc": str(t.get("desc", "")).strip()})
+            role = str(t.get("role", "")).strip()
+            if role in ("entry", "solution"):
+                role_cnt[role] += 1
+                if role_cnt[role] > 1:
+                    nm = "진입점" if role == "entry" else "추천단위"
+                    raise ValueError(f"{nm} 역할은 스키마당 1개만 가능합니다")
+            else:
+                role = "attr"
+            out.append({"key": key, "label": str(t.get("label", "")).strip(),
+                        "desc": str(t.get("desc", "")).strip(), "role": role})
         return out
 
 
@@ -624,6 +633,22 @@ def admin_entity_line_versions(name: str, page: int = 1):
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
         return versioning.list_versions(cur, versioning.ENTITY_SPEC, name, page)
+
+
+class EntityPreviewIn(BaseModel):
+    criteria: str = ""
+    etypes: list[dict] = []
+
+
+@router.post("/admin/entity-preview")
+def admin_entity_preview(inp: EntityPreviewIn):
+    """스키마·지침으로 조립된 프롬프트 미리보기 — UI가 서버와 동일한 조립 결과를 표시
+    (프론트에 조립 로직을 복제하지 않는다)."""
+    schema = _judge.norm_schema(inp.etypes)
+    d, p = _judge.build_prompts(schema, inp.criteria)
+    return {"doc_prompt": d, "pack_prompt": p,
+            "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
+                     "attrs": [a["key"] for a in schema["attrs"]]}}
 
 
 @router.post("/admin/entity-lines")
@@ -1535,18 +1560,41 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
                 for row in cur.fetchall()]
     if not docs:
         return {"domain": domain, "results": [], "note": "미처리 문서가 없습니다"}
+    # 활성 엔티티 버전의 스키마·지침으로 조립 — run이 실제로 쓸 프롬프트와 동일 기준
+    doc_prompt, schema = "", _judge.DEFAULT_SCHEMA
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        en, ev = versioning.active(cur, "entity_versions")
+        if en and ev is not None:
+            cur.execute("""SELECT doc_prompt, criteria, etypes FROM entity_versions
+                           WHERE name = :1 AND version = :2""", [en, ev])
+            r2 = cur.fetchone()
+            if r2:
+                import json as _json
+                raw, crit = _lob_str(r2[0]), _lob_str(r2[1])
+                try:
+                    schema = _judge.norm_schema(_json.loads(_lob_str(r2[2]) or "[]"))
+                except (_json.JSONDecodeError, TypeError):
+                    schema = _judge.DEFAULT_SCHEMA
+                doc_prompt = raw.strip() or _judge.build_doc_prompt(schema, crit)
     # LLM 판정은 커넥션 반납 후 — 판정 1건에 수 초라 커넥션을 잡고 있지 않는다
     st = settings.get_all()
     body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
     model = (st.get("doc_extract_model") or "").strip()
-    doc_prompt = (st.get("struct_doc_prompt") or "").strip()  # 드라이런도 override로 미리보기
+    if not doc_prompt:   # 활성 버전이 비었으면 앱설정 원문 override → 코드 기본
+        doc_prompt = (st.get("struct_doc_prompt") or "").strip()
+    ek, sk = schema["entry"]["key"], schema["solution"]["key"]
+    keys = [(ek, schema["entry"].get("label") or ek),
+            (sk, schema["solution"].get("label") or sk)] + \
+           [(a["key"], a.get("label") or a["key"]) for a in schema["attrs"]]
     out = []
     for src_id, title, kind, body in docs:
         j = doc_pipeline.judge_doc(domain, hint, kind, title, body,
                                    model=model, body_chars=body_chars, doc_prompt=doc_prompt)
+        extracted = {label: str(j.get(k) or "") for k, label in keys if j.get(k)}
         out.append({"src_id": src_id, "title": title.strip()[:120],
                     "fits": bool(j.get("fits")), "reason": j.get("reason") or
                     j.get("_error") or "파싱 실패",
-                    "goal": j.get("goal") or "", "approach": j.get("approach") or ""})
+                    "extracted": extracted})
     return {"domain": domain, "results": out,
-            "note": "판정만 수행 — 그래프·상태에 반영 안 됨"}
+            "note": "활성 엔티티 버전의 스키마로 판정만 수행 — 그래프·상태에 반영 안 됨"}

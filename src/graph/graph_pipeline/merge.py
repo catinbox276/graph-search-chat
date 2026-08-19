@@ -115,7 +115,9 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
             if top_sim >= mc["sim_high"] and _auto_merge_ok(name, top_name, mc):
                 node_id = top_id  # 고신뢰 + 문자 가드 통과 — LLM 없이 즉시 병합
             else:
-                node_id = llm_select(LAYER_KIND.get(layer, "개념"), name, cands,
+                kind = ((mc.get("layer_kind") or {}).get(layer)   # 스키마 표시명 우선
+                        or LAYER_KIND.get(layer, "개념"))
+                node_id = llm_select(kind, name, cands,
                                      mc["select_max"], prompt=mc.get("select_prompt", ""))
     else:
         cur.execute("SELECT id FROM nodes WHERE layer = :1 AND name = :2",

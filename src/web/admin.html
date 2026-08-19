@@ -196,23 +196,30 @@
 <section class="card" id="sec-entity">
   <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
   <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서에서 뽑아내는 지식의 단위</b>입니다.
-     <b>목표(goal)·접근법(approach)</b>이 내장 엔티티(그래프 2·3층)이고, 여기에 관리자가
-     time·company 같은 <b>추가 엔티티</b>를 정의할 수 있습니다. (행동/도구 엔티티는 대화에서만 나옴 — 문서엔 없음)</p>
+     <b>키·표시명·설명은 전부 변경 가능</b>하고, <b>역할</b>이 그래프에서의 자리를 정합니다 —
+     진입점(2층, 경로 추천의 시작)·추천단위(3층, 검증·가중치가 붙는 곳)는 각 1개, 속성(5층)은 자유.
+     goal·approach는 기본 스키마의 이름일 뿐 바꿔도 됩니다. (행동/도구는 대화에서만 나옴)</p>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="fgroup">
-      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 문서 하나를 읽고 무엇을 추출할지. 설명이 곧 추출 기준입니다</small></div>
+      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 문서 하나를 읽고 무엇을 추출할지. 설명이 곧 추출 기준이고, 키·표시명·설명 모두 편집 가능합니다</small></div>
       <table class="vertable">
-        <thead><tr><th style="width:70px">구분</th><th style="width:170px">키(이름)</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:36px"></th></tr></thead>
+        <thead><tr><th style="width:86px">역할</th><th style="width:130px">키 (영문 권장)</th><th style="width:120px">표시명</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:36px"></th></tr></thead>
         <tbody>
-          <tr style="opacity:.75"><td>내장 🔒</td><td><b>goal</b> (목표)</td><td>문서가 다루는 문제/목표 한 문장 → 그래프 2층 노드가 됩니다</td><td></td></tr>
-          <tr style="opacity:.75"><td>내장 🔒</td><td><b>approach</b> (접근법)</td><td>핵심 해법/조치 한 문장 → 그래프 3층 노드가 됩니다</td><td></td></tr>
+          <tr><td title="경로 추천의 시작점 — 그래프 2층. 스키마당 1개">진입점 🔗</td>
+            <td><input id="veEkey" value="goal" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
+            <td><input id="veElabel" value="목표" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
+            <td><input id="veEdesc" value="문서가 다루는 문제/목표" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td><td></td></tr>
+          <tr><td title="검증·가중치·추천이 붙는 단위 — 그래프 3층. 스키마당 1개">추천단위 ⭐</td>
+            <td><input id="veSkey" value="approach" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
+            <td><input id="veSlabel" value="접근법" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
+            <td><input id="veSdesc" value="핵심 해법/접근법" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td><td></td></tr>
         </tbody>
         <tbody id="veTypes"></tbody>
       </table>
       <div class="schedrow" style="margin:6px 0 0">
-        <button type="button" class="ghost" id="veTypeAdd">＋ 엔티티 추가</button>
-        <span class="hint" style="margin:0">추가 엔티티는 그래프 5층 노드로 목표에 연결되고, run별 문서 결과에도 저장됩니다</span>
+        <button type="button" class="ghost" id="veTypeAdd">＋ 속성 추가</button>
+        <span class="hint" style="margin:0">속성(예: time·company)은 그래프 5층 노드로 진입점에 연결되고, run별 문서 결과에도 저장됩니다</span>
       </div>
     </div>
     <div class="fgroup">
@@ -230,7 +237,8 @@
       </div>
     </div>
     <details style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">🔒 스캐폴드 보기 (읽기 전용) — 위 1·2가 주입되는 고정 틀 · 출력 형식 {"fits", "goal", "approach", "entities"}는 코드가 잠금</summary>
+      <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 위 1·2로 생성되는 실제 프롬프트 · 출력 형식은 코드가 생성해 잠금</summary>
+      <div class="schedrow" style="margin:4px 0 0"><button type="button" class="ghost" id="entPvBtn">🔄 현재 폼으로 미리보기</button></div>
       <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
     </details>
     <details style="margin:6px 0">
@@ -996,7 +1004,8 @@ $("sdry").onclick = async () => {
     mark.className = d.fits ? "ok" : "no";
     mark.textContent = d.fits ? "✓ 통과" : "✗ 미달";
     line.append(mark, ` [${d.src_id}] ${d.title} — ${d.reason}`);
-    if (d.fits) line.append(` | 목표: ${d.goal} → 접근법: ${d.approach}`);
+    const ex = Object.entries(d.extracted || {});   // 스키마 동적 키 (표시명: 값)
+    if (d.fits && ex.length) line.append(" | " + ex.map(([k, v]) => `${k}: ${v}`).join(" → "));
     out.appendChild(line);
   });
 };
@@ -1844,8 +1853,8 @@ async function vmVersions(cfg, name, page, td) {
     [`v${v.version}`, v.created || "", cfg.summary(v), v.note || "", v.is_default ? "★ 기본" : ""]
       .forEach(x => { const c = document.createElement("td"); c.textContent = x; vr.appendChild(c); });
     const cv = document.createElement("td");   // 👁 상세 — 내부 구조(프롬프트 전문) 뷰어
-    cv.appendChild(_verBtn("👁 상세", () =>
-      openVerModal(`${cfg.title} · ${name} v${v.version}`, cfg.viewSections(v))));
+    cv.appendChild(_verBtn("👁 상세", async () =>
+      openVerModal(`${cfg.title} · ${name} v${v.version}`, await cfg.viewSections(v))));
     vr.appendChild(cv);
     if (v.is_default) vr.classList.add("sel");
     tb.appendChild(vr);
@@ -1880,45 +1889,66 @@ async function vmNewLine(cfg) {
   $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
   if (r.ok) vmLoadLines(cfg);
 }
-// ── 엔티티 편집기 — 내장(goal·approach) 아래에 추가 엔티티를 표 행으로 (etypes JSON [{key,desc}]) ──
-function veTypeRow(key, desc) {
+// ── 엔티티 스키마 편집기 — 진입점·추천단위(고정 행) + 속성 행 (etypes JSON [{key,label,desc,role}]) ──
+const _VE_IN = "width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+function veTypeRow(key, label, desc) {
   const tr = document.createElement("tr"); tr.className = "etyperow";
-  const c0 = document.createElement("td"); c0.textContent = "추가 ✏"; tr.appendChild(c0);
-  const c1 = document.createElement("td");
-  const k = document.createElement("input"); k.placeholder = "키 (예: time)"; k.value = key || "";
-  k.style.cssText = "width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
-  c1.appendChild(k); tr.appendChild(c1);
-  const c2 = document.createElement("td");
-  const d = document.createElement("input"); d.placeholder = "무엇을 뽑을지 — 이 설명이 추출 기준이 됩니다 (예: 문서에 언급된 시점)"; d.value = desc || "";
-  d.style.cssText = "width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
-  c2.appendChild(d); tr.appendChild(c2);
+  const c0 = document.createElement("td"); c0.textContent = "속성 ✏";
+  c0.title = "부가 정보 — 그래프 5층 노드로 진입점에 연결"; tr.appendChild(c0);
+  const mk = (ph, val) => { const td = document.createElement("td");
+    const i = document.createElement("input"); i.placeholder = ph; i.value = val || "";
+    i.style.cssText = _VE_IN; td.appendChild(i); tr.appendChild(td); return i; };
+  mk("키 (예: time)", key); mk("표시명 (예: 시점)", label);
+  mk("무엇을 뽑을지 — 이 설명이 추출 기준 (예: 문서에 언급된 시점)", desc);
   const c3 = document.createElement("td");
   const x = document.createElement("button"); x.type = "button"; x.className = "ghost"; x.textContent = "✕";
   x.onclick = () => tr.remove();
   c3.appendChild(x); tr.appendChild(c3);
   $("veTypes").appendChild(tr);
 }
-function veTypesRead() {
-  return [...$("veTypes").querySelectorAll(".etyperow")].map(r => {
-    const [k, d] = r.querySelectorAll("input");
-    return {key: k.value.trim(), desc: d.value.trim()};
-  }).filter(t => t.key);
+function veTypesRead() {   // 폼 → etypes (역할 포함)
+  const out = [];
+  if ($("veEkey").value.trim())
+    out.push({role: "entry", key: $("veEkey").value.trim(),
+              label: $("veElabel").value.trim(), desc: $("veEdesc").value.trim()});
+  if ($("veSkey").value.trim())
+    out.push({role: "solution", key: $("veSkey").value.trim(),
+              label: $("veSlabel").value.trim(), desc: $("veSdesc").value.trim()});
+  [...$("veTypes").querySelectorAll(".etyperow")].forEach(r => {
+    const [k, l, d] = r.querySelectorAll("input");
+    if (k.value.trim()) out.push({role: "attr", key: k.value.trim(),
+                                  label: l.value.trim(), desc: d.value.trim()});
+  });
+  return out;
 }
-function veTypesSet(arr) {
+function veTypesSet(arr) {   // etypes → 폼 (entry/solution 없으면 기본값)
+  const rows = arr || [];
+  const pick = role => rows.find(t => t.role === role);
+  const e = pick("entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
+  const s = pick("solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
+  $("veEkey").value = e.key; $("veElabel").value = e.label || ""; $("veEdesc").value = e.desc || "";
+  $("veSkey").value = s.key; $("veSlabel").value = s.label || ""; $("veSdesc").value = s.desc || "";
   $("veTypes").innerHTML = "";
-  (arr || []).forEach(t => veTypeRow(t.key, t.desc));
+  rows.filter(t => t.role !== "entry" && t.role !== "solution")
+      .forEach(t => veTypeRow(t.key, t.label, t.desc));
 }
-$("veTypeAdd").onclick = () => veTypeRow("", "");
+$("veTypeAdd").onclick = () => veTypeRow("", "", "");
+$("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 서버 조립 미리보기
+  $("entScaffold").textContent = "조립 중…";
+  const pv = await entPreview($("veCrit").value, veTypesRead());
+  $("entScaffold").textContent = pv
+    ? "── 문서 판정 프롬프트 ──\n" + pv.doc_prompt + "\n\n── 묶음 판정 프롬프트 ──\n" + pv.pack_prompt
+    : "미리보기 실패";
+};
 function parseEtypes(v) {   // 백엔드는 etypes를 JSON 문자열로 반환
   try { const a = JSON.parse(v || "[]"); return Array.isArray(a) ? a : []; }
   catch { return []; }
 }
-const ENT_ANCHOR = "도메인 기준·추출 지침: {hint}";   // judge.py _CRIT_ANCHOR와 동일
-function entAssemble(tmpl, crit) {   // 지침을 스캐폴드 슬롯에 주입 (백엔드 with_criteria와 동일 규칙)
-  if (!(crit || "").trim()) return tmpl;
-  const block = ENT_ANCHOR + "\n엔티티 판정·추출 지침:\n" + crit.trim();
-  return tmpl.includes(ENT_ANCHOR) ? tmpl.replace(ENT_ANCHOR, block)
-                                   : "엔티티 판정·추출 지침:\n" + crit.trim() + "\n\n" + tmpl;
+async function entPreview(criteria, etypes) {   // 서버 조립 — 프론트에 조립 로직 복제 금지
+  const r = await fetch("/admin/entity-preview", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({criteria: criteria || "", etypes: etypes || []})});
+  return r.ok ? r.json() : null;
 }
 const ENTITY_VM = {
   title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
@@ -1933,27 +1963,32 @@ const ENTITY_VM = {
     veTypesSet(parseEtypes(v.etypes));
     $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
   summary: v => {
-    const nt = parseEtypes(v.etypes).length;
-    return (v.doc_prompt ? "원문:커스텀(고급)" : (v.criteria ? "지침:커스텀" : "코드 기본")) +
-           (nt ? `·타입${nt}종` : "");
-  },
-  viewSections: v => {
-    const d = ENTITY_VM.defaults || {};
     const et = parseEtypes(v.etypes);
+    const e = et.find(t => t.role === "entry"), s = et.find(t => t.role === "solution");
+    const nAttr = et.filter(t => t.role !== "entry" && t.role !== "solution").length;
+    return (v.doc_prompt ? "원문:커스텀(고급)"
+            : `${(e && (e.label || e.key)) || "목표"}→${(s && (s.label || s.key)) || "접근법"}`) +
+           (nAttr ? `·속성${nAttr}종` : "") + (v.criteria ? "·지침" : "");
+  },
+  viewSections: async v => {   // 서버 조립 결과 = 실제 LLM에 가는 프롬프트
+    const et = parseEtypes(v.etypes);
+    const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
+    const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
+    const attrs = et.filter(t => t.role !== "entry" && t.role !== "solution");
+    const fmt = t => `${t.key} (${t.label || t.key}): ${t.desc || "(설명 없음)"}`;
     const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr},
-                  {label: "판정 지침 (관리자 편집분)", text: v.criteria},
-                  {label: `추출 엔티티 타입 (${et.length}종 + 내장 goal·approach)`,
-                   text: ["goal: 문서가 다루는 문제/목표 (내장)",
-                          "approach: 핵심 해법/접근법 (내장)",
-                          ...et.map(t => `${t.key}: ${t.desc || "(설명 없음)"}`)].join("\n")}];
+                  {label: `스키마 (진입점·추천단위 + 속성 ${attrs.length}종)`,
+                   text: [`진입점 🔗 ${fmt(e)} → 그래프 2층`,
+                          `추천단위 ⭐ ${fmt(s)} → 그래프 3층`,
+                          ...attrs.map(t => `속성 ✏ ${fmt(t)} → 그래프 5층`)].join("\n")},
+                  {label: "판정 지침 (관리자 편집분)", text: v.criteria}];
     if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
-      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt || d.doc_prompt},
-                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt || d.pack_prompt});
-    } else {   // 지침이 스캐폴드에 주입된 조립 결과 = 실제 LLM에 가는 프롬프트
-      secs.push({label: "적용될 문서 프롬프트 (스캐폴드 + 지침 조립 결과)",
-                 text: entAssemble(d.doc_prompt || "", v.criteria)},
-                {label: "적용될 묶음 프롬프트 (조립 결과)",
-                 text: entAssemble(d.pack_prompt || "", v.criteria)});
+      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt},
+                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt});
+    } else {
+      const pv = await entPreview(v.criteria, et);
+      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과)", text: pv && pv.doc_prompt},
+                {label: "적용될 묶음 프롬프트 (서버 조립 결과)", text: pv && pv.pack_prompt});
     }
     secs.push({label: "메모", text: v.note});
     return secs;

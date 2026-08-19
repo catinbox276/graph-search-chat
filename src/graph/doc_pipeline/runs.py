@@ -222,15 +222,12 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
                 etypes = json.loads(_lob(r[3]) or "[]")
             except (json.JSONDecodeError, TypeError):
                 etypes = []
-            if crit and not (doc_p or "").strip():
-                doc_p = _j.with_criteria(_j.DOC_PROMPT, crit)
-            if crit and not (pack_p or "").strip():
-                pack_p = _j.with_criteria(_j.PACK_PROMPT, crit)
-            if etypes:   # 타입 정의가 있으면 조립/커스텀 어느 쪽이든 추출 지시를 부착
-                doc_p = _j.with_etypes((doc_p or "").strip() or _j.DOC_PROMPT, etypes)
-                pack_p = _j.with_etypes((pack_p or "").strip() or _j.PACK_PROMPT, etypes)
-                st["etypes"] = etypes   # 재현성 — 어떤 타입 정의로 뽑았는지 스냅샷
-            st["doc_prompt"], st["pack_prompt"] = doc_p, pack_p
+            schema = _j.norm_schema(etypes)
+            st["schema"] = schema   # 재현성 — 어떤 스키마(역할·키·설명)로 뽑았는지 스냅샷
+            built_doc, built_pack = _j.build_prompts(schema, crit)
+            # 고급 원문 override가 있으면 그것 우선 (스키마 지시는 원문에 직접 포함해야 함)
+            st["doc_prompt"] = (doc_p or "").strip() or built_doc
+            st["pack_prompt"] = (pack_p or "").strip() or built_pack
     # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
     cl_name, cv = (cluster_line or None), cluster_version
     if not (cl_name and cv):

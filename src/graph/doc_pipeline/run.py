@@ -15,7 +15,7 @@ from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
 from graph.graph_pipeline.merge import default_merge_cfg, upsert_entity
 
 from . import runs
-from .judge import PACK_MAX_DOCS, judge_pack
+from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, judge_pack
 
 
 def doc_ddl(cur):
@@ -43,6 +43,7 @@ def _load_settings(limit_override: int = 0) -> SimpleNamespace:
         doc_prompt=(st.get("struct_doc_prompt") or "").strip(),    # 빈값=코드 기본(judge)
         pack_prompt=(st.get("struct_pack_prompt") or "").strip(),
         dedup=default_merge_cfg(),   # 클러스터(dedup) 기본 — run 지정 시 스냅샷으로 덮음
+        schema=DEFAULT_SCHEMA,       # 추출 스키마 — run 지정 시 스냅샷으로 덮음
         embed_model="")              # run별 임베딩 — 빈값=기본
 
 
@@ -142,6 +143,11 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
     # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
     mc = {**s.dedup, "embed_model": s.embed_model}  # run별 클러스터(dedup)·임베딩 설정
+    sc = s.schema if isinstance(getattr(s, "schema", None), dict) else DEFAULT_SCHEMA
+    ek, sk = sc["entry"]["key"], sc["solution"]["key"]   # 스키마의 진입점·추천단위 키
+    # 병합 LLM의 종류 라벨도 스키마 표시명을 따르게 (미지정 시 merge의 기본 LAYER_KIND)
+    mc["layer_kind"] = {2: sc["entry"].get("label") or ek,
+                        3: sc["solution"].get("label") or sk}
     ex = ThreadPoolExecutor(max_workers=s.conc)
     it = iter(packs)
     pending = set()
@@ -159,25 +165,29 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                       s.body_chars, s.no_think, s.doc_prompt, s.pack_prompt))
             for (src_id, title, kind, body), j in fut.result():
                 ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
+                attrs_out = {}   # 이 문서에서 뽑힌 속성들 — run별 결과 기록용
                 if not j or j.get("_error"):
                     status, note = "error", (j.get("_error") if j
                                              else "LLM 응답 파싱 실패")
-                elif j.get("fits") and j.get("goal") and j.get("approach"):
+                elif j.get("fits") and j.get(ek) and j.get(sk):
                     d = get_or_create(cur, 1, domain, None, "doc", ref,
                                       use_embedding=False, run_id=run_id, count=count, mc=mc)
-                    g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref,
+                    g = get_or_create(cur, 2, str(j[ek])[:400], d, "doc", ref,
                                       run_id=run_id, count=count, mc=mc)
-                    get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref,
+                    get_or_create(cur, 3, str(j[sk])[:400], g, "doc", ref,
                                   run_id=run_id, count=count, mc=mc)
-                    # 관리자 정의 타입 엔티티(layer 5) — 목표 노드에 연결.
+                    # 속성(attr) 엔티티(layer 5) — 진입점 노드에 연결.
                     # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
-                    ej = j.get("entities")
-                    if isinstance(ej, dict):
-                        for ek, ev_ in list(ej.items())[:30]:
-                            if isinstance(ev_, (str, int, float)) and str(ev_).strip():
-                                upsert_entity(cur, str(ek).strip()[:100],
-                                              str(ev_).strip()[:400], g, "doc", ref,
-                                              run_id=run_id, count=count)
+                    ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
+                    legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
+                    if not any(v for v in ej.values()) and isinstance(legacy, dict):
+                        ej = legacy
+                    for ak, av in list(ej.items())[:30]:
+                        if isinstance(av, (str, int, float)) and str(av).strip():
+                            attrs_out[str(ak).strip()[:100]] = str(av).strip()[:400]
+                            upsert_entity(cur, str(ak).strip()[:100],
+                                          str(av).strip()[:400], g, "doc", ref,
+                                          run_id=run_id, count=count)
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
@@ -186,9 +196,8 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                WHERE source_name = :3 AND src_id = :4""",
                             [status, (note or "")[:1000] or None, source_name, src_id])
                 if run_id != "-":  # run별 결과 기록 (B-full 버저닝)
-                    ents = j.get("entities") if j else None   # 관리자 정의 타입 추출물
-                    ents_json = (json.dumps(ents, ensure_ascii=False)[:4000]
-                                 if isinstance(ents, dict) and ents else "")
+                    ents_json = (json.dumps(attrs_out, ensure_ascii=False)[:4000]
+                                 if attrs_out else "")
                     runs.record_result(cur, run_id, source_name, src_id, status, note,
                                        entities=ents_json)
                 con.commit()
@@ -223,6 +232,8 @@ def _run_overrides(cur, run_id: str, s):
     s.no_think = bool(st.get("no_think", s.no_think))
     s.doc_prompt = st.get("doc_prompt", s.doc_prompt)    # 엔티티 추출 프롬프트 스냅샷 적용
     s.pack_prompt = st.get("pack_prompt", s.pack_prompt)
+    if isinstance(st.get("schema"), dict):               # 추출 스키마 스냅샷 (역할·키·설명)
+        s.schema = st["schema"]
     if isinstance(st.get("dedup"), dict):                # 클러스터(dedup) 스냅샷 적용
         s.dedup = {**s.dedup, **st["dedup"]}
     s.embed_model = (embed_model or "").strip() or s.embed_model   # run별 임베딩
