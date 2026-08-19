@@ -96,6 +96,9 @@
   .toolgrp[open] > summary::before { content: "▾ "; }
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
+  .fgroup { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  .fgroup-t { font-weight: 600; font-size: .8rem; margin-bottom: 6px; }
+  .fgroup-t small { font-weight: 400; color: var(--mut); }
   .vertable { width: 100%; font-size: .78rem; }
   .vertable th, .vertable td { padding: 3px 6px; text-align: left; }
   .vertable td:nth-child(7) { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -192,45 +195,51 @@
 </section>
 <section class="card" id="sec-entity">
   <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
-  <p class="hint" style="margin:4px 0 8px">엔티티의 <b>꼴(구조)은 코드에 고정</b>돼 있습니다 — 4계층: 도메인 › <b>목표(goal)</b> › <b>접근법(approach)</b> › 행동(도구).
-     이 탭은 그 꼴을 바꾸는 게 아니라, 문서에서 <b>목표·접근법을 어떻게 뽑아낼지</b>(판정 기준 + 출력 형식)의 프롬프트를 버전 관리합니다.
-     프롬프트가 빈 버전은 코드 기본을 쓰며 — 👁 상세에서 그 기본 전문(fits 판정·goal·approach 출력 형식)을 볼 수 있습니다.</p>
+  <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서에서 뽑아내는 지식의 단위</b>입니다.
+     <b>목표(goal)·접근법(approach)</b>이 내장 엔티티(그래프 2·3층)이고, 여기에 관리자가
+     time·company 같은 <b>추가 엔티티</b>를 정의할 수 있습니다. (행동/도구 엔티티는 대화에서만 나옴 — 문서엔 없음)</p>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-    <div class="schedrow" style="margin:0 0 6px">
-      <input id="veName" placeholder="이름 (새 라인 만들 때)" style="min-width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <input id="veDescr" placeholder="설명 — 이 엔티티가 뭔지·어떤 방향인지 (사람용, 프롬프트엔 안 들어감)" style="flex:1;min-width:280px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+    <div class="fgroup">
+      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 문서 하나를 읽고 무엇을 추출할지. 설명이 곧 추출 기준입니다</small></div>
+      <table class="vertable">
+        <thead><tr><th style="width:70px">구분</th><th style="width:170px">키(이름)</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:36px"></th></tr></thead>
+        <tbody>
+          <tr style="opacity:.75"><td>내장 🔒</td><td><b>goal</b> (목표)</td><td>문서가 다루는 문제/목표 한 문장 → 그래프 2층 노드가 됩니다</td><td></td></tr>
+          <tr style="opacity:.75"><td>내장 🔒</td><td><b>approach</b> (접근법)</td><td>핵심 해법/조치 한 문장 → 그래프 3층 노드가 됩니다</td><td></td></tr>
+        </tbody>
+        <tbody id="veTypes"></tbody>
+      </table>
+      <div class="schedrow" style="margin:6px 0 0">
+        <button type="button" class="ghost" id="veTypeAdd">＋ 엔티티 추가</button>
+        <span class="hint" style="margin:0">추가 엔티티는 그래프 5층 노드로 목표에 연결되고, run별 문서 결과에도 저장됩니다</span>
+      </div>
     </div>
-    <label class="k2">판정 지침 <small>무엇을 뽑고 무엇을 제외할지 — 아래 스캐폴드의 지정 슬롯에 주입됩니다. 출력 형식은 코드가 잠금(못 깨뜨림)</small></label>
-    <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
-    <label class="k2">추출 엔티티 타입 <small>키+설명 행으로 정의 — <b>설명이 분류 기준</b>이 되어 문서에서 해당 값을 뽑아옵니다 (예: time=문서에 언급된 시점). goal·approach는 내장이라 항상 추출</small></label>
-    <div class="schedrow" style="margin:2px 0;opacity:.65">
-      <input value="goal" disabled style="width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
-      <input value="문서가 다루는 문제/목표 (내장 — 그래프 2층)" disabled style="flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
+    <div class="fgroup">
+      <div class="fgroup-t">2️⃣ 문서 포함/제외 기준 <small>— 어떤 문서를 지식으로 인정할지 + 뽑는 방식 지침 (선택, 빈값=코드 기본)</small></div>
+      <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
     </div>
-    <div class="schedrow" style="margin:2px 0 4px;opacity:.65">
-      <input value="approach" disabled style="width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
-      <input value="핵심 해법/접근법 (내장 — 그래프 3층)" disabled style="flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
-    </div>
-    <div id="veTypes"></div>
-    <div class="schedrow" style="margin:2px 0 8px">
-      <button type="button" class="ghost" id="veTypeAdd">＋ 타입 추가</button>
-      <span class="hint" style="margin:0">추출된 값은 run별 문서 결과에 저장됩니다 (그래프 구조는 불변)</span>
+    <div class="fgroup">
+      <div class="fgroup-t">3️⃣ 저장 <small>— 라인 목록에서 버전을 선택했으면 [✚ 버전 업], 새로 만들면 이름 넣고 [＋ 새 라인]</small></div>
+      <div class="schedrow" style="margin:0">
+        <input id="veName" placeholder="이름 (새 라인 만들 때)" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+        <input id="veDescr" placeholder="설명 — 이 추출기가 뭔지·어떤 방향인지 (사람용)" style="flex:1;min-width:240px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+        <input id="veNote" placeholder="메모(선택)" style="min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+        <button type="button" class="ghost" id="entNew">＋ 새 라인 만들기</button>
+        <span class="hint" id="veMsg" style="margin:0"></span>
+      </div>
     </div>
     <details style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">🔒 스캐폴드 보기 (읽기 전용) — 지침이 주입되는 고정 틀 · 출력 형식 {"fits", "goal", "approach"}</summary>
+      <summary class="hint" style="cursor:pointer;margin:0">🔒 스캐폴드 보기 (읽기 전용) — 위 1·2가 주입되는 고정 틀 · 출력 형식 {"fits", "goal", "approach", "entities"}는 코드가 잠금</summary>
       <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
     </details>
     <details style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">⚙ 고급 — 원문 전체 편집 (스캐폴드를 통째로 대체, 지정 시 판정 지침보다 우선)</summary>
+      <summary class="hint" style="cursor:pointer;margin:0">⚙ 고급 — 원문 전체 편집 (스캐폴드를 통째로 대체, 지정 시 위 2번 지침보다 우선)</summary>
       <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
       <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
       <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
       <textarea id="vePack" class="psta" spellcheck="false"></textarea>
     </details>
-    <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" class="ghost" id="entNew">＋ 새 라인 만들기</button>
-      <span class="hint" id="veMsg" style="margin:0"></span></div>
   </div>
 </section>
 <section class="card" id="sec-cluster">
@@ -1871,17 +1880,23 @@ async function vmNewLine(cfg) {
   $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
   if (r.ok) vmLoadLines(cfg);
 }
-// ── 엔티티 타입 행 편집기 — 키+설명 행 추가/삭제 (etypes JSON [{key,desc}]) ──
+// ── 엔티티 편집기 — 내장(goal·approach) 아래에 추가 엔티티를 표 행으로 (etypes JSON [{key,desc}]) ──
 function veTypeRow(key, desc) {
-  const row = document.createElement("div"); row.className = "schedrow etyperow";
-  row.style.margin = "2px 0";
-  const k = document.createElement("input"); k.placeholder = "타입 키 (예: time)"; k.value = key || "";
-  k.style.cssText = "width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
-  const d = document.createElement("input"); d.placeholder = "설명 — 분류 기준이 됩니다 (예: 문서에 언급된 시점)"; d.value = desc || "";
-  d.style.cssText = "flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+  const tr = document.createElement("tr"); tr.className = "etyperow";
+  const c0 = document.createElement("td"); c0.textContent = "추가 ✏"; tr.appendChild(c0);
+  const c1 = document.createElement("td");
+  const k = document.createElement("input"); k.placeholder = "키 (예: time)"; k.value = key || "";
+  k.style.cssText = "width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+  c1.appendChild(k); tr.appendChild(c1);
+  const c2 = document.createElement("td");
+  const d = document.createElement("input"); d.placeholder = "무엇을 뽑을지 — 이 설명이 추출 기준이 됩니다 (예: 문서에 언급된 시점)"; d.value = desc || "";
+  d.style.cssText = "width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+  c2.appendChild(d); tr.appendChild(c2);
+  const c3 = document.createElement("td");
   const x = document.createElement("button"); x.type = "button"; x.className = "ghost"; x.textContent = "✕";
-  x.onclick = () => row.remove();
-  row.append(k, d, x); $("veTypes").appendChild(row);
+  x.onclick = () => tr.remove();
+  c3.appendChild(x); tr.appendChild(c3);
+  $("veTypes").appendChild(tr);
 }
 function veTypesRead() {
   return [...$("veTypes").querySelectorAll(".etyperow")].map(r => {
