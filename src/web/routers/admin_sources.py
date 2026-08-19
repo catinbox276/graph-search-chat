@@ -495,6 +495,24 @@ def admin_schedule_run_now():
     return {"ok": True, "note": "전체 소스 구조화를 시작했습니다 — 아래 처리 현황에서 진행 확인."}
 
 
+@router.post("/admin/schedule/reset-run")
+def admin_schedule_reset_run():
+    """초기화 후 재처리 — 전체 문서를 미처리로 되돌리고(그래프 기여 회수) 처음부터 재구조화.
+    처리 중이면 거절. 중지 상태였으면 해제하고 시작."""
+    if scheduler.is_running() or _structuring:
+        raise HTTPException(409, "처리 중입니다 — 먼저 중지하고 완료를 기다린 뒤 다시 시도하세요.")
+    with db_cursor() as cur:
+        cur.execute("SELECT source_name FROM source_registry WHERE domain IS NOT NULL")
+        names = [r[0] for r in cur.fetchall()]
+        per = {s: _reset_source(cur, s) for s in names}
+    total = sum(n for n, _ in per.values())
+    scheduler.resume()                    # 중지 상태였으면 해제
+    started = scheduler.run_all("manual-reset")
+    return {"ok": bool(started), "reset": total,
+            "note": (f"{total}건을 미처리로 되돌리고 재처리를 시작했습니다." if started
+                     else f"{total}건 초기화했으나 시작 실패 — 처리 현황을 확인하세요.")}
+
+
 def _reset_source(cur, sname: str):
     """소스 1개의 그래프 기여(엣지 +1, 증거) 회수 후 문서 상태 리셋. commit은 호출자가."""
     # 증거 회수: 문서 ref마다 그 문서가 만든 노드 집합 내부 엣지에서 기여 -1

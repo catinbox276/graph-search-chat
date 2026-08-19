@@ -89,7 +89,7 @@ def main():
 
 
 def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id="-",
-                   count=True, by_run=False):
+                   count=True, by_run=False, should_stop=None):
     """소스 1개의 미처리 문서를 최대 budget건 판정·병합. 처리한 문서 수를 반환.
     main()(전 소스 루프)과 run_for_source()(즉시 실행) 공용. s = _load_settings().
     by_run=True: '이 run이 아직 판정 안 한 문서'가 대상 (활성 캐시와 무관 — 재판정용).
@@ -147,7 +147,8 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     while pending:
         finished, pending = wait(pending, return_when=FIRST_COMPLETED)
         for fut in finished:
-            np_ = next(it, None)  # 병합 전에 먼저 다음 묶음 투입 — 파이프 안 끊김
+            # 중지 요청 시 새 묶음 투입 중단 — 진행 중인 것만 마치고 배치 종료(묶음 단위 취소)
+            np_ = None if (should_stop and should_stop()) else next(it, None)
             if np_ is not None:
                 pending.add(ex.submit(judge_pack, domain, hint, np_, s.model,
                                       s.body_chars, s.no_think, s.doc_prompt, s.pack_prompt))
@@ -250,7 +251,7 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
             stopped = True
             break
         n = _structure_one(cur, con, row[0], row[1], hint, s.limit, s, stats, rid,
-                           count=count, by_run=by_run)
+                           count=count, by_run=by_run, should_stop=should_stop)
         total += n
         if not drain or n == 0:  # drain: 미처리가 바닥날 때까지 반복
             break

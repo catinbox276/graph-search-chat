@@ -279,6 +279,7 @@
       <button type="button" id="scRun">지금 전체 구조화</button>
       <button type="button" id="scStop" class="warn">■ 중지</button>
       <button type="button" id="scResume">▶ 다시 시작</button>
+      <button type="button" id="scReset" class="warn">🔄 초기화 후 재처리</button>
       <span class="hint" id="scMsg" style="margin:0"></span>
     </div>
   </div>
@@ -997,6 +998,10 @@ $("scSave").onclick = () => _scPost("/admin/schedule", "✓ 예약 저장됨 —
 $("scRun").onclick = () => _scPost("/admin/schedule/run-now");
 $("scStop").onclick = () => _scPost("/admin/schedule/stop");
 $("scResume").onclick = () => _scPost("/admin/schedule/resume");
+$("scReset").onclick = () => {
+  if (!confirm("전체 문서를 미처리로 되돌리고(그래프 기여 회수) 처음부터 재처리합니다.\n대화 세션 기여는 유지됩니다. 계속할까요?")) return;
+  _scPost("/admin/schedule/reset-run");
+};
 
 async function loadDocStatus() {
   const box = $("docstat");
