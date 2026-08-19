@@ -136,6 +136,7 @@ async def admin_agent_settings_get(request: Request):
             "default_name": dname, "default_intro": dintro, "default_scope": dscope,
             "mcp_enabled": st.get("agent_mcp_enabled", "1") != "0",
             "no_think": st.get("agent_no_think", "") == "1",
+            "block_hanzi": st.get("agent_block_hanzi", "") == "1",
             "disabled_tools": [t.strip() for t in
                                (st.get("agent_disabled_tools") or "").split(",")
                                if t.strip()],
@@ -150,6 +151,7 @@ class AgentSettingsIn(BaseModel):
     agent_scope: str = ""
     mcp_enabled: bool = True     # DataHub MCP 전역 on/off
     no_think: bool = False       # True=추론(생각) 출력 끔 — 빠르지만 복잡한 추론엔 품질↓
+    block_hanzi: bool = False    # True=한자(중국어) 차단 (guided_regex) — 생성 단계 제외
     disabled_tools: list[str] = []  # 비활성 도구 이름 목록 (builtin·MCP 공통)
 
 
@@ -168,6 +170,7 @@ def admin_agent_settings_set(inp: AgentSettingsIn, request: Request):
         "agent_scope": inp.agent_scope.strip(),
         "agent_mcp_enabled": "" if inp.mcp_enabled else "0",
         "agent_no_think": "1" if inp.no_think else "",
+        "agent_block_hanzi": "1" if inp.block_hanzi else "",
         "agent_disabled_tools": ",".join(
             t.strip() for t in inp.disabled_tools if t.strip()),
     })

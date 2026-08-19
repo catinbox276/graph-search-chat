@@ -396,6 +396,10 @@
     <input type="checkbox" id="agThink" checked><b>생각하기(thinking) 사용</b>
     <span class="hint" style="margin:0">— 끄면 enable_thinking=false로 더 빠름 (복잡한 추론엔 품질↓)</span>
   </label>
+  <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
+    <input type="checkbox" id="agBlockHanzi"><b>한자 차단</b>
+    <span class="hint" style="margin:0">— 한자(중국어)를 생성 단계에서 제외(guided_regex). 한글·영문·코드는 통과, 한자 자리에 대체어. ⚠ 도구호출과 궁합 확인 필요</span>
+  </label>
   <h4>도구 사용 여부 <small>끄면 에이전트가 그 도구를 아예 받지 않습니다 (builtin·MCP 공통)</small></h4>
   <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
     <input type="checkbox" id="agMcp" checked><b>DataHub MCP 사용</b>
@@ -1329,6 +1333,7 @@ async function loadAgentSettings() {
   $("agPrompt").placeholder = s.default_prompt;
   $("agMcp").checked = s.mcp_enabled;
   $("agThink").checked = !s.no_think;  // no_think=true면 체크 해제(생각 끔)
+  $("agBlockHanzi").checked = !!s.block_hanzi;
   $("agName").value = s.agent_name || "";   $("agName").placeholder = s.default_name || "";
   $("agScope").value = s.agent_scope || "";  $("agScope").placeholder = s.default_scope || "";
   $("agIntro").value = s.agent_intro || "";  $("agIntro").placeholder = s.default_intro || "";
@@ -1395,6 +1400,7 @@ $("agForm").onsubmit = async (e) => {
                           agent_scope: $("agScope").value,
                           mcp_enabled: $("agMcp").checked,
                           no_think: !$("agThink").checked,
+                          block_hanzi: $("agBlockHanzi").checked,
                           disabled_tools: disabled}),
   });
   if (!r.ok) {

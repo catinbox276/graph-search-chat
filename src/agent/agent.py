@@ -26,6 +26,11 @@ from search.path_suggest import suggest_paths
 MODEL_URL = config.CHAT_URL
 MODEL_NAME = config.CHAT_MODEL
 
+# 한자(중국어) 차단용 guided_regex — "한자 블록이 아닌 모든 문자"의 반복(전체 매칭).
+# 한글·영문·코드·숫자·기호·이모지는 통과, CJK 한자(통합+확장A+호환)만 생성 단계에서 제외.
+# vLLM guided_regex(xgrammar)로 매 토큰 마스킹 → 한자 자리에 대체어가 생성됨(후처리 삭제 아님).
+HANZI_BLOCK_RE = r"[^一-鿿㐀-䶿豈-﫿]*"
+
 def default_system_prompt(st: dict | None = None) -> str:
     """코드 기본 시스템 프롬프트 — 정체성(이름·소개·지원범위)을 런타임에 주입한다.
     관리에서 agent_system_prompt를 지정하면 build_agent가 그걸 우선 쓴다."""
@@ -96,7 +101,7 @@ def load_agent_settings() -> dict:
     """전역 에이전트 설정 (app_settings — 관리 페이지 /admin에서 변경).
     DB를 못 읽으면 코드 기본값으로 동작 (CLI 단독 실행 등)."""
     out = {"system_prompt": "", "disabled_tools": set(), "mcp_enabled": True,
-           "no_think": False}
+           "no_think": False, "block_hanzi": False}
     try:
         from core import settings
         st = settings.get_all()  # ORM — 접속·반납은 db.session()이 관리
@@ -106,6 +111,7 @@ def load_agent_settings() -> dict:
                                  if t.strip()}
         out["mcp_enabled"] = st.get("agent_mcp_enabled", "1") != "0"
         out["no_think"] = st.get("agent_no_think", "") == "1"
+        out["block_hanzi"] = st.get("agent_block_hanzi", "") == "1"
     except Exception as e:
         print(f"[경고] 에이전트 설정 조회 실패 — 기본값 사용: {e}", file=sys.stderr)
     return out
@@ -209,15 +215,18 @@ async def build_agent(checkpointer=None, model_name=None):
             print(f"[경고] MCP 연결 실패, 검색 도구만 사용: {e}", file=sys.stderr)
     if ag["disabled_tools"]:
         tools = [t for t in tools if _tool_name(t) not in ag["disabled_tools"]]
-    # no_think: 추론 모델의 생각 출력을 끈다 (Qwen3 chat_template_kwargs — triage와 동일).
-    extra = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
-             if ag["no_think"] else {})
+    # 서빙 파라미터(extra_body): no_think=생각 출력 끔(Qwen3), block_hanzi=한자 차단(guided_regex)
+    eb = {}
+    if ag["no_think"]:
+        eb["chat_template_kwargs"] = {"enable_thinking": False}
+    if ag["block_hanzi"]:
+        eb["guided_regex"] = HANZI_BLOCK_RE
     model = ChatOpenAI(
         base_url=MODEL_URL,
         api_key=config.MODEL_API_KEY,
         model=model_name or MODEL_NAME,
         temperature=config.LLM_TEMPERATURE,
-        **extra,
+        **({"extra_body": eb} if eb else {}),
     )
     return create_deep_agent(model=model, tools=tools,
                              system_prompt=ag["system_prompt"] or default_system_prompt(),
