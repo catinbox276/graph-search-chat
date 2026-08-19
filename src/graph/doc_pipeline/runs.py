@@ -195,16 +195,25 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
         st["pack_tokens"] = pack_tokens
     if no_think is not None:
         st["no_think"] = no_think
-    # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인)
+    # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인).
+    # 원문(doc/pack) 없이 판정 지침(criteria)만 있으면 코드 스캐폴드에 주입해 조립 —
+    # 관리자는 지침만 만지고 출력 형식은 코드가 보장 (run은 조립 결과를 스냅샷).
     en_name, ev = (entity_line or None), entity_version
     if not (en_name and ev):
         en_name, ev = versioning.active(cur, "entity_versions")
     if en_name and ev is not None:
-        cur.execute("SELECT doc_prompt, pack_prompt FROM entity_versions WHERE name = :1 AND version = :2",
-                    [en_name, ev])
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria FROM entity_versions
+                       WHERE name = :1 AND version = :2""", [en_name, ev])
         r = cur.fetchone()
         if r:
-            st["doc_prompt"], st["pack_prompt"] = _lob(r[0]), _lob(r[1])
+            doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
+            if crit and not (doc_p or "").strip():
+                from graph.doc_pipeline import judge as _j
+                doc_p = _j.with_criteria(_j.DOC_PROMPT, crit)
+            if crit and not (pack_p or "").strip():
+                from graph.doc_pipeline import judge as _j
+                pack_p = _j.with_criteria(_j.PACK_PROMPT, crit)
+            st["doc_prompt"], st["pack_prompt"] = doc_p, pack_p
     # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
     cl_name, cv = (cluster_line or None), cluster_version
     if not (cl_name and cv):

@@ -197,11 +197,23 @@
      프롬프트가 빈 버전은 코드 기본을 쓰며 — 👁 상세에서 그 기본 전문(fits 판정·goal·approach 출력 형식)을 볼 수 있습니다.</p>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-    <div class="schedrow" style="margin:0 0 6px"><input id="veName" placeholder="라인 이름 (새 라인 만들 때)" style="min-width:220px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></div>
-    <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
-    <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
-    <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
-    <textarea id="vePack" class="psta" spellcheck="false"></textarea>
+    <div class="schedrow" style="margin:0 0 6px">
+      <input id="veName" placeholder="이름 (새 라인 만들 때)" style="min-width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <input id="veDescr" placeholder="설명 — 이 엔티티가 뭔지·어떤 방향인지 (사람용, 프롬프트엔 안 들어감)" style="flex:1;min-width:280px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+    </div>
+    <label class="k2">판정 지침 <small>무엇을 뽑고 무엇을 제외할지 — 아래 스캐폴드의 지정 슬롯에 주입됩니다. 출력 형식은 코드가 잠금(못 깨뜨림)</small></label>
+    <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
+    <details style="margin:6px 0">
+      <summary class="hint" style="cursor:pointer;margin:0">🔒 스캐폴드 보기 (읽기 전용) — 지침이 주입되는 고정 틀 · 출력 형식 {"fits", "goal", "approach"}</summary>
+      <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
+    </details>
+    <details style="margin:6px 0">
+      <summary class="hint" style="cursor:pointer;margin:0">⚙ 고급 — 원문 전체 편집 (스캐폴드를 통째로 대체, 지정 시 판정 지침보다 우선)</summary>
+      <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
+      <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
+      <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
+      <textarea id="vePack" class="psta" spellcheck="false"></textarea>
+    </details>
     <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
       <button type="button" class="ghost" id="entNew">＋ 새 라인 만들기</button>
       <span class="hint" id="veMsg" style="margin:0"></span></div>
@@ -1757,17 +1769,25 @@ async function vmLoadLines(cfg) {
   const box = $(cfg.lines); box.innerHTML = "⏳";
   const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
   if (j.defaults) cfg.defaults = j.defaults;   // 코드 기본 프롬프트 — 빈 버전 뷰어에 전문 표시용
+  if (j.defaults && cfg.scaffold && $(cfg.scaffold))   // 스캐폴드 읽기 전용 표시
+    $(cfg.scaffold).textContent =
+      "── 문서 판정 스캐폴드 ──\n" + (j.defaults.doc_prompt || "") +
+      "\n\n── 묶음 판정 스캐폴드 ──\n" + (j.defaults.pack_prompt || "");
   box.innerHTML = "";
   if (!(j.lines || []).length) {
     box.innerHTML = "<span class='hint'>아직 라인이 없습니다 — 아래 폼에서 이름을 넣고 [＋ 새 라인 만들기]</span>"; return;
   }
   const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>라인</th><th>버전 수</th><th>활성 버전</th></tr></thead>";
+  t.innerHTML = cfg.hasDescr
+    ? "<thead><tr><th>이름</th><th>설명</th><th>버전 수</th><th>활성 버전</th></tr></thead>"
+    : "<thead><tr><th>라인</th><th>버전 수</th><th>활성 버전</th></tr></thead>";
   const tb = document.createElement("tbody");
   j.lines.forEach(ln => {
     const tr = document.createElement("tr"); tr.style.cursor = "pointer";
-    [ln.name, `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"]
-      .forEach(x => { const td = document.createElement("td"); td.textContent = x; tr.appendChild(td); });
+    const cells = cfg.hasDescr
+      ? [ln.name, ln.descr || "", `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"]
+      : [ln.name, `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"];
+    cells.forEach(x => { const td = document.createElement("td"); td.textContent = x; tr.appendChild(td); });
     if (ln.default_version != null) tr.classList.add("sel");
     tr.onclick = () => { $(cfg.name).value = ln.name; vmToggle(cfg, ln.name, tr); };
     tb.appendChild(tr);
@@ -1780,7 +1800,8 @@ function vmToggle(cfg, name, tr) {
   $(cfg.lines).querySelectorAll(".verrow").forEach(x => x.remove());
   if (open) return;                         // 같은 라인 재클릭 = 접기
   const row = document.createElement("tr"); row.className = "verrow";
-  const td = document.createElement("td"); td.colSpan = 3; row.appendChild(td); tr.after(row);
+  const td = document.createElement("td"); td.colSpan = cfg.hasDescr ? 4 : 3;
+  row.appendChild(td); tr.after(row);
   vmVersions(cfg, name, 1, td);
 }
 async function vmVersions(cfg, name, page, td) {
@@ -1835,22 +1856,39 @@ async function vmNewLine(cfg) {
   $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
   if (r.ok) vmLoadLines(cfg);
 }
+const ENT_ANCHOR = "도메인 기준·추출 지침: {hint}";   // judge.py _CRIT_ANCHOR와 동일
+function entAssemble(tmpl, crit) {   // 지침을 스캐폴드 슬롯에 주입 (백엔드 with_criteria와 동일 규칙)
+  if (!(crit || "").trim()) return tmpl;
+  const block = ENT_ANCHOR + "\n엔티티 판정·추출 지침:\n" + crit.trim();
+  return tmpl.includes(ENT_ANCHOR) ? tmpl.replace(ENT_ANCHOR, block)
+                                   : "엔티티 판정·추출 지침:\n" + crit.trim() + "\n\n" + tmpl;
+}
 const ENTITY_VM = {
   title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
+  hasDescr: true, scaffold: "entScaffold",
   linesEndpoint: "/admin/entity-lines",
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
-  readForm: () => ({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
-  setForm: v => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
-  summary: v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
+  readForm: () => ({criteria: $("veCrit").value, descr: $("veDescr").value,
+    doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
+  setForm: v => { $("veCrit").value = v.criteria || ""; $("veDescr").value = v.descr || "";
+    $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
+  summary: v => v.doc_prompt ? "원문:커스텀(고급)" : (v.criteria ? "지침:커스텀" : "코드 기본"),
   viewSections: v => {
-    const d = ENTITY_VM.defaults || {};   // 빈값=코드 기본 — 실제 기본 프롬프트 전문을 보여준다
-    return [
-      {label: "문서 판정 프롬프트 (doc_prompt)" + (v.doc_prompt ? " — 커스텀" : " — 코드 기본"),
-       text: v.doc_prompt || d.doc_prompt},
-      {label: "묶음 판정 프롬프트 (pack_prompt)" + (v.pack_prompt ? " — 커스텀" : " — 코드 기본"),
-       text: v.pack_prompt || d.pack_prompt},
-      {label: "메모", text: v.note}];
+    const d = ENTITY_VM.defaults || {};
+    const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr},
+                  {label: "판정 지침 (관리자 편집분)", text: v.criteria}];
+    if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
+      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt || d.doc_prompt},
+                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt || d.pack_prompt});
+    } else {   // 지침이 스캐폴드에 주입된 조립 결과 = 실제 LLM에 가는 프롬프트
+      secs.push({label: "적용될 문서 프롬프트 (스캐폴드 + 지침 조립 결과)",
+                 text: entAssemble(d.doc_prompt || "", v.criteria)},
+                {label: "적용될 묶음 프롬프트 (조립 결과)",
+                 text: entAssemble(d.pack_prompt || "", v.criteria)});
+    }
+    secs.push({label: "메모", text: v.note});
+    return secs;
   },
   validate: () => {
     if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return false; }

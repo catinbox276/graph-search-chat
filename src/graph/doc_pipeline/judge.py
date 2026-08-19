@@ -45,6 +45,23 @@ fits=false로 판정할 것: 도메인과 무관 / 문제도 해법도 없음 / 
 
 PACK_MAX_DOCS = 8  # 묶음당 문서 상한 — 출력 길이·판정 품질 보호
 
+_CRIT_ANCHOR = "도메인 기준·추출 지침: {hint}"
+
+
+def with_criteria(tmpl: str, criteria: str) -> str:
+    """엔티티 버전의 판정 지침(criteria)을 스캐폴드의 지정 슬롯에 주입.
+
+    관리자는 지침만 편집하고 출력 형식·placeholder 배선은 코드가 잠근다
+    (스키마를 편집 영역에서 분리 — 원문 전체 편집은 '고급'으로만).
+    criteria 안의 중괄호는 _fill이 이름 있는 키만 치환하므로 안전하다."""
+    criteria = (criteria or "").strip()
+    if not criteria:
+        return tmpl
+    block = f"{_CRIT_ANCHOR}\n엔티티 판정·추출 지침:\n{criteria}"
+    if _CRIT_ANCHOR in tmpl:
+        return tmpl.replace(_CRIT_ANCHOR, block, 1)
+    return f"엔티티 판정·추출 지침:\n{criteria}\n\n{tmpl}"   # 앵커 없는 커스텀 스캐폴드 폴백
+
 
 def _gen_kwargs(no_think: bool, max_tokens: int) -> dict:
     """생성 옵션 — no_think면 추론(생각) 출력을 끄고 출력 상한을 건다.

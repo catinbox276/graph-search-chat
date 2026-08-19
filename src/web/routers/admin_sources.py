@@ -505,7 +505,9 @@ def _ensure_cluster_versions(cur):
 
 
 class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
-    doc_prompt: str = ""
+    criteria: str = ""     # 판정 지침 — 코드 스캐폴드 슬롯에 주입 (기본 편집 통로)
+    descr: str = ""        # 이 엔티티가 뭔지 사람용 설명 (프롬프트 미포함)
+    doc_prompt: str = ""   # 고급: 원문 전체 override (지정 시 criteria보다 우선)
     pack_prompt: str = ""
     note: str = ""
 
@@ -559,7 +561,9 @@ def _validate_entity(doc_prompt: str, pack_prompt: str):
 
 def _entity_vals(inp) -> dict:
     return {"doc_prompt": inp.doc_prompt.strip() or None,
-            "pack_prompt": inp.pack_prompt.strip() or None, "note": inp.note.strip() or None}
+            "pack_prompt": inp.pack_prompt.strip() or None,
+            "criteria": inp.criteria.strip() or None, "descr": inp.descr.strip() or None,
+            "note": inp.note.strip() or None}
 
 
 def _cluster_vals(inp) -> dict:
@@ -580,10 +584,17 @@ def admin_entity_versions():
 
 @router.get("/admin/entity-lines")
 def admin_entity_lines():
-    """엔티티 라인 목록 + 코드 기본 프롬프트 — 빈 버전의 실체를 UI가 보여줄 수 있게."""
+    """엔티티 라인 목록(+최신 설명) + 코드 기본 프롬프트 — 빈 버전의 실체를 UI가 보여줄 수 있게."""
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
-        return {"lines": versioning.list_lines(cur, versioning.ENTITY_SPEC),
+        lines = versioning.list_lines(cur, versioning.ENTITY_SPEC)
+        cur.execute("""SELECT e.name, e.descr FROM entity_versions e
+                       WHERE e.version = (SELECT MAX(version) FROM entity_versions
+                                          WHERE name = e.name)""")
+        descr = {r[0]: (r[1] or "") for r in cur.fetchall()}
+        for ln in lines:
+            ln["descr"] = descr.get(ln["name"], "")
+        return {"lines": lines,
                 "defaults": {"doc_prompt": _judge.DOC_PROMPT,
                              "pack_prompt": _judge.PACK_PROMPT}}
 
