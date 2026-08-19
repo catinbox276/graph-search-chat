@@ -63,6 +63,25 @@ def with_criteria(tmpl: str, criteria: str) -> str:
     return f"엔티티 판정·추출 지침:\n{criteria}\n\n{tmpl}"   # 앵커 없는 커스텀 스캐폴드 폴백
 
 
+def with_etypes(tmpl: str, etypes: list) -> str:
+    """관리자 정의 엔티티 타입([{key, desc}])의 추출 지시를 프롬프트 끝에 부착.
+
+    설명(desc)이 분류 기준으로 쓰인다 (Graphiti extract_nodes 방식). 출력은 기존
+    JSON에 "entities" 객체 하나를 더하는 것이라 fits/goal/approach 스캐폴드와 독립 —
+    커스텀 원문(고급) 프롬프트에도 안전하게 붙는다."""
+    rows = [t for t in (etypes or [])
+            if isinstance(t, dict) and str(t.get("key", "")).strip()]
+    if not rows:
+        return tmpl
+    lines = "\n".join(f'- {str(t["key"]).strip()}: {str(t.get("desc", "")).strip() or "(설명 없음)"}'
+                      for t in rows)
+    return (f"{tmpl}\n\n추가 엔티티 추출 — fits=true인 문서는 출력 JSON에 \"entities\" 객체를"
+            f" 함께 넣어라. 아래 타입 각각에 대해, 문서에서 확인되는 값만 넣는다"
+            f" (각 설명이 분류 기준, 값은 문서 원문에 근거한 간결한 문자열 — 없으면 그 키를 생략):\n"
+            f"{lines}\n"
+            f'예: "entities": {{"{str(rows[0]["key"]).strip()}": "..."}}')
+
+
 def _gen_kwargs(no_think: bool, max_tokens: int) -> dict:
     """생성 옵션 — no_think면 추론(생각) 출력을 끄고 출력 상한을 건다.
 

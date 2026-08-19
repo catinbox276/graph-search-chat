@@ -4,6 +4,7 @@
 (커서 공유 안전). 멱등·이어하기: graph_status IS NULL만 처리, 문서마다 커밋.
 """
 import argparse
+import json
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from types import SimpleNamespace
 
@@ -176,7 +177,11 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                WHERE source_name = :3 AND src_id = :4""",
                             [status, (note or "")[:1000] or None, source_name, src_id])
                 if run_id != "-":  # run별 결과 기록 (B-full 버저닝)
-                    runs.record_result(cur, run_id, source_name, src_id, status, note)
+                    ents = j.get("entities") if j else None   # 관리자 정의 타입 추출물
+                    ents_json = (json.dumps(ents, ensure_ascii=False)[:4000]
+                                 if isinstance(ents, dict) and ents else "")
+                    runs.record_result(cur, run_id, source_name, src_id, status, note,
+                                       entities=ents_json)
                 con.commit()
                 stats[status] += 1
                 pt, ct = (j or {}).get("_usage", (0, 0))   # 입력·출력 토큰

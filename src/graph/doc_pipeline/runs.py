@@ -53,6 +53,13 @@ def ensure_runs(cur):
                        WHERE table_name = 'DOC_RUNS' AND column_name = :1""", [col])
         if not cur.fetchone()[0]:
             cur.execute(f"ALTER TABLE doc_runs ADD ({col} VARCHAR2(100))")
+    # doc_results.entities — 관리자 정의 타입으로 뽑은 엔티티 JSON (run별, 멱등)
+    cur.execute("""SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'""")
+    if cur.fetchone()[0]:
+        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                       WHERE table_name = 'DOC_RESULTS' AND column_name = 'ENTITIES'""")
+        if not cur.fetchone()[0]:
+            cur.execute("ALTER TABLE doc_results ADD (entities CLOB)")
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE doc_results (
@@ -61,6 +68,7 @@ def ensure_runs(cur):
             src_id      VARCHAR2(200) NOT NULL,
             status      VARCHAR2(20),
             note        VARCHAR2(1000),
+            entities    CLOB,
             judged_at   TIMESTAMP DEFAULT SYSTIMESTAMP,
             CONSTRAINT doc_results_pk PRIMARY KEY (run_id, source_name, src_id),
             CONSTRAINT doc_results_run_fk FOREIGN KEY (run_id)
@@ -131,16 +139,18 @@ def current_run(cur, source_name: str) -> str:
 
 
 def record_result(cur, run_id: str, source_name: str, src_id: str,
-                  status: str, note: str):
-    """run별 문서 판정 결과 기록 (재판정 시 갱신)."""
+                  status: str, note: str, entities: str = ""):
+    """run별 문서 판정 결과 기록 (재판정 시 갱신). entities: 추출 엔티티 JSON(없으면 빈값)."""
     cur.execute("""MERGE INTO doc_results r USING dual
                    ON (r.run_id = :rid AND r.source_name = :s AND r.src_id = :d)
                    WHEN MATCHED THEN UPDATE SET status = :st, note = :nt,
-                        judged_at = SYSTIMESTAMP
-                   WHEN NOT MATCHED THEN INSERT (run_id, source_name, src_id, status, note)
-                   VALUES (:rid, :s, :d, :st, :nt)""",
+                        entities = :en, judged_at = SYSTIMESTAMP
+                   WHEN NOT MATCHED THEN INSERT
+                        (run_id, source_name, src_id, status, note, entities)
+                   VALUES (:rid, :s, :d, :st, :nt, :en)""",
                 {"rid": run_id, "s": source_name, "d": src_id,
-                 "st": status, "nt": (note or "")[:1000] or None})
+                 "st": status, "nt": (note or "")[:1000] or None,
+                 "en": (entities or "") or None})
 
 
 def _lob(v) -> str:
@@ -202,17 +212,24 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
     if not (en_name and ev):
         en_name, ev = versioning.active(cur, "entity_versions")
     if en_name and ev is not None:
-        cur.execute("""SELECT doc_prompt, pack_prompt, criteria FROM entity_versions
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, etypes FROM entity_versions
                        WHERE name = :1 AND version = :2""", [en_name, ev])
         r = cur.fetchone()
         if r:
+            from graph.doc_pipeline import judge as _j
             doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
+            try:
+                etypes = json.loads(_lob(r[3]) or "[]")
+            except (json.JSONDecodeError, TypeError):
+                etypes = []
             if crit and not (doc_p or "").strip():
-                from graph.doc_pipeline import judge as _j
                 doc_p = _j.with_criteria(_j.DOC_PROMPT, crit)
             if crit and not (pack_p or "").strip():
-                from graph.doc_pipeline import judge as _j
                 pack_p = _j.with_criteria(_j.PACK_PROMPT, crit)
+            if etypes:   # 타입 정의가 있으면 조립/커스텀 어느 쪽이든 추출 지시를 부착
+                doc_p = _j.with_etypes((doc_p or "").strip() or _j.DOC_PROMPT, etypes)
+                pack_p = _j.with_etypes((pack_p or "").strip() or _j.PACK_PROMPT, etypes)
+                st["etypes"] = etypes   # 재현성 — 어떤 타입 정의로 뽑았는지 스냅샷
             st["doc_prompt"], st["pack_prompt"] = doc_p, pack_p
     # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
     cl_name, cv = (cluster_line or None), cluster_version

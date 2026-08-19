@@ -507,9 +507,26 @@ def _ensure_cluster_versions(cur):
 class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
     criteria: str = ""     # 판정 지침 — 코드 스캐폴드 슬롯에 주입 (기본 편집 통로)
     descr: str = ""        # 이 엔티티가 뭔지 사람용 설명 (프롬프트 미포함)
+    etypes: list[dict] = []  # 추가 추출 타입 [{key, desc}] — 설명이 분류 기준
     doc_prompt: str = ""   # 고급: 원문 전체 override (지정 시 criteria보다 우선)
     pack_prompt: str = ""
     note: str = ""
+
+    @field_validator("etypes")
+    @classmethod
+    def _etypes(cls, v: list) -> list:
+        out, seen = [], set()
+        for t in (v or [])[:30]:   # 상한 30종 — 프롬프트 길이 보호
+            key = str(t.get("key", "")).strip()
+            if not key:
+                continue
+            if key in ("goal", "approach", "fits", "reason", "id", "entities"):
+                raise ValueError(f"'{key}'는 내장 필드라 타입 이름으로 쓸 수 없습니다")
+            if key in seen:
+                raise ValueError(f"타입 이름 중복: {key}")
+            seen.add(key)
+            out.append({"key": key, "desc": str(t.get("desc", "")).strip()})
+        return out
 
 
 class EntityLineIn(EntityVersionIn):     # 새 라인 (이름 포함)
@@ -560,9 +577,11 @@ def _validate_entity(doc_prompt: str, pack_prompt: str):
 
 
 def _entity_vals(inp) -> dict:
+    import json
     return {"doc_prompt": inp.doc_prompt.strip() or None,
             "pack_prompt": inp.pack_prompt.strip() or None,
             "criteria": inp.criteria.strip() or None, "descr": inp.descr.strip() or None,
+            "etypes": (json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None),
             "note": inp.note.strip() or None}
 
 
@@ -1399,17 +1418,33 @@ def admin_source_docs(sname: str, status: str = "", page: int = 1):
     elif status in ("done", "excluded", "error"):
         where += " AND d.graph_status = :st"
         binds["st"] = status
+    from graph.doc_pipeline.runs import ensure_runs
+    import json
     with db_cursor() as cur:
+        ensure_runs(cur)
         cur.execute(f"SELECT COUNT(*) FROM corpus_docs d WHERE {where}", binds)
         total = cur.fetchone()[0]
-        cur.execute(f"""SELECT d.src_id, NVL(d.title, ' '), d.graph_status, d.graph_note
-                        FROM corpus_docs d WHERE {where}
+        cur.execute(f"""SELECT d.src_id, NVL(d.title, ' '), d.graph_status, d.graph_note,
+                               dr.entities
+                        FROM corpus_docs d
+                        LEFT JOIN doc_runs r
+                          ON r.source_name = d.source_name AND r.active = 'Y'
+                        LEFT JOIN doc_results dr
+                          ON dr.run_id = r.run_id AND dr.source_name = d.source_name
+                         AND dr.src_id = d.src_id
+                        WHERE {where}
                         ORDER BY d.src_id
                         OFFSET :off ROWS FETCH NEXT 20 ROWS ONLY""",
                     {**binds, "off": (page - 1) * 20})
-        rows = [{"src_id": r[0], "title": (r[1] or "").strip()[:120],
-                 "status": r[2] or "pending", "note": r[3] or ""}
-                for r in cur.fetchall()]
+        rows = []
+        for r in cur.fetchall():
+            try:
+                ents = json.loads(_lob_str(r[4]) or "{}")
+            except (json.JSONDecodeError, TypeError):
+                ents = {}
+            rows.append({"src_id": r[0], "title": (r[1] or "").strip()[:120],
+                         "status": r[2] or "pending", "note": r[3] or "",
+                         "entities": ents})
     return {"docs": rows, "total": total, "page": page,
             "pages": max(1, (total + 19) // 20)}
 

@@ -182,17 +182,18 @@ def _seed_cluster(cur, spec: Spec):
 
 ENTITY_SPEC = Spec(
     table="entity_versions",
-    content_cols=["doc_prompt", "pack_prompt", "criteria", "descr"],
+    content_cols=["doc_prompt", "pack_prompt", "criteria", "descr", "etypes"],
     # criteria: 판정 지침 — 코드 스캐폴드의 지정 슬롯에 주입 (관리자 편집의 기본 통로)
     # descr: 이 엔티티(라인)가 뭔지 사람용 설명 — 프롬프트에 안 들어감
+    # etypes: 추가 추출 엔티티 타입 정의 JSON [{"key","desc"}] — 설명이 분류 기준 (Graphiti 방식)
     ddl="""CREATE TABLE entity_versions (
         name VARCHAR2(100) NOT NULL, version NUMBER NOT NULL,
         doc_prompt CLOB, pack_prompt CLOB, criteria CLOB, descr VARCHAR2(1000),
-        note VARCHAR2(500),
+        etypes CLOB, note VARCHAR2(500),
         is_default CHAR(1) DEFAULT 'N', created TIMESTAMP DEFAULT SYSTIMESTAMP,
         CONSTRAINT entity_versions_pk PRIMARY KEY (name, version))""",
     seed=_seed_entity, migrate=migrate_add_name,
-    add_cols={"criteria": "CLOB", "descr": "VARCHAR2(1000)"})
+    add_cols={"criteria": "CLOB", "descr": "VARCHAR2(1000)", "etypes": "CLOB"})
 
 CLUSTER_SPEC = Spec(
     table="cluster_versions",

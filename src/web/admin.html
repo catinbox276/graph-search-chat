@@ -203,6 +203,20 @@
     </div>
     <label class="k2">판정 지침 <small>무엇을 뽑고 무엇을 제외할지 — 아래 스캐폴드의 지정 슬롯에 주입됩니다. 출력 형식은 코드가 잠금(못 깨뜨림)</small></label>
     <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
+    <label class="k2">추출 엔티티 타입 <small>키+설명 행으로 정의 — <b>설명이 분류 기준</b>이 되어 문서에서 해당 값을 뽑아옵니다 (예: time=문서에 언급된 시점). goal·approach는 내장이라 항상 추출</small></label>
+    <div class="schedrow" style="margin:2px 0;opacity:.65">
+      <input value="goal" disabled style="width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
+      <input value="문서가 다루는 문제/목표 (내장 — 그래프 2층)" disabled style="flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
+    </div>
+    <div class="schedrow" style="margin:2px 0 4px;opacity:.65">
+      <input value="approach" disabled style="width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
+      <input value="핵심 해법/접근법 (내장 — 그래프 3층)" disabled style="flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px">
+    </div>
+    <div id="veTypes"></div>
+    <div class="schedrow" style="margin:2px 0 8px">
+      <button type="button" class="ghost" id="veTypeAdd">＋ 타입 추가</button>
+      <span class="hint" style="margin:0">추출된 값은 run별 문서 결과에 저장됩니다 (그래프 구조는 불변)</span>
+    </div>
     <details style="margin:6px 0">
       <summary class="hint" style="cursor:pointer;margin:0">🔒 스캐폴드 보기 (읽기 전용) — 지침이 주입되는 고정 틀 · 출력 형식 {"fits", "goal", "approach"}</summary>
       <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
@@ -1270,14 +1284,15 @@ async function loadRunDocs(src, status, page) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>문서 id</th><th>제목</th><th>상태</th><th>사유</th></tr></thead>";
+  t.innerHTML = "<thead><tr><th>문서 id</th><th>제목</th><th>상태</th><th>사유</th><th>추출 엔티티</th></tr></thead>";
   const tb = document.createElement("tbody");
   const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
   j.docs.forEach(d => {
     const tr = document.createElement("tr");
-    [d.src_id, d.title, LB[d.status] || d.status, d.note].forEach((v, i) => {
+    const ents = Object.entries(d.entities || {}).map(([k, v]) => `${k}=${v}`).join(" · ");
+    [d.src_id, d.title, LB[d.status] || d.status, d.note, ents].forEach((v, i) => {
       const td = document.createElement("td"); td.textContent = v ?? "";
-      if (i === 1 || i === 3) td.title = v ?? "";  // 잘린 제목·사유는 툴팁으로 전체
+      if (i === 1 || i === 3 || i === 4) td.title = v ?? "";  // 잘린 값은 툴팁으로 전체
       tr.appendChild(td);
     });
     tr.title = "클릭 = 원본 보기";
@@ -1856,6 +1871,33 @@ async function vmNewLine(cfg) {
   $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
   if (r.ok) vmLoadLines(cfg);
 }
+// ── 엔티티 타입 행 편집기 — 키+설명 행 추가/삭제 (etypes JSON [{key,desc}]) ──
+function veTypeRow(key, desc) {
+  const row = document.createElement("div"); row.className = "schedrow etyperow";
+  row.style.margin = "2px 0";
+  const k = document.createElement("input"); k.placeholder = "타입 키 (예: time)"; k.value = key || "";
+  k.style.cssText = "width:130px;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+  const d = document.createElement("input"); d.placeholder = "설명 — 분류 기준이 됩니다 (예: 문서에 언급된 시점)"; d.value = desc || "";
+  d.style.cssText = "flex:1;min-width:260px;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
+  const x = document.createElement("button"); x.type = "button"; x.className = "ghost"; x.textContent = "✕";
+  x.onclick = () => row.remove();
+  row.append(k, d, x); $("veTypes").appendChild(row);
+}
+function veTypesRead() {
+  return [...$("veTypes").querySelectorAll(".etyperow")].map(r => {
+    const [k, d] = r.querySelectorAll("input");
+    return {key: k.value.trim(), desc: d.value.trim()};
+  }).filter(t => t.key);
+}
+function veTypesSet(arr) {
+  $("veTypes").innerHTML = "";
+  (arr || []).forEach(t => veTypeRow(t.key, t.desc));
+}
+$("veTypeAdd").onclick = () => veTypeRow("", "");
+function parseEtypes(v) {   // 백엔드는 etypes를 JSON 문자열로 반환
+  try { const a = JSON.parse(v || "[]"); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
 const ENT_ANCHOR = "도메인 기준·추출 지침: {hint}";   // judge.py _CRIT_ANCHOR와 동일
 function entAssemble(tmpl, crit) {   // 지침을 스캐폴드 슬롯에 주입 (백엔드 with_criteria와 동일 규칙)
   if (!(crit || "").trim()) return tmpl;
@@ -1870,14 +1912,25 @@ const ENTITY_VM = {
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
   readForm: () => ({criteria: $("veCrit").value, descr: $("veDescr").value,
+    etypes: veTypesRead(),
     doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
   setForm: v => { $("veCrit").value = v.criteria || ""; $("veDescr").value = v.descr || "";
+    veTypesSet(parseEtypes(v.etypes));
     $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
-  summary: v => v.doc_prompt ? "원문:커스텀(고급)" : (v.criteria ? "지침:커스텀" : "코드 기본"),
+  summary: v => {
+    const nt = parseEtypes(v.etypes).length;
+    return (v.doc_prompt ? "원문:커스텀(고급)" : (v.criteria ? "지침:커스텀" : "코드 기본")) +
+           (nt ? `·타입${nt}종` : "");
+  },
   viewSections: v => {
     const d = ENTITY_VM.defaults || {};
+    const et = parseEtypes(v.etypes);
     const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr},
-                  {label: "판정 지침 (관리자 편집분)", text: v.criteria}];
+                  {label: "판정 지침 (관리자 편집분)", text: v.criteria},
+                  {label: `추출 엔티티 타입 (${et.length}종 + 내장 goal·approach)`,
+                   text: ["goal: 문서가 다루는 문제/목표 (내장)",
+                          "approach: 핵심 해법/접근법 (내장)",
+                          ...et.map(t => `${t.key}: ${t.desc || "(설명 없음)"}`)].join("\n")}];
     if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
       secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt || d.doc_prompt},
                 {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt || d.pack_prompt});
