@@ -20,17 +20,27 @@ SIM_THRESHOLD = config.DEDUP_SIM_THRESHOLD  # 후보 하한 — 이 구간은 LL
 LAYER_KIND = {2: "목표(사용자가 이루려는 것)", 3: "접근법(문제를 푸는 방법)"}
 
 
-def _auto_merge_ok(a: str, b: str) -> bool:
+def default_merge_cfg() -> dict:
+    """클러스터(dedup) 기본 설정 — config(.env). run별 스냅샷의 폴백."""
+    return {"sim_high": config.DEDUP_SIM_HIGH,
+            "sim_threshold": config.DEDUP_SIM_THRESHOLD,
+            "short_name_chars": config.DEDUP_SHORT_NAME_CHARS,
+            "char_ratio": config.DEDUP_CHAR_RATIO,
+            "select_max": config.DEDUP_SELECT_MAX,
+            "embed_model": ""}   # ""=기본 임베딩 (model_registry)
+
+
+def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:
     """임베딩 ≥HIGH 자동 병합 가드 — 짧은 이름 제외 + 문자 유사도 AND 조건.
     임베딩 코사인 단독 즉시 병합은 업계 관행에 없음 (Graphiti 3-gram Jaccard,
     Neo4j 편집거리 AND). 가드에 걸리면 병합을 버리는 게 아니라 LLM 판정으로 넘어간다."""
-    if min(len(a), len(b)) < config.DEDUP_SHORT_NAME_CHARS:
+    if min(len(a), len(b)) < mc["short_name_chars"]:
         return False
-    return difflib.SequenceMatcher(None, a, b).ratio() >= config.DEDUP_CHAR_RATIO
+    return difflib.SequenceMatcher(None, a, b).ratio() >= mc["char_ratio"]
 
 
 def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True,
-                  run_id="-", count=True):
+                  run_id="-", count=True, mc=None):
     """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
 
     ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'.
@@ -39,10 +49,11 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
            만들어 두고, 가중치는 활성 전환 시 증거 기반 델타로 가산)."""
     # 임베딩 엔드포인트가 죽어도 구조화는 계속 — 벡터 없으면(vec=None) dedup은 이름/LLM만
     # 사용(과병합만 줄고 진행은 됨). 무한 대기·전체 실패보다 낫다.
+    mc = mc or default_merge_cfg()
     vec = None
     if use_embedding:
         try:
-            vec = embed(name)
+            vec = embed(name, mc.get("embed_model", ""))
         except Exception as e:
             print(f"[embed 실패→벡터없이 진행] {type(e).__name__}: {str(e)[:120]}", flush=True)
     node_id = None
@@ -61,15 +72,16 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
                 if len(cand) != len(vec):
                     continue  # 임베딩 모델 교체로 차원 다른 옛 벡터 → 비교 불가(잘못된 병합 방지)
                 sim = cosine(vec, cand)
-                if sim >= SIM_THRESHOLD:
+                if sim >= mc["sim_threshold"]:
                     cands.append((sim, nid, nname))
         if node_id is None and cands:
             cands.sort(reverse=True)
             top_sim, top_id, top_name = cands[0]
-            if top_sim >= SIM_HIGH and _auto_merge_ok(name, top_name):
+            if top_sim >= mc["sim_high"] and _auto_merge_ok(name, top_name, mc):
                 node_id = top_id  # 고신뢰 + 문자 가드 통과 — LLM 없이 즉시 병합
             else:
-                node_id = llm_select(LAYER_KIND.get(layer, "개념"), name, cands)
+                node_id = llm_select(LAYER_KIND.get(layer, "개념"), name, cands,
+                                     mc["select_max"])
     else:
         cur.execute("SELECT id FROM nodes WHERE layer = :1 AND name = :2",
                     [layer, name])

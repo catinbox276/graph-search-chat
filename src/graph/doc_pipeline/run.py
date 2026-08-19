@@ -11,6 +11,7 @@ import oracledb
 
 from core import config, settings
 from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
+from graph.graph_pipeline.merge import default_merge_cfg
 
 from . import runs
 from .judge import PACK_MAX_DOCS, judge_pack
@@ -39,7 +40,9 @@ def _load_settings(limit_override: int = 0) -> SimpleNamespace:
         no_think=bool(settings.get_int(st, "doc_no_think", config.DOC_NO_THINK)),
         model=(st.get("doc_extract_model") or "").strip(),
         doc_prompt=(st.get("struct_doc_prompt") or "").strip(),    # 빈값=코드 기본(judge)
-        pack_prompt=(st.get("struct_pack_prompt") or "").strip())
+        pack_prompt=(st.get("struct_pack_prompt") or "").strip(),
+        dedup=default_merge_cfg(),   # 클러스터(dedup) 기본 — run 지정 시 스냅샷으로 덮음
+        embed_model="")              # run별 임베딩 — 빈값=기본
 
 
 def main():
@@ -137,6 +140,7 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     # 연속 파이프라인: 판정 요청(묶음)을 항상 conc건 서버에 걸어둔다 — 하나
     # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
     # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
+    mc = {**s.dedup, "embed_model": s.embed_model}  # run별 클러스터(dedup)·임베딩 설정
     ex = ThreadPoolExecutor(max_workers=s.conc)
     it = iter(packs)
     pending = set()
@@ -159,11 +163,11 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
                                              else "LLM 응답 파싱 실패")
                 elif j.get("fits") and j.get("goal") and j.get("approach"):
                     d = get_or_create(cur, 1, domain, None, "doc", ref,
-                                      use_embedding=False, run_id=run_id, count=count)
+                                      use_embedding=False, run_id=run_id, count=count, mc=mc)
                     g = get_or_create(cur, 2, str(j["goal"])[:400], d, "doc", ref,
-                                      run_id=run_id, count=count)
+                                      run_id=run_id, count=count, mc=mc)
                     get_or_create(cur, 3, str(j["approach"])[:400], g, "doc", ref,
-                                  run_id=run_id, count=count)
+                                  run_id=run_id, count=count, mc=mc)
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
@@ -189,12 +193,12 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
 def _run_overrides(cur, run_id: str, s):
     """run 조합 스냅샷을 설정에 덮어씀 — (hint, count, by_run) 반환."""
     import json as _json
-    cur.execute("""SELECT domain, domain_version, chat_model, settings, active
+    cur.execute("""SELECT domain, domain_version, chat_model, settings, active, embed_model
                    FROM doc_runs WHERE run_id = :1""", [run_id])
     r = cur.fetchone()
     if not r:
         raise ValueError(f"run이 없습니다: {run_id}")
-    domain, dver, model, st_json, active = r
+    domain, dver, model, st_json, active, embed_model = r
     if hasattr(st_json, "read"):     # settings가 CLOB이면 문자열로
         st_json = st_json.read()
     st = _json.loads(st_json or "{}")
@@ -204,6 +208,9 @@ def _run_overrides(cur, run_id: str, s):
     s.no_think = bool(st.get("no_think", s.no_think))
     s.doc_prompt = st.get("doc_prompt", s.doc_prompt)    # 엔티티 추출 프롬프트 스냅샷 적용
     s.pack_prompt = st.get("pack_prompt", s.pack_prompt)
+    if isinstance(st.get("dedup"), dict):                # 클러스터(dedup) 스냅샷 적용
+        s.dedup = {**s.dedup, **st["dedup"]}
+    s.embed_model = (embed_model or "").strip() or s.embed_model   # run별 임베딩
     cur.execute("""SELECT extract_hint FROM domain_versions
                    WHERE name = :1 AND version = :2""", [domain, dver])
     h = cur.fetchone()

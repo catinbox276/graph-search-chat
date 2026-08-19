@@ -217,15 +217,24 @@ def embedding_endpoint() -> tuple:
 _emb_clients = {}
 
 
-def embedding_client() -> tuple:
-    """(OpenAI 클라이언트, 모델명) — base_url별 클라이언트 재사용."""
+def embedding_client(name: str = "") -> tuple:
+    """(OpenAI 클라이언트, 모델명) — base_url별 클라이언트 재사용.
+    name 지정 시 그 임베딩 모델의 base_url을 레지스트리에서 조회(run별 임베딩). 없으면 기본."""
     from openai import OpenAI
-    url, name = embedding_endpoint()
+    url, resolved = embedding_endpoint()          # 기본(기본 임베딩)
+    if name:
+        try:
+            with db.session() as s:
+                r = s.query(ModelRegistry).filter_by(kind="embedding", name=name).first()
+            if r:
+                url, resolved = (r.base_url or config.EMBED_URL), name
+        except Exception:
+            pass  # 조회 실패 시 기본 임베딩으로 진행
     if url not in _emb_clients:
         # 타임아웃 필수 — 임베딩 엔드포인트가 멈추면 그래프 병합(메인 스레드)이 무한 대기.
         _emb_clients[url] = OpenAI(base_url=url, api_key=config.MODEL_API_KEY,
                                    timeout=config.LLM_TIMEOUT)
-    return _emb_clients[url], name
+    return _emb_clients[url], resolved
 
 
 def probe_serving(timeout: float = 5.0) -> list:

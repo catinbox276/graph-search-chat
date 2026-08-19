@@ -102,11 +102,12 @@ def llm_same(kind: str, a: str, b: str) -> bool:
         return False
 
 
-def llm_select(kind: str, name: str, cands: list) -> str | None:
+def llm_select(kind: str, name: str, cands: list, max_n: int = 0) -> str | None:
     """후보 형제 여러 개 중 같은 의도 하나를 LLM이 선택 (없으면 없음).
     쌍별 이지선다 반복보다 정확하고 호출도 1회 (ComEM, COLING 2025).
-    cands: [(sim, node_id, name)] 유사도 내림차순. 반환: 병합 대상 node_id 또는 None."""
-    cands = cands[:config.DEDUP_SELECT_MAX]
+    cands: [(sim, node_id, name)] 유사도 내림차순. 반환: 병합 대상 node_id 또는 None.
+    max_n: 후보 상한(0=config 기본) — run별 클러스터 설정."""
+    cands = cands[:(max_n or config.DEDUP_SELECT_MAX)]
     kw = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
            "max_tokens": 80}
           if config.LLM_AUX_NO_THINK else {})
@@ -125,9 +126,9 @@ def llm_select(kind: str, name: str, cands: list) -> str | None:
     return cands[pick - 1][1] if 1 <= pick <= len(cands) else None
 
 
-def embed(text: str) -> list:
+def embed(text: str, model: str = "") -> list:
     from core import model_registry
-    cli, emb_name = model_registry.embedding_client()
+    cli, emb_name = model_registry.embedding_client(model)  # model 지정 시 그 임베딩
     return cli.embeddings.create(model=emb_name, input=text).data[0].embedding
 
 

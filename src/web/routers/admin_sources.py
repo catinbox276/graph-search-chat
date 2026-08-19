@@ -768,6 +768,9 @@ def _run_settings_display(sj) -> str:
         parts.append("no-think")
     if (d.get("doc_prompt") or "").strip() or (d.get("pack_prompt") or "").strip():
         parts.append("엔티티:커스텀")
+    dd = d.get("dedup")
+    if isinstance(dd, dict) and dd.get("sim_high") is not None:
+        parts.append(f"클러스터 H{dd['sim_high']}/T{dd.get('sim_threshold')}")
     return " · ".join(parts)
 
 
@@ -801,10 +804,16 @@ def admin_source_runs(sname: str):
 class RunCreateIn(BaseModel):
     domain_version: int | None = None  # 미지정=현재 기본 버전
     chat_model: str = ""               # 미지정=현재 전처리 모델
-    embed_model: str = ""
+    embed_model: str = ""              # 미지정=기본 임베딩
     body_chars: int | None = None
     pack_tokens: int | None = None
     no_think: int | None = None
+    # 클러스터(dedup) 부분 override — 미지정=현재 config 스냅샷
+    sim_high: float | None = None
+    sim_threshold: float | None = None
+    short_name_chars: int | None = None
+    char_ratio: float | None = None
+    select_max: int | None = None
 
 
 @router.post("/admin/sources/{sname}/runs")
@@ -819,7 +828,10 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
         rid = create_run(cur, sname, domain_version=inp.domain_version,
                          chat_model=inp.chat_model, embed_model=inp.embed_model,
                          body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
-                         no_think=inp.no_think)
+                         no_think=inp.no_think,
+                         dedup={"sim_high": inp.sim_high, "sim_threshold": inp.sim_threshold,
+                                "short_name_chars": inp.short_name_chars,
+                                "char_ratio": inp.char_ratio, "select_max": inp.select_max})
     return {"ok": True, "run_id": rid,
             "note": "run 생성됨(비활성) — [이 run으로 구조화] 후 결과를 보고 활성 전환하세요"}
 

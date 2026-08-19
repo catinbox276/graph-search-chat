@@ -89,7 +89,13 @@ def _combo(cur, source_name: str) -> dict:
                 "no_think": settings.get_int(st, "doc_no_think", config.DOC_NO_THINK),
                 # 엔티티(문서→목표·접근법) 추출 프롬프트 스냅샷 — 빈값=코드 기본
                 "doc_prompt": (st.get("struct_doc_prompt") or ""),
-                "pack_prompt": (st.get("struct_pack_prompt") or "")},
+                "pack_prompt": (st.get("struct_pack_prompt") or ""),
+                # 클러스터(dedup) 설정 스냅샷 — config 기본값
+                "dedup": {"sim_high": config.DEDUP_SIM_HIGH,
+                          "sim_threshold": config.DEDUP_SIM_THRESHOLD,
+                          "short_name_chars": config.DEDUP_SHORT_NAME_CHARS,
+                          "char_ratio": config.DEDUP_CHAR_RATIO,
+                          "select_max": config.DEDUP_SELECT_MAX}},
                 ensure_ascii=False)}
 
 
@@ -128,9 +134,11 @@ def record_result(cur, run_id: str, source_name: str, src_id: str,
 
 
 def create_run(cur, source_name: str, domain_version=None, chat_model="",
-               embed_model="", body_chars=None, pack_tokens=None, no_think=None) -> str:
+               embed_model="", body_chars=None, pack_tokens=None, no_think=None,
+               dedup=None) -> str:
     """새 조합 run 생성 (비활성) — 지정 안 한 항목은 현재 기본값 스냅샷.
-    구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
+    구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환.
+    dedup: 클러스터 설정 부분 override(지정 키만 덮음)."""
     ensure_runs(cur)
     c = _combo(cur, source_name)
     st = json.loads(c["settings"])
@@ -140,6 +148,9 @@ def create_run(cur, source_name: str, domain_version=None, chat_model="",
         st["pack_tokens"] = pack_tokens
     if no_think is not None:
         st["no_think"] = no_think
+    if dedup:   # 클러스터 부분 override — None 아닌 키만
+        st["dedup"] = {**st.get("dedup", {}),
+                       **{k: v for k, v in dedup.items() if v is not None}}
     rid = uuid.uuid4().hex
     cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
                      chat_model, embed_model, settings, active)
