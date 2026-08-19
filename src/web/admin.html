@@ -176,8 +176,8 @@
   <button data-tab="mcp">MCP 서버</button>
   <button data-tab="agent">에이전트</button>
   <button data-tab="domains">도메인 시드</button>
-  <button data-tab="entity">엔티티 버전</button>
-  <button data-tab="cluster">클러스터 버전</button>
+  <button data-tab="entity">① 추출 (엔티티)</button>
+  <button data-tab="cluster">② 병합 (클러스터)</button>
   <button data-tab="mapping">매핑 버전</button>
   <button data-tab="data">데이터 버전</button>
   <button data-tab="presets">조합 프리셋</button>
@@ -191,7 +191,7 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 구조화</b>는 [원천 테이블·구조화] 탭 → 소스 클릭 → "✚ 새 조합 run"에서.</p>
 </section>
 <section class="card" id="sec-entity">
-  <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
   <p class="hint" style="margin:4px 0 8px">엔티티의 <b>꼴(구조)은 코드에 고정</b>돼 있습니다 — 4계층: 도메인 › <b>목표(goal)</b> › <b>접근법(approach)</b> › 행동(도구).
      이 탭은 그 꼴을 바꾸는 게 아니라, 문서에서 <b>목표·접근법을 어떻게 뽑아낼지</b>(판정 기준 + 출력 형식)의 프롬프트를 버전 관리합니다.
      프롬프트가 빈 버전은 코드 기본을 쓰며 — 👁 상세에서 그 기본 전문(fits 판정·goal·approach 출력 형식)을 볼 수 있습니다.</p>
@@ -208,7 +208,7 @@
   </div>
 </section>
 <section class="card" id="sec-cluster">
-  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <h3>② 병합 (클러스터) <small>파이프라인 2단계: ①에서 뽑은 문구를 그래프에 합치기(dedup) · 라인마다 독립 버전 — 라인 클릭=버전 목록</small></h3>
   <p class="hint" style="margin:4px 0 8px">클러스터 = <b>룰 임계값</b>(자동병합·후보하한·이름 가드) + <b>LLM 후보선택 프롬프트</b>(애매 구간에서 "같은 의도의 후보 번호를 골라라"고 묻는 문구).
      도메인 프롬프트와는 별개이며 도메인 지침은 병합에 쓰이지 않습니다. 프롬프트를 비우면 코드 기본 문구를 씁니다.</p>
   <div id="clsLines"><span class="hint">불러오는 중…</span></div>
@@ -245,8 +245,8 @@
       <input id="ppName" placeholder="프리셋 이름" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
       <select id="ppDomain" title="소스 등록 도메인 오버라이드 — 빈값=소스 도메인 사용"><option value="">도메인(소스 기본)</option></select>
       <input id="ppDomainVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:130px" title="빈값=그 도메인의 기본 버전">
-      <select id="ppEntity" title="엔티티 라인·버전"><option value="">엔티티(활성)</option></select>
-      <select id="ppCluster" title="클러스터 라인·버전"><option value="">클러스터(활성)</option></select>
+      <select id="ppEntity" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option></select>
+      <select id="ppCluster" title="② 병합(클러스터) 라인·버전"><option value="">②병합(활성)</option></select>
       <select id="ppModel" title="판정 LLM"><option value="">LLM(기본)</option></select>
       <select id="ppEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option></select>
       <input id="ppNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
@@ -1152,7 +1152,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>①추출</th><th>②병합</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1211,8 +1211,8 @@ async function renderRunForm(src) {
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
       <b style="font-size:.78rem">버전 조합:</b>
       <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
-      <select id="rfEntVer" title="엔티티 (라인·버전) — 버전 관리 탭"><option value="">엔티티(활성)</option>${entV.map(vlopt).join("")}</select>
-      <select id="rfClsVer" title="클러스터 (라인·버전) — 버전 관리 탭"><option value="">클러스터(활성)</option>${clsV.map(vlopt).join("")}</select>
+      <select id="rfEntVer" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option>${entV.map(vlopt).join("")}</select>
+      <select id="rfClsVer" title="② 병합(클러스터) 라인·버전"><option value="">②병합(활성)</option>${clsV.map(vlopt).join("")}</select>
       <select id="rfJoinVer" title="매핑 버전(id·시간·필드)"><option value="">매핑(기본)</option>${joinV.map(vopt).join("")}</select>
       <select id="rfDataVer" title="데이터 신선도 버전(적재 시점)"><option value="">데이터(기본)</option>${dataV.map(dopt).join("")}</select>
       <select id="rfModel" title="판정 LLM"><option value="">LLM(기본)</option>
@@ -1836,7 +1836,7 @@ async function vmNewLine(cfg) {
   if (r.ok) vmLoadLines(cfg);
 }
 const ENTITY_VM = {
-  title: "🧩 엔티티", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
+  title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
   linesEndpoint: "/admin/entity-lines",
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
@@ -1859,7 +1859,7 @@ const ENTITY_VM = {
   },
 };
 const CLUSTER_VM = {
-  title: "🔗 클러스터", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
+  title: "② 병합(클러스터)", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
   linesEndpoint: "/admin/cluster-lines",
   versions: n => `/admin/cluster-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/cluster-lines/${encodeURIComponent(n)}/versions/${v}/default`,
@@ -1940,9 +1940,9 @@ async function loadPresets() {
   $("ppDomain").innerHTML = `<option value="">도메인(소스 기본)</option>` +
     (doms.domains || []).filter(d => d.scope !== "chat")
       .map(d => `<option>${esc(d.name)}</option>`).join("");
-  $("ppEntity").innerHTML = `<option value="">엔티티(활성)</option>` +
+  $("ppEntity").innerHTML = `<option value="">①추출(활성)</option>` +
     (entV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
-  $("ppCluster").innerHTML = `<option value="">클러스터(활성)</option>` +
+  $("ppCluster").innerHTML = `<option value="">②병합(활성)</option>` +
     (clsV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
   $("ppModel").innerHTML = `<option value="">LLM(기본)</option>` +
     (models.llm || []).map(m => `<option>${esc(m.name)}</option>`).join("");
@@ -1957,7 +1957,7 @@ async function loadPresets() {
     box.innerHTML = `<span class="hint">아직 프리셋이 없습니다 — 아래 폼에서 만들고 저장하세요</span>`; return;
   }
   const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>이름</th><th>도메인</th><th>엔티티</th><th>클러스터</th>" +
+  t.innerHTML = "<thead><tr><th>이름</th><th>도메인</th><th>①추출</th><th>②병합</th>" +
                 "<th>LLM</th><th>임베딩</th><th>메모</th><th>수정</th><th></th></tr></thead>";
   const tb = document.createElement("tbody");
   j.presets.forEach(p => {
