@@ -454,6 +454,133 @@ def admin_source_structure(sname: str, run_id: str = ""):
                     "진행은 아래 처리 현황(5초 갱신)에서 실시간으로 올라갑니다."}
 
 
+# ── 엔티티·클러스터 버전 (도메인 버전과 같은 패턴 — 전용 버전관리 탭) ──────────
+def _ensure_entity_versions(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'ENTITY_VERSIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE entity_versions (
+            version NUMBER PRIMARY KEY, doc_prompt CLOB, pack_prompt CLOB,
+            note VARCHAR2(500), is_default CHAR(1) DEFAULT 'N',
+            created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+    cur.execute("SELECT COUNT(*) FROM entity_versions")
+    if not cur.fetchone()[0]:   # v1 시드 = 현재 전역 프롬프트(빈값=코드 기본)
+        st = settings.get_all()
+        cur.execute("""INSERT INTO entity_versions (version, doc_prompt, pack_prompt, note, is_default)
+                       VALUES (1, :d, :p, '초기(현재 설정)', 'Y')""",
+                    {"d": (st.get("struct_doc_prompt") or None),
+                     "p": (st.get("struct_pack_prompt") or None)})
+
+
+def _ensure_cluster_versions(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CLUSTER_VERSIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE cluster_versions (
+            version NUMBER PRIMARY KEY, sim_high NUMBER, sim_threshold NUMBER,
+            short_name_chars NUMBER, char_ratio NUMBER, select_max NUMBER,
+            note VARCHAR2(500), is_default CHAR(1) DEFAULT 'N',
+            created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+    cur.execute("SELECT COUNT(*) FROM cluster_versions")
+    if not cur.fetchone()[0]:   # v1 시드 = config 기본
+        cur.execute("""INSERT INTO cluster_versions (version, sim_high, sim_threshold,
+                         short_name_chars, char_ratio, select_max, note, is_default)
+                       VALUES (1, :sh, :st, :sn, :cr, :sm, '초기(config 기본)', 'Y')""",
+                    {"sh": config.DEDUP_SIM_HIGH, "st": config.DEDUP_SIM_THRESHOLD,
+                     "sn": config.DEDUP_SHORT_NAME_CHARS, "cr": config.DEDUP_CHAR_RATIO,
+                     "sm": config.DEDUP_SELECT_MAX})
+
+
+class EntityVersionIn(BaseModel):
+    doc_prompt: str = ""
+    pack_prompt: str = ""
+    note: str = ""
+
+
+class ClusterVersionIn(BaseModel):
+    sim_high: float = 0.92
+    sim_threshold: float = 0.70
+    short_name_chars: int = 12
+    char_ratio: float = 0.40
+    select_max: int = 8
+    note: str = ""
+
+
+@router.get("/admin/entity-versions")
+def admin_entity_versions():
+    """엔티티(추출 프롬프트) 버전 목록 — 최신순."""
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
+                              doc_prompt, pack_prompt, note, is_default
+                       FROM entity_versions ORDER BY version DESC""")
+        rows = [{"version": int(r[0]), "created": r[1],
+                 "doc_prompt": _lob_str(r[2]), "pack_prompt": _lob_str(r[3]),
+                 "note": r[4] or "", "is_default": r[5] == "Y"} for r in cur.fetchall()]
+    return {"versions": rows}
+
+
+@router.post("/admin/entity-versions")
+def admin_entity_version_add(inp: EntityVersionIn):
+    """새 엔티티 버전 생성 (기본 지정은 별도)."""
+    if inp.doc_prompt.strip() and "{body}" not in inp.doc_prompt:
+        raise HTTPException(400, "문서 프롬프트에는 {body} 자리표시자가 있어야 합니다")
+    if inp.pack_prompt.strip() and "{docs}" not in inp.pack_prompt:
+        raise HTTPException(400, "묶음 프롬프트에는 {docs} 자리표시자가 있어야 합니다")
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        cur.execute("""INSERT INTO entity_versions (version, doc_prompt, pack_prompt, note)
+                       SELECT NVL(MAX(version), 0) + 1, :d, :p, :n FROM entity_versions""",
+                    {"d": inp.doc_prompt.strip() or None, "p": inp.pack_prompt.strip() or None,
+                     "n": inp.note.strip() or None})
+    return {"ok": True}
+
+
+@router.post("/admin/entity-versions/{v}/default")
+def admin_entity_version_default(v: int):
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        cur.execute("UPDATE entity_versions SET is_default = 'N'")
+        cur.execute("UPDATE entity_versions SET is_default = 'Y' WHERE version = :1", [v])
+    return {"ok": True}
+
+
+@router.get("/admin/cluster-versions")
+def admin_cluster_versions():
+    """클러스터(dedup) 버전 목록 — 최신순."""
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
+                              sim_high, sim_threshold, short_name_chars, char_ratio,
+                              select_max, note, is_default
+                       FROM cluster_versions ORDER BY version DESC""")
+        rows = [{"version": int(r[0]), "created": r[1], "sim_high": float(r[2]),
+                 "sim_threshold": float(r[3]), "short_name_chars": int(r[4]),
+                 "char_ratio": float(r[5]), "select_max": int(r[6]),
+                 "note": r[7] or "", "is_default": r[8] == "Y"} for r in cur.fetchall()]
+    return {"versions": rows}
+
+
+@router.post("/admin/cluster-versions")
+def admin_cluster_version_add(inp: ClusterVersionIn):
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        cur.execute("""INSERT INTO cluster_versions (version, sim_high, sim_threshold,
+                         short_name_chars, char_ratio, select_max, note)
+                       SELECT NVL(MAX(version), 0) + 1, :sh, :st, :sn, :cr, :sm, :n
+                       FROM cluster_versions""",
+                    {"sh": inp.sim_high, "st": inp.sim_threshold, "sn": inp.short_name_chars,
+                     "cr": inp.char_ratio, "sm": inp.select_max, "n": inp.note.strip() or None})
+    return {"ok": True}
+
+
+@router.post("/admin/cluster-versions/{v}/default")
+def admin_cluster_version_default(v: int):
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        cur.execute("UPDATE cluster_versions SET is_default = 'N'")
+        cur.execute("UPDATE cluster_versions SET is_default = 'Y' WHERE version = :1", [v])
+    return {"ok": True}
+
+
 # ── 예약 스케줄러 (문서 구조화 — graph/doc_pipeline/scheduler.py) ─────────────
 class ScheduleIn(BaseModel):
     enabled: bool = False
