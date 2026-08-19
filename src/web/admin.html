@@ -212,6 +212,15 @@
     </div>
   </details>
 
+  <h4>④ 테이블 조인 버전 <small>테이블 간 관계(조인 키) — 사람이 직접 등록</small></h4>
+  <div id="verJoin"><span class="hint">불러오는 중…</span></div>
+  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 테이블 조인 버전</summary>
+    <label class="k2">관계 목록 <small>한 줄에 하나: <code>테이블A.컬럼A -&gt; 테이블B.컬럼B</code></small></label>
+    <textarea id="vjRel" class="psta" spellcheck="false" placeholder="orders.customer_id -> customers.id&#10;orders.product_id -> products.id"></textarea>
+    <div class="schedrow"><input id="vjNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" id="vjAdd">테이블 조인 버전 생성</button><span class="hint" id="vjMsg" style="margin:0"></span></div>
+  </details>
+
   <p class="hint" style="margin-top:12px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭에서 관리합니다. 🔹 <b>버전을 조합해 구조화</b>하려면 [원천 테이블·구조화] 탭 → 소스 줄 클릭 → "✚ 새 조합 run 만들기"에서 도메인·엔티티·클러스터·모델·임베딩을 골라 실행하고, run 목록에서 어떤 조합으로 만든 데이터인지 확인합니다.</p>
 </section>
 <section class="card" id="sec-users">
@@ -1666,7 +1675,21 @@ async function loadVersions() {
   const cv = await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}));
   _verList($("verCluster"), cv.versions, "cluster",
            v => `자동병합≥${v.sim_high} · 후보≥${v.sim_threshold} · 후보수${v.select_max}`);
+  const jv = await fetch("/admin/join-versions").then(r => r.json()).catch(() => ({versions: []}));
+  _verList($("verJoin"), jv.versions, "join", v => `관계 ${(v.relations || []).length}건`);
 }
+$("vjAdd").onclick = async () => {
+  $("vjMsg").textContent = "";
+  const rels = $("vjRel").value.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+    const m = l.match(/^(.+?)\.(.+?)\s*->\s*(.+?)\.(.+?)$/);
+    return m ? {from_table: m[1].trim(), from_col: m[2].trim(), to_table: m[3].trim(), to_col: m[4].trim()} : null;
+  }).filter(Boolean);
+  const r = await fetch("/admin/join-versions", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({relations: rels, note: $("vjNote").value})});
+  const j = await r.json().catch(() => ({}));
+  $("vjMsg").textContent = r.ok ? `✓ 생성됨 (관계 ${rels.length}건)` : (j.detail || `실패 ${r.status}`);
+  if (r.ok) { $("vjRel").value = $("vjNote").value = ""; loadVersions(); }
+};
 $("veAdd").onclick = async () => {
   $("veMsg").textContent = "";
   const r = await fetch("/admin/entity-versions", {method: "POST", headers: {"Content-Type": "application/json"},

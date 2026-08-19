@@ -581,6 +581,72 @@ def admin_cluster_version_default(v: int):
     return {"ok": True}
 
 
+# ── 테이블 조인 버전 (테이블 간 관계 정의 — 사람이 직접 등록) ─────────────────
+def _ensure_join_versions(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'JOIN_VERSIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE join_versions (
+            version NUMBER PRIMARY KEY, relations CLOB, note VARCHAR2(500),
+            is_default CHAR(1) DEFAULT 'N', created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+    cur.execute("SELECT COUNT(*) FROM join_versions")
+    if not cur.fetchone()[0]:   # v1 시드 = 빈 관계
+        cur.execute("""INSERT INTO join_versions (version, relations, note, is_default)
+                       VALUES (1, '[]', '초기(빈 관계)', 'Y')""")
+
+
+class JoinRelation(BaseModel):
+    from_table: str
+    from_col: str
+    to_table: str
+    to_col: str
+
+
+class JoinVersionIn(BaseModel):
+    relations: list[JoinRelation] = []   # 테이블 간 관계(조인 키) 목록
+    note: str = ""
+
+
+@router.get("/admin/join-versions")
+def admin_join_versions():
+    """테이블 조인(관계) 버전 목록 — 최신순."""
+    import json
+    with db_cursor() as cur:
+        _ensure_join_versions(cur)
+        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
+                              relations, note, is_default
+                       FROM join_versions ORDER BY version DESC""")
+        rows = []
+        for r in cur.fetchall():
+            try:
+                rel = json.loads(_lob_str(r[2]) or "[]")
+            except (json.JSONDecodeError, TypeError):
+                rel = []
+            rows.append({"version": int(r[0]), "created": r[1], "relations": rel,
+                         "note": r[3] or "", "is_default": r[4] == "Y"})
+    return {"versions": rows}
+
+
+@router.post("/admin/join-versions")
+def admin_join_version_add(inp: JoinVersionIn):
+    import json
+    rel = json.dumps([x.model_dump() for x in inp.relations], ensure_ascii=False)
+    with db_cursor() as cur:
+        _ensure_join_versions(cur)
+        cur.execute("""INSERT INTO join_versions (version, relations, note)
+                       SELECT NVL(MAX(version), 0) + 1, :r, :n FROM join_versions""",
+                    {"r": rel, "n": inp.note.strip() or None})
+    return {"ok": True}
+
+
+@router.post("/admin/join-versions/{v}/default")
+def admin_join_version_default(v: int):
+    with db_cursor() as cur:
+        _ensure_join_versions(cur)
+        cur.execute("UPDATE join_versions SET is_default = 'N'")
+        cur.execute("UPDATE join_versions SET is_default = 'Y' WHERE version = :1", [v])
+    return {"ok": True}
+
+
 # ── 예약 스케줄러 (문서 구조화 — graph/doc_pipeline/scheduler.py) ─────────────
 class ScheduleIn(BaseModel):
     enabled: bool = False
