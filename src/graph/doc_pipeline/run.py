@@ -191,7 +191,8 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
 
 
 def _run_overrides(cur, run_id: str, s):
-    """run 조합 스냅샷을 설정에 덮어씀 — (hint, count, by_run) 반환."""
+    """run 조합 스냅샷을 설정에 덮어씀 — (domain, hint, count) 반환.
+    domain은 run에 스냅샷된 값(프리셋 오버라이드 포함) — 소스 등록 도메인보다 우선."""
     import json as _json
     cur.execute("""SELECT domain, domain_version, chat_model, settings, active, embed_model
                    FROM doc_runs WHERE run_id = :1""", [run_id])
@@ -214,7 +215,7 @@ def _run_overrides(cur, run_id: str, s):
     cur.execute("""SELECT extract_hint FROM domain_versions
                    WHERE name = :1 AND version = :2""", [domain, dver])
     h = cur.fetchone()
-    return (h[0] if h and h[0] else ""), active == "Y"
+    return domain, (h[0] if h and h[0] else ""), active == "Y"
 
 
 def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
@@ -236,24 +237,38 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
     doc_ddl(cur)
     con.commit()
     s = _load_settings(limit)
-    # 대화 전용(scope=chat) 도메인은 제외 — main()과 동일 기준
-    cur.execute("""SELECT s.source_name, s.domain, NVL(d.extract_hint, ' ')
-                   FROM source_registry s
-                   JOIN domain_registry d ON d.name = s.domain
-                   WHERE s.source_name = :1 AND s.enabled = 'Y' AND s.domain IS NOT NULL
-                     AND NVL(d.scope, 'both') != 'chat'""", [source_name])
-    row = cur.fetchone()
-    if not row:
-        con.close()
-        return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
     stats = {"done": 0, "excluded": 0, "error": 0}
     total = 0
-    hint, count, by_run = row[2], True, False
     if run_id:
+        # run 지정 실행 — 도메인은 run 스냅샷(프리셋 오버라이드 포함)이 우선이라
+        # 소스 등록 도메인이 없어도 된다. 활성·존재만 확인.
+        cur.execute("""SELECT 1 FROM source_registry
+                       WHERE source_name = :1 AND enabled = 'Y'""", [source_name])
+        if not cur.fetchone():
+            con.close()
+            return {"error": "활성 소스가 아닙니다"}
         rid = run_id
-        h2, count = _run_overrides(cur, rid, s)
-        hint, by_run = (h2 or hint), True
+        domain, hint, count = _run_overrides(cur, rid, s)
+        by_run = True
+        if not domain:
+            con.close()
+            return {"error": "run에 도메인이 없습니다 — 소스나 프리셋에 도메인을 지정하세요"}
+        if not hint:   # run의 도메인 버전에 지침이 없으면 registry(현재 기본) 폴백
+            cur.execute("SELECT extract_hint FROM domain_registry WHERE name = :1", [domain])
+            h = cur.fetchone()
+            hint = (h[0] or "") if h else ""
     else:
+        # 대화 전용(scope=chat) 도메인은 제외 — main()과 동일 기준
+        cur.execute("""SELECT s.source_name, s.domain, NVL(d.extract_hint, ' ')
+                       FROM source_registry s
+                       JOIN domain_registry d ON d.name = s.domain
+                       WHERE s.source_name = :1 AND s.enabled = 'Y' AND s.domain IS NOT NULL
+                         AND NVL(d.scope, 'both') != 'chat'""", [source_name])
+        row = cur.fetchone()
+        if not row:
+            con.close()
+            return {"error": "도메인이 지정된 활성 소스가 아닙니다 (검색 전용은 구조화 대상 아님)"}
+        domain, hint, count, by_run = row[1], row[2], True, False
         rid = runs.current_run(cur, source_name)
     con.commit()
     stopped = False
@@ -261,7 +276,7 @@ def run_for_source(source_name: str, limit: int = 0, drain: bool = False,
         if should_stop and should_stop():  # 예약/수동 중지 — 배치 경계에서 협조적 취소
             stopped = True
             break
-        n = _structure_one(cur, con, row[0], row[1], hint, s.limit, s, stats, rid,
+        n = _structure_one(cur, con, source_name, domain, hint, s.limit, s, stats, rid,
                            count=count, by_run=by_run, should_stop=should_stop)
         total += n
         if not drain or n == 0:  # drain: 미처리가 바닥날 때까지 반복

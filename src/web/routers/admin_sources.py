@@ -170,6 +170,18 @@ def admin_doc_status():
     return {"sources": rows}
 
 
+def _check_doc_domain(cur, name: str):
+    """도메인이 닫힌 목록에 실존 + 문서 용도(both/doc)인지 — 소스 등록·프리셋 공용."""
+    ensure_domain_registry(cur)
+    cur.execute("SELECT NVL(scope, 'both') FROM domain_registry WHERE name = :1", [name])
+    r = cur.fetchone()
+    if not r:
+        raise HTTPException(400, f"등록되지 않은 도메인: {name} (⚙ 관리에서 먼저 추가)")
+    if r[0] == "chat":
+        raise HTTPException(400, f"도메인 '{name}'은 대화 전용입니다 — "
+                                 "문서 구조화에 쓰려면 용도를 '대화+문서'나 '문서 전용'으로")
+
+
 @router.post("/admin/sources")
 def admin_source_add(inp: SourceIn):
     """관리자: 원천 테이블 등록/수정 — 테이블·컬럼 실존을 검증하고 저장.
@@ -183,22 +195,49 @@ def admin_source_add(inp: SourceIn):
                                        inp.ts_column, inp.field_map)
         if err:
             raise HTTPException(400, err)
-        if inp.domain:  # 지정 시 닫힌 도메인 목록에 실존 + 문서 용도(both/doc)여야 함
-            ensure_domain_registry(cur)
-            cur.execute("SELECT NVL(scope, 'both') FROM domain_registry WHERE name = :1",
-                        [inp.domain])
-            r = cur.fetchone()
-            if not r:
-                raise HTTPException(400, f"등록되지 않은 도메인: {inp.domain} (⚙ 관리에서 먼저 추가)")
-            if r[0] == "chat":
-                raise HTTPException(400, f"도메인 '{inp.domain}'은 대화 전용입니다 — "
-                                         "문서 구조화에 쓰려면 용도를 '대화+문서'나 '문서 전용'으로")
+        if inp.domain:
+            _check_doc_domain(cur, inp.domain)
         source_registry.upsert(cur, inp.source_name, inp.table_name,
                                inp.id_column, inp.ts_column,
                                inp.field_map, inp.content_kind, inp.enabled,
                                domain=inp.domain, url_enabled=inp.url_enabled)
+        _auto_mapping_version(cur, inp)   # 매핑(id·시간·필드)이 바뀌었으면 자동 버전
     return {"ok": True, "source_name": inp.source_name,
             "note": "다음 적재 배치부터 반영 (원천 테이블은 읽기 전용)"}
+
+
+def _auto_mapping_version(cur, inp):
+    """등록/수정 저장 시 매핑 자동 버전 — 등록 자체가 버저닝의 시작(v1).
+    최신 버전과 다르면 MAX+1 자동 생성(note='등록/수정 자동'), 같으면 no-op.
+    is_default는 건드리지 않는다 — 관리자가 pin한 기본을 자동이 덮지 않게."""
+    import json
+    _ensure_mapping_versions(cur)
+    cur.execute("SELECT COUNT(*) FROM mapping_versions WHERE source_name = :1",
+                [inp.source_name])
+    if not cur.fetchone()[0]:
+        _seed_mapping_v1(cur, inp.source_name)   # 첫 등록 = v1(기본)
+        return
+    # 신규 값을 upsert와 같은 규칙으로 정규화 후, 최신 버전과 비교
+    new_id = inp.id_column.upper()
+    new_ts = inp.ts_column.upper() if inp.ts_column else None
+    new_fm = {k: v.upper() for k, v in inp.field_map.items()}
+    cur.execute("""SELECT id_column, ts_column, field_map FROM mapping_versions
+                   WHERE source_name = :1
+                     AND version = (SELECT MAX(version) FROM mapping_versions
+                                    WHERE source_name = :1)""", [inp.source_name])
+    r = cur.fetchone()
+    try:   # field_map은 dict 동등 비교 — JSON 키 순서 무관
+        old_fm = json.loads(_lob_str(r[2]) or "{}")
+    except (json.JSONDecodeError, TypeError):
+        old_fm = {}
+    if (r[0] or None) == (new_id or None) and (r[1] or None) == new_ts and old_fm == new_fm:
+        return   # 변경 없음
+    cur.execute("""INSERT INTO mapping_versions (source_name, version, id_column, ts_column,
+                     field_map, note)
+                   SELECT :s, NVL(MAX(version), 0) + 1, :i, :t, :f, '등록/수정 자동'
+                   FROM mapping_versions WHERE source_name = :s""",
+                {"s": inp.source_name, "i": new_id, "t": new_ts,
+                 "f": json.dumps(new_fm, ensure_ascii=False)})
 
 
 @router.get("/admin/sources/tables")
@@ -488,7 +527,16 @@ class ClusterVersionIn(BaseModel):
     short_name_chars: int = 12
     char_ratio: float = 0.40
     select_max: int = 8
+    select_prompt: str = ""   # LLM 후보선택 프롬프트 override — 빈값=코드 기본
     note: str = ""
+
+    @field_validator("select_prompt")
+    @classmethod
+    def _sel_prompt(cls, v: str) -> str:
+        v = v.strip()
+        if v and ("{name}" not in v or "{cands}" not in v):
+            raise ValueError("후보선택 프롬프트에는 {name}과 {cands} 자리표시자가 있어야 합니다")
+        return v
 
 
 class ClusterLineIn(ClusterVersionIn):
@@ -517,7 +565,8 @@ def _entity_vals(inp) -> dict:
 def _cluster_vals(inp) -> dict:
     return {"sim_high": inp.sim_high, "sim_threshold": inp.sim_threshold,
             "short_name_chars": inp.short_name_chars, "char_ratio": inp.char_ratio,
-            "select_max": inp.select_max, "note": inp.note.strip() or None}
+            "select_max": inp.select_max, "select_prompt": inp.select_prompt or None,
+            "note": inp.note.strip() or None}
 
 
 # 엔티티 -----------------------------------------------------------------
@@ -638,6 +687,132 @@ def admin_cluster_version_default(name: str, v: int):
         except KeyError:
             raise HTTPException(404, f"없는 버전: {name} v{v}")
     return {"ok": True, "note": f"{name} v{v}이(가) 기본 — 새 조합 run이 이 기준으로 스냅샷"}
+
+
+# ── 조합 프리셋 (헬름차트식 — 차원별 버전 선택을 이름 있는 세트로 저장, 소스에 적용) ──
+def _ensure_combo_presets(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'COMBO_PRESETS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE combo_presets (
+            name           VARCHAR2(100) PRIMARY KEY,
+            domain         VARCHAR2(100),
+            domain_version NUMBER,
+            entity_line    VARCHAR2(100), entity_version  NUMBER,
+            cluster_line   VARCHAR2(100), cluster_version NUMBER,
+            chat_model     VARCHAR2(200), embed_model     VARCHAR2(200),
+            note           VARCHAR2(500),
+            created        TIMESTAMP DEFAULT SYSTIMESTAMP,
+            updated        TIMESTAMP DEFAULT SYSTIMESTAMP)""")
+
+
+class PresetIn(BaseModel):
+    name: str
+    domain: str = ""              # 소스 기본 도메인 오버라이드 (빈값=소스 도메인)
+    domain_version: int | None = None
+    entity_line: str = ""
+    entity_version: int | None = None
+    cluster_line: str = ""
+    cluster_version: int | None = None
+    chat_model: str = ""
+    embed_model: str = ""
+    note: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("프리셋 이름을 입력하세요")
+        return v.strip()
+
+
+class PresetApplyIn(BaseModel):
+    source_name: str
+    join_version: int | None = None   # 매핑 버전 (소스별 — 빈값=기본)
+    data_version: int | None = None   # 데이터 버전 (소스별 — 빈값=기본)
+
+
+@router.get("/admin/presets")
+def admin_presets():
+    """조합 프리셋 목록 — 최근 수정 순."""
+    with db_cursor() as cur:
+        _ensure_combo_presets(cur)
+        cur.execute("""SELECT name, domain, domain_version, entity_line, entity_version,
+                              cluster_line, cluster_version, chat_model, embed_model, note,
+                              TO_CHAR(updated, 'YYYY-MM-DD HH24:MI')
+                       FROM combo_presets ORDER BY updated DESC""")
+        rows = [{"name": r[0], "domain": r[1] or "", "domain_version": r[2],
+                 "entity_line": r[3] or "", "entity_version": r[4],
+                 "cluster_line": r[5] or "", "cluster_version": r[6],
+                 "chat_model": r[7] or "", "embed_model": r[8] or "",
+                 "note": r[9] or "", "updated": r[10]} for r in cur.fetchall()]
+    return {"presets": rows}
+
+
+@router.post("/admin/presets")
+def admin_preset_save(inp: PresetIn):
+    """조합 프리셋 저장 — 같은 이름은 수정(upsert)."""
+    with db_cursor() as cur:
+        _ensure_combo_presets(cur)
+        if inp.domain.strip():
+            _check_doc_domain(cur, inp.domain.strip())
+        b = {"n": inp.name, "d": inp.domain.strip() or None, "dv": inp.domain_version,
+             "el": inp.entity_line.strip() or None, "ev": inp.entity_version,
+             "cl": inp.cluster_line.strip() or None, "cv": inp.cluster_version,
+             "cm": inp.chat_model.strip() or None, "em": inp.embed_model.strip() or None,
+             "nt": inp.note.strip() or None}
+        cur.execute("""MERGE INTO combo_presets p USING dual ON (p.name = :n)
+                       WHEN MATCHED THEN UPDATE SET domain = :d, domain_version = :dv,
+                            entity_line = :el, entity_version = :ev,
+                            cluster_line = :cl, cluster_version = :cv,
+                            chat_model = :cm, embed_model = :em, note = :nt,
+                            updated = SYSTIMESTAMP
+                       WHEN NOT MATCHED THEN INSERT
+                            (name, domain, domain_version, entity_line, entity_version,
+                             cluster_line, cluster_version, chat_model, embed_model, note)
+                       VALUES (:n, :d, :dv, :el, :ev, :cl, :cv, :cm, :em, :nt)""", b)
+    return {"ok": True, "note": f"프리셋 '{inp.name}' 저장됨 — [▶ 적용]으로 소스에 run 생성"}
+
+
+@router.delete("/admin/presets/{name}")
+def admin_preset_delete(name: str):
+    with db_cursor() as cur:
+        _ensure_combo_presets(cur)
+        cur.execute("DELETE FROM combo_presets WHERE name = :1", [name])
+        if not cur.rowcount:
+            raise HTTPException(404, f"프리셋이 없습니다: {name}")
+    return {"ok": True, "note": "삭제됨 — 이미 만든 run은 스냅샷이라 영향 없음"}
+
+
+@router.post("/admin/presets/{name}/apply")
+def admin_preset_apply(name: str, inp: PresetApplyIn):
+    """프리셋을 소스에 적용 — 프리셋의 차원 선택 + 소스별 매핑·데이터 버전으로 run 생성(비활성)."""
+    from graph.doc_pipeline.runs import create_run
+    with db_cursor() as cur:
+        _ensure_combo_presets(cur)
+        cur.execute("""SELECT domain, domain_version, entity_line, entity_version,
+                              cluster_line, cluster_version, chat_model, embed_model
+                       FROM combo_presets WHERE name = :1""", [name])
+        p = cur.fetchone()
+        if not p:
+            raise HTTPException(404, f"프리셋이 없습니다: {name}")
+        cur.execute("SELECT COUNT(*) FROM source_registry WHERE source_name = :1",
+                    [inp.source_name])
+        if not cur.fetchone()[0]:
+            raise HTTPException(404, f"소스가 없습니다: {inp.source_name}")
+        _ensure_entity_versions(cur)     # create_run이 참조하는 버전 테이블 보장
+        _ensure_cluster_versions(cur)
+        _ensure_mapping_versions(cur)
+        _seed_mapping_v1(cur, inp.source_name)
+        _ensure_data_versions(cur)
+        rid = create_run(cur, inp.source_name,
+                         domain=p[0] or "", domain_version=p[1],
+                         entity_line=p[2] or "", entity_version=p[3],
+                         cluster_line=p[4] or "", cluster_version=p[5],
+                         chat_model=p[6] or "", embed_model=p[7] or "",
+                         join_version=inp.join_version, data_version=inp.data_version)
+    return {"ok": True, "run_id": rid,
+            "note": f"'{name}' 조합으로 run 생성됨(비활성) — 원천 테이블·구조화 탭에서 "
+                    "[선택 run으로 구조화] 후 결과 확인·활성 전환"}
 
 
 # ── 매핑 버전 (원천 테이블 등록의 id·시간·필드 매핑 스냅샷 — 소스별) ──────────────

@@ -175,12 +175,14 @@ def _default_data_ver(cur, source_name: str):
         return None
 
 
-def create_run(cur, source_name: str, domain_version=None, entity_line="", entity_version=None,
+def create_run(cur, source_name: str, domain="", domain_version=None,
+               entity_line="", entity_version=None,
                cluster_line="", cluster_version=None, join_version=None, data_version=None,
                chat_model="", embed_model="", body_chars=None,
                pack_tokens=None, no_think=None, dedup=None) -> str:
     """새 조합 run 생성 (비활성) — 도메인 버전 + 엔티티·클러스터 (라인, 버전) + 매핑·데이터
     버전을 참조해 그 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/활성값.
+    domain: 소스 등록 도메인 오버라이드 (프리셋 적용 — 빈값=소스 도메인).
     구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
     ensure_runs(cur)
     versioning.ensure(cur, versioning.ENTITY_SPEC)    # name 컬럼·기본 라인 보장
@@ -208,13 +210,14 @@ def create_run(cur, source_name: str, domain_version=None, entity_line="", entit
     if not (cl_name and cv):
         cl_name, cv = versioning.active(cur, "cluster_versions")
     if cl_name and cv is not None:
-        cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio, select_max
+        cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio, select_max,
+                              select_prompt
                        FROM cluster_versions WHERE name = :1 AND version = :2""", [cl_name, cv])
         r = cur.fetchone()
         if r:
             st["dedup"] = {"sim_high": float(r[0]), "sim_threshold": float(r[1]),
                            "short_name_chars": int(r[2]), "char_ratio": float(r[3]),
-                           "select_max": int(r[4])}
+                           "select_max": int(r[4]), "select_prompt": _lob(r[5]) or ""}
     elif dedup:   # 라인 없을 때만 raw override (하위호환)
         st["dedup"] = {**st.get("dedup", {}),
                        **{k: v for k, v in dedup.items() if v is not None}}
@@ -231,12 +234,21 @@ def create_run(cur, source_name: str, domain_version=None, entity_line="", entit
         except Exception:
             pass
     dv = data_version or _default_data_ver(cur, source_name)
+    # 도메인 오버라이드 — 지정 시 그 도메인의 기본 버전을 조회 (소스 도메인 버전과 무관)
+    dom = (domain or "").strip() or c["domain"]
+    if (domain or "").strip() and not domain_version:
+        cur.execute("SELECT version FROM domain_versions WHERE name = :1 AND is_default = 'Y'",
+                    [dom])
+        r = cur.fetchone()
+        dmv = int(r[0]) if r else 1
+    else:
+        dmv = domain_version or c["domain_version"]
     rid = uuid.uuid4().hex
     cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
                      entity_line, entity_version, cluster_line, cluster_version,
                      join_version, data_version, chat_model, embed_model, settings, active)
                    VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, 'N')""",
-                [rid, source_name, c["domain"], domain_version or c["domain_version"],
+                [rid, source_name, dom, dmv,
                  en_name, ev, cl_name, cv, jv, dv, (chat_model or c["chat_model"]).strip(),
                  (embed_model or c["embed_model"]).strip(),
                  json.dumps(st, ensure_ascii=False)])

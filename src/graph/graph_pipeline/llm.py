@@ -102,22 +102,32 @@ def llm_same(kind: str, a: str, b: str) -> bool:
         return False
 
 
-def llm_select(kind: str, name: str, cands: list, max_n: int = 0) -> str | None:
+def llm_select(kind: str, name: str, cands: list, max_n: int = 0,
+               prompt: str = "") -> str | None:
     """후보 형제 여러 개 중 같은 의도 하나를 LLM이 선택 (없으면 없음).
     쌍별 이지선다 반복보다 정확하고 호출도 1회 (ComEM, COLING 2025).
     cands: [(sim, node_id, name)] 유사도 내림차순. 반환: 병합 대상 node_id 또는 None.
-    max_n: 후보 상한(0=config 기본) — run별 클러스터 설정."""
+    max_n: 후보 상한(0=config 기본) — run별 클러스터 설정.
+    prompt: 클러스터 버전의 후보선택 프롬프트 override ({kind}/{name}/{cands} 자리표시자,
+            빈값=코드 기본)."""
     cands = cands[:(max_n or config.DEDUP_SELECT_MAX)]
     kw = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
            "max_tokens": 80}
           if config.LLM_AUX_NO_THINK else {})
     lines = "\n".join(f"{i + 1}. {n}" for i, (_s, _id, n) in enumerate(cands))
+    default_msg = (
+        f'기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. '
+        f'주제·도구가 비슷해도 의도가 다르면 같은 것이 아니다. JSON만 출력: {{"pick": 번호}}\n'
+        f'기준: {name}\n후보:\n{lines}')
+    msg = default_msg
+    if (prompt or "").strip():
+        try:   # 사용자 템플릿 오타(KeyError 등)가 병합을 죽이지 않게 기본으로 폴백
+            msg = prompt.format(kind=kind, name=name, cands=lines)
+        except (KeyError, IndexError, ValueError):
+            msg = default_msg
     resp = llm.chat.completions.create(
         model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
-        messages=[{"role": "user", "content":
-                   f'기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. '
-                   f'주제·도구가 비슷해도 의도가 다르면 같은 것이 아니다. JSON만 출력: {{"pick": 번호}}\n'
-                   f'기준: {name}\n후보:\n{lines}'}], **kw)
+        messages=[{"role": "user", "content": msg}], **kw)
     m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
     try:
         pick = int(json.loads(m.group()).get("pick", 0)) if m else 0

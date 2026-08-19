@@ -180,6 +180,7 @@
   <button data-tab="cluster">클러스터 버전</button>
   <button data-tab="mapping">매핑 버전</button>
   <button data-tab="data">데이터 버전</button>
+  <button data-tab="presets">조합 프리셋</button>
   <button data-tab="sources">원천 테이블·구조화</button>
   <button data-tab="events">활동 로그</button>
   <button data-tab="users">계정 관리</button>
@@ -204,7 +205,9 @@
   </div>
 </section>
 <section class="card" id="sec-cluster">
-  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <p class="hint" style="margin:4px 0 8px">클러스터 = <b>룰 임계값</b>(자동병합·후보하한·이름 가드) + <b>LLM 후보선택 프롬프트</b>(애매 구간에서 "같은 의도의 후보 번호를 골라라"고 묻는 문구).
+     도메인 프롬프트와는 별개이며 도메인 지침은 병합에 쓰이지 않습니다. 프롬프트를 비우면 코드 기본 문구를 씁니다.</p>
   <div id="clsLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="schedrow" style="margin:6px 0">
@@ -218,11 +221,38 @@
       <button type="button" class="ghost" id="clsNew">＋ 새 라인 만들기</button>
       <span class="hint" id="vcMsg" style="margin:0"></span>
     </div>
+    <label class="k2">LLM 후보선택 프롬프트 <small>{kind} {name} {cands} — <b>{name}·{cands} 필수</b>, 빈값=코드 기본</small></label>
+    <textarea id="vcSelPrompt" class="psta" spellcheck="false" placeholder='예: 기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. JSON만 출력: {"pick": 번호}
+기준: {name}
+후보:
+{cands}'></textarea>
   </div>
 </section>
 <section class="card" id="sec-mapping">
-  <h3>매핑 버전 <small>원천 테이블 등록의 id·시간·필드 매핑 스냅샷 (소스별) — 매핑 수정은 [원천 테이블·구조화] 탭, 여기선 버전 스냅샷·기본 지정</small></h3>
+  <h3>매핑 버전 <small>원천 테이블 등록의 id·시간·필드 매핑 스냅샷 (소스별) — 등록/수정 저장 시 자동으로 새 버전, 수동 📸도 가능</small></h3>
   <div id="verMapping"><span class="hint">불러오는 중…</span></div>
+</section>
+<section class="card" id="sec-presets">
+  <h3>조합 프리셋 <small>차원별 버전 선택을 이름 있는 세트로 저장 — 헬름차트처럼 조합해 소스에 적용(run 생성)</small></h3>
+  <p class="hint" style="margin:4px 0 8px">프리셋 = 도메인(+버전) · 엔티티 라인·버전 · 클러스터 라인·버전 · 모델 · 임베딩.
+     소스별 항목(매핑·데이터 버전)은 [▶ 적용] 때 고릅니다. 도메인을 지정하면 소스 등록 도메인을 <b>오버라이드</b>합니다.</p>
+  <div id="presetList"><span class="hint">불러오는 중…</span></div>
+  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+    <div class="schedrow" style="margin:6px 0">
+      <input id="ppName" placeholder="프리셋 이름" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <select id="ppDomain" title="소스 등록 도메인 오버라이드 — 빈값=소스 도메인 사용"><option value="">도메인(소스 기본)</option></select>
+      <input id="ppDomainVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:130px" title="빈값=그 도메인의 기본 버전">
+      <select id="ppEntity" title="엔티티 라인·버전"><option value="">엔티티(활성)</option></select>
+      <select id="ppCluster" title="클러스터 라인·버전"><option value="">클러스터(활성)</option></select>
+      <select id="ppModel" title="판정 LLM"><option value="">LLM(기본)</option></select>
+      <select id="ppEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option></select>
+      <input id="ppNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" id="ppSave">💾 프리셋 저장</button>
+      <span class="hint" id="ppMsg" style="margin:0"></span>
+    </div>
+  </div>
+  <p class="hint">행 클릭=폼에 불러오기(같은 이름으로 저장=수정) · [▶ 적용]=소스와 매핑·데이터 버전을 골라 run 생성(비활성) —
+     생성된 run은 [원천 테이블·구조화] 탭에서 구조화·활성 전환합니다.</p>
 </section>
 <section class="card" id="sec-users">
   <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
@@ -235,7 +265,7 @@
 
 <section class="card" id="sec-domains">
   <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
-  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th></tr></thead>
+  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th><th></th></tr></thead>
     <tbody></tbody></table>
   <form id="dform">
     <input id="dname" placeholder="도메인 이름" required>
@@ -246,7 +276,8 @@
     </select>
     <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
     <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
-    <input id="dhint" placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨">
+    <textarea id="dhint" rows="3" style="flex-basis:100%;resize:vertical"
+      placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨"></textarea>
     <button id="dsave">추가/수정</button>
     <button type="button" class="warn" id="dreset"
             title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
@@ -585,6 +616,15 @@ async function loadDomains(selName) {
       td.textContent = v ?? "";
       tr.appendChild(td);
     });
+    const cv = document.createElement("td");   // 👁 상세 — 정의 전문(지침 잘림 해소) 뷰어
+    const vb = document.createElement("button"); vb.type = "button"; vb.className = "ghost";
+    vb.textContent = "👁";
+    vb.onclick = ev => { ev.stopPropagation();   // 행 클릭(폼 로드·버전 펼침)과 분리
+      openVerModal(`🏷 도메인 · ${d.name} (현재 기본)`, [
+        {label: "용도 · 우선순위", text: `${SCOPE_LABEL[d.scope] || d.scope} · 우선순위 ${d.priority}`},
+        {label: "도구 (쉼표구분)", text: d.tools},
+        {label: "추출 지침 (시스템 프롬프트에 주입)", text: d.extract_hint}]); };
+    cv.appendChild(vb); tr.appendChild(cv);
     tr.children[2].className = "tools";
     if (d.name === selName) tr.classList.add("sel");
     tr.onclick = () => {
@@ -608,7 +648,7 @@ function toggleDomainVersions(dname, tr) {
   const row = document.createElement("tr");
   row.className = "verrow";
   const td = document.createElement("td");
-  td.colSpan = 5;
+  td.colSpan = 6;
   row.appendChild(td);
   tr.after(row);
   renderDomainVersions(dname, 1, td);
@@ -622,7 +662,7 @@ async function renderDomainVersions(dname, page, td) {
   const t = document.createElement("table");
   t.className = "vertable";
   t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성일</th><th>용도</th>" +
-                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th></tr></thead>";
+                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th><th></th></tr></thead>";
   const tb = document.createElement("tbody");
   const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
   j.versions.forEach(v => {
@@ -640,6 +680,14 @@ async function renderDomainVersions(dname, page, td) {
      v.priority, v.extract_hint, v.is_default ? "★ 기본" : ""].forEach(x => {
       const c = document.createElement("td"); c.textContent = x ?? ""; vr.appendChild(c);
     });
+    const cvw = document.createElement("td");   // 👁 상세 — 이 버전의 정의 전문
+    const vwb = document.createElement("button"); vwb.type = "button"; vwb.className = "ghost";
+    vwb.textContent = "👁";
+    vwb.onclick = () => openVerModal(`🏷 도메인 · ${dname} v${v.version}`, [
+      {label: "용도 · 우선순위", text: `${SCOPE_LABEL[v.scope] || v.scope} · 우선순위 ${v.priority}`},
+      {label: "도구 (쉼표구분)", text: v.tools},
+      {label: "추출 지침 (시스템 프롬프트에 주입)", text: v.extract_hint}]);
+    cvw.appendChild(vwb); vr.appendChild(cvw);
     if (v.is_default) vr.classList.add("sel");
     tb.appendChild(vr);
   });
@@ -1172,7 +1220,7 @@ async function renderRunForm(src) {
       <input id="rfPack" type="number" min="0" placeholder="묶음토큰" style="width:90px">
       <button type="button" id="rfGo">생성</button>
     </div>
-    <span class="hint" style="margin:0">엔티티·클러스터는 [버전 관리] 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 만든 조합은 아래 목록에서 어떤 버전으로 만들었는지 확인됩니다.</span>`;
+    <span class="hint" style="margin:0">엔티티·클러스터는 각 버전 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 자주 쓰는 조합은 [조합 프리셋] 탭에 이름 붙여 저장해 두고 적용하세요.</span>`;
   $("rfGo").onclick = async () => {
     const body = {};
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
@@ -1630,6 +1678,21 @@ $("evmClose").onclick = () => $("evModal").close();
 $("evModal").addEventListener("click", ev => {   // 배경 클릭 = 닫기
   if (ev.target === $("evModal")) $("evModal").close();
 });
+// 버전 상세 뷰어 — 도메인·엔티티·클러스터 공용 (evModal 재사용).
+// sections: [{label, text}] — text는 <pre>에 textContent(전문 그대로, XSS 안전).
+function openVerModal(title, sections) {
+  $("evmTitle").textContent = title;
+  const box = $("evmBody"); box.innerHTML = "";
+  (sections || []).forEach(s => {
+    const sec = document.createElement("div"); sec.className = "evsec";
+    const h = document.createElement("div"); h.className = "evseclabel req";
+    h.textContent = s.label;
+    const pre = document.createElement("pre");
+    pre.textContent = (s.text || "").trim() || "(빈 값 — 코드 기본)";
+    sec.append(h, pre); box.appendChild(sec);
+  });
+  $("evModal").showModal();
+}
 $("evsearch").onclick = () => { evPage = 1; loadEvents(); };
 $("evq").addEventListener("keydown", e => { if (e.key === "Enter") { evPage = 1; loadEvents(); } });
 $("evkind").onchange = $("evlevel").onchange = () => { evPage = 1; loadEvents(); };
@@ -1721,7 +1784,7 @@ async function vmVersions(cfg, name, page, td) {
   const j = await fetch(`${cfg.versions(name)}?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
   td.innerHTML = "";
   const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th></tr></thead>";
+  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th><th></th></tr></thead>";
   const tb = document.createElement("tbody");
   (j.versions || []).forEach(v => {
     const vr = document.createElement("tr");
@@ -1731,6 +1794,10 @@ async function vmVersions(cfg, name, page, td) {
     const c0 = document.createElement("td"); c0.appendChild(sel); vr.appendChild(c0);
     [`v${v.version}`, v.created || "", cfg.summary(v), v.note || "", v.is_default ? "★ 기본" : ""]
       .forEach(x => { const c = document.createElement("td"); c.textContent = x; vr.appendChild(c); });
+    const cv = document.createElement("td");   // 👁 상세 — 내부 구조(프롬프트 전문) 뷰어
+    cv.appendChild(_verBtn("👁 상세", () =>
+      openVerModal(`${cfg.title} · ${name} v${v.version}`, cfg.viewSections(v))));
+    vr.appendChild(cv);
     if (v.is_default) vr.classList.add("sel");
     tb.appendChild(vr);
   });
@@ -1765,13 +1832,17 @@ async function vmNewLine(cfg) {
   if (r.ok) vmLoadLines(cfg);
 }
 const ENTITY_VM = {
-  lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
+  title: "🧩 엔티티", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
   linesEndpoint: "/admin/entity-lines",
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
   readForm: () => ({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
   setForm: v => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
   summary: v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
+  viewSections: v => [
+    {label: "문서 판정 프롬프트 (doc_prompt)", text: v.doc_prompt},
+    {label: "묶음 판정 프롬프트 (pack_prompt)", text: v.pack_prompt},
+    {label: "메모", text: v.note}],
   validate: () => {
     if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return false; }
     if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return false; }
@@ -1779,17 +1850,28 @@ const ENTITY_VM = {
   },
 };
 const CLUSTER_VM = {
-  lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
+  title: "🔗 클러스터", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
   linesEndpoint: "/admin/cluster-lines",
   versions: n => `/admin/cluster-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/cluster-lines/${encodeURIComponent(n)}/versions/${v}/default`,
   readForm: () => ({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
     short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
-    select_max: parseInt($("vcSel").value), note: $("vcNote").value}),
+    select_max: parseInt($("vcSel").value), select_prompt: $("vcSelPrompt").value, note: $("vcNote").value}),
   setForm: v => { $("vcHigh").value = v.sim_high; $("vcThr").value = v.sim_threshold; $("vcShort").value = v.short_name_chars;
-    $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max; $("vcNote").value = v.note || ""; },
-  summary: v => `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}`,
-  validate: () => true,
+    $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max;
+    $("vcSelPrompt").value = v.select_prompt || ""; $("vcNote").value = v.note || ""; },
+  summary: v => `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}` +
+    (v.select_prompt ? "·프롬프트:커스텀" : ""),
+  viewSections: v => [
+    {label: "병합 규칙", text: `자동병합 임계 ≥ ${v.sim_high} (문자 가드: 이름 ${v.short_name_chars}자 이상 + 문자 유사도 ≥ ${v.char_ratio})\n후보 하한 ≥ ${v.sim_threshold} · LLM 후보 수 최대 ${v.select_max}`},
+    {label: "LLM 후보선택 프롬프트 (select_prompt)", text: v.select_prompt},
+    {label: "메모", text: v.note}],
+  validate: () => {
+    const sp = $("vcSelPrompt").value.trim();
+    if (sp && (!sp.includes("{name}") || !sp.includes("{cands}"))) {
+      $("vcMsg").textContent = "후보선택 프롬프트에 {name}·{cands} 필요"; return false; }
+    return true;
+  },
 };
 async function loadMappingVer() {
   const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
@@ -1835,12 +1917,137 @@ async function loadMappingVer() {
   }
 }
 
+// ── 조합 프리셋 — 차원별 버전 선택을 이름 있는 세트로 (적용=run 생성) ──────────
+async function loadPresets() {
+  // 폼 셀렉트 채우기 (도메인·엔티티·클러스터·모델)
+  const [doms, entV, clsV, models, allm] = await Promise.all([
+    fetch("/admin/domains").then(r => r.json()).catch(() => ({domains: []})),
+    fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []})),
+    fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []})),
+    fetch("/models").then(r => r.json()).catch(() => ({llm: []})),
+    fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))]);
+  const lv = v => `${esc(v.name)}\t${v.version}`;   // 라인·버전을 value에 인코딩 (run 폼과 동일)
+  const lvLabel = v => `${esc(v.name)}·v${v.version}${v.is_default ? " ★" : ""}`;
+  $("ppDomain").innerHTML = `<option value="">도메인(소스 기본)</option>` +
+    (doms.domains || []).filter(d => d.scope !== "chat")
+      .map(d => `<option>${esc(d.name)}</option>`).join("");
+  $("ppEntity").innerHTML = `<option value="">엔티티(활성)</option>` +
+    (entV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
+  $("ppCluster").innerHTML = `<option value="">클러스터(활성)</option>` +
+    (clsV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
+  $("ppModel").innerHTML = `<option value="">LLM(기본)</option>` +
+    (models.llm || []).map(m => `<option>${esc(m.name)}</option>`).join("");
+  $("ppEmbed").innerHTML = `<option value="">임베딩(기본)</option>` +
+    (allm.models || []).filter(m => m.kind === "embedding")
+      .map(m => `<option>${esc(m.name)}</option>`).join("");
+  // 목록
+  const box = $("presetList"); box.innerHTML = "⏳";
+  const j = await fetch("/admin/presets").then(r => r.json()).catch(() => ({presets: []}));
+  box.innerHTML = "";
+  if (!(j.presets || []).length) {
+    box.innerHTML = `<span class="hint">아직 프리셋이 없습니다 — 아래 폼에서 만들고 저장하세요</span>`; return;
+  }
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th>이름</th><th>도메인</th><th>엔티티</th><th>클러스터</th>" +
+                "<th>LLM</th><th>임베딩</th><th>메모</th><th>수정</th><th></th></tr></thead>";
+  const tb = document.createElement("tbody");
+  j.presets.forEach(p => {
+    const tr = document.createElement("tr"); tr.style.cursor = "pointer";
+    const lvTxt = (ln, v) => v != null ? `${ln || "?"}·v${v}` : "(활성)";
+    [p.name, p.domain ? `${p.domain}${p.domain_version ? " v" + p.domain_version : ""}` : "(소스 기본)",
+     lvTxt(p.entity_line, p.entity_version), lvTxt(p.cluster_line, p.cluster_version),
+     p.chat_model || "(기본)", p.embed_model || "(기본)", p.note, p.updated]
+      .forEach(x => { const c = document.createElement("td"); c.textContent = x ?? ""; tr.appendChild(c); });
+    tr.onclick = () => {   // 행 클릭 = 폼 로드 (같은 이름 저장=수정)
+      $("ppName").value = p.name; $("ppDomain").value = p.domain || "";
+      $("ppDomainVer").value = p.domain_version ?? "";
+      $("ppEntity").value = p.entity_version != null ? `${p.entity_line}\t${p.entity_version}` : "";
+      $("ppCluster").value = p.cluster_version != null ? `${p.cluster_line}\t${p.cluster_version}` : "";
+      $("ppModel").value = p.chat_model || ""; $("ppEmbed").value = p.embed_model || "";
+      $("ppNote").value = p.note || "";
+      $("ppMsg").textContent = `'${p.name}' 값을 폼에 불러왔습니다 — 수정 후 [저장]`;
+    };
+    const act = document.createElement("td");
+    act.appendChild(_verBtn("▶ 적용", ev => { ev.stopPropagation(); presetApplyPanel(p, tr); }));
+    act.appendChild(_verBtn("🗑", async ev => { ev.stopPropagation();
+      const r = await fetch(`/admin/presets/${encodeURIComponent(p.name)}`, {method: "DELETE"});
+      const jj = await r.json().catch(() => ({}));
+      $("ppMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `삭제 실패 ${r.status}`);
+      if (r.ok) loadPresets();
+    }));
+    tr.appendChild(act); tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+}
+async function presetApplyPanel(p, tr) {
+  // 행 아래 인라인 패널 — 소스 + 소스별 매핑·데이터 버전 선택 후 run 생성
+  const nx = tr.nextElementSibling;
+  const open = nx && nx.classList.contains("verrow");
+  $("presetList").querySelectorAll(".verrow").forEach(x => x.remove());
+  if (open) return;
+  const row = document.createElement("tr"); row.className = "verrow";
+  const td = document.createElement("td"); td.colSpan = 9; row.appendChild(td); tr.after(row);
+  td.innerHTML = "⏳";
+  const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
+  td.innerHTML = "";
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
+  const srcSel = document.createElement("select");
+  srcSel.innerHTML = `<option value="">소스 선택…</option>` +
+    srcs.map(s => `<option>${esc(s.source_name)}</option>`).join("");
+  const mapSel = document.createElement("select");
+  const dataSel = document.createElement("select");
+  mapSel.innerHTML = `<option value="">매핑(기본)</option>`;
+  dataSel.innerHTML = `<option value="">데이터(기본)</option>`;
+  srcSel.onchange = async () => {   // 소스별 매핑·데이터 버전 로드
+    const s = srcSel.value;
+    if (!s) return;
+    const [mv, dv] = await Promise.all([
+      fetch(`/admin/sources/${encodeURIComponent(s)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []})),
+      fetch(`/admin/sources/${encodeURIComponent(s)}/data-versions`).then(r => r.json()).catch(() => ({versions: []}))]);
+    mapSel.innerHTML = `<option value="">매핑(기본)</option>` + (mv.versions || [])
+      .map(v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}</option>`).join("");
+    dataSel.innerHTML = `<option value="">데이터(기본)</option>` + (dv.versions || [])
+      .map(v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""} (${v.watermark || "-"}·${v.doc_count}건)</option>`).join("");
+  };
+  const msg = document.createElement("span"); msg.className = "hint"; msg.style.margin = "0";
+  bar.append(srcSel, mapSel, dataSel,
+    _verBtn("▶ 이 조합으로 run 생성", async () => {
+      if (!srcSel.value) { msg.textContent = "소스를 먼저 선택하세요"; return; }
+      const body = {source_name: srcSel.value};
+      if (mapSel.value) body.join_version = parseInt(mapSel.value);
+      if (dataSel.value) body.data_version = parseInt(dataSel.value);
+      const r = await fetch(`/admin/presets/${encodeURIComponent(p.name)}/apply`, {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+      const jj = await r.json().catch(() => ({}));
+      msg.textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `실패 ${r.status}`);
+    }), msg);
+  td.appendChild(bar);
+}
+$("ppSave").onclick = async () => {
+  const name = $("ppName").value.trim();
+  if (!name) { $("ppMsg").textContent = "프리셋 이름을 입력하세요"; return; }
+  const body = {name, domain: $("ppDomain").value, chat_model: $("ppModel").value,
+                embed_model: $("ppEmbed").value, note: $("ppNote").value};
+  if ($("ppDomainVer").value !== "") body.domain_version = parseInt($("ppDomainVer").value);
+  const lv = (id, lk, vk) => { const s = $(id).value; if (s) { const [n, v] = s.split("\t");
+    body[lk] = n; body[vk] = parseInt(v); } };
+  lv("ppEntity", "entity_line", "entity_version");
+  lv("ppCluster", "cluster_line", "cluster_version");
+  const r = await fetch("/admin/presets", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const jj = await r.json().catch(() => ({}));
+  $("ppMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `저장 실패 ${r.status}`);
+  if (r.ok) loadPresets();
+};
+
 const TABS = {
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
   cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
   mapping: {secs: ["sec-mapping"], load: () => loadMappingVer()},
+  presets: {secs: ["sec-presets"], load: () => loadPresets()},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources(); loadTables();

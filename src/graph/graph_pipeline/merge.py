@@ -27,6 +27,7 @@ def default_merge_cfg() -> dict:
             "short_name_chars": config.DEDUP_SHORT_NAME_CHARS,
             "char_ratio": config.DEDUP_CHAR_RATIO,
             "select_max": config.DEDUP_SELECT_MAX,
+            "select_prompt": "",   # ""=코드 기본 후보선택 프롬프트 (llm_select)
             "embed_model": ""}   # ""=기본 임베딩 (model_registry)
 
 
@@ -81,7 +82,7 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
                 node_id = top_id  # 고신뢰 + 문자 가드 통과 — LLM 없이 즉시 병합
             else:
                 node_id = llm_select(LAYER_KIND.get(layer, "개념"), name, cands,
-                                     mc["select_max"])
+                                     mc["select_max"], prompt=mc.get("select_prompt", ""))
     else:
         cur.execute("SELECT id FROM nodes WHERE layer = :1 AND name = :2",
                     [layer, name])

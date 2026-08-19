@@ -23,6 +23,7 @@ class Spec:
     ddl: str                               # 신규 생성 DDL (name/version PK 포함)
     seed: Optional[Callable] = None        # seed(cur, spec) — 비었을 때 v1 기본 라인
     migrate: Optional[Callable] = None     # migrate(cur, spec) — 기존 평면 테이블에 name 추가
+    add_cols: Optional[dict] = None        # 나중에 늘어난 컨텐츠 컬럼 {이름: Oracle 타입} — 멱등 ALTER
 
 
 def _exists(cur, table: str) -> bool:
@@ -50,8 +51,15 @@ def migrate_add_name(cur, spec: Spec):
 def ensure(cur, spec: Spec):
     if not _exists(cur, spec.table):
         cur.execute(spec.ddl)
-    elif spec.migrate:
-        spec.migrate(cur, spec)
+    else:
+        if spec.migrate:
+            spec.migrate(cur, spec)
+        for col, typ in (spec.add_cols or {}).items():   # 나중에 늘어난 컬럼 (멱등)
+            cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                           WHERE table_name = :1 AND column_name = :2""",
+                        [spec.table.upper(), col.upper()])
+            if not cur.fetchone()[0]:
+                cur.execute(f"ALTER TABLE {spec.table} ADD ({col} {typ})")
     if spec.seed:
         spec.seed(cur, spec)
 
@@ -184,11 +192,13 @@ ENTITY_SPEC = Spec(
 
 CLUSTER_SPEC = Spec(
     table="cluster_versions",
-    content_cols=["sim_high", "sim_threshold", "short_name_chars", "char_ratio", "select_max"],
+    content_cols=["sim_high", "sim_threshold", "short_name_chars", "char_ratio", "select_max",
+                  "select_prompt"],   # LLM 후보선택 프롬프트 override (NULL=코드 기본)
     ddl="""CREATE TABLE cluster_versions (
         name VARCHAR2(100) NOT NULL, version NUMBER NOT NULL,
         sim_high NUMBER, sim_threshold NUMBER, short_name_chars NUMBER,
-        char_ratio NUMBER, select_max NUMBER, note VARCHAR2(500),
+        char_ratio NUMBER, select_max NUMBER, select_prompt CLOB, note VARCHAR2(500),
         is_default CHAR(1) DEFAULT 'N', created TIMESTAMP DEFAULT SYSTIMESTAMP,
         CONSTRAINT cluster_versions_pk PRIMARY KEY (name, version))""",
-    seed=_seed_cluster, migrate=migrate_add_name)
+    seed=_seed_cluster, migrate=migrate_add_name,
+    add_cols={"select_prompt": "CLOB"})
