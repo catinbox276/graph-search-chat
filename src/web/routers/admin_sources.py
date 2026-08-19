@@ -580,10 +580,12 @@ def admin_entity_versions():
 
 @router.get("/admin/entity-lines")
 def admin_entity_lines():
-    """엔티티 라인 목록 — 이름별 버전 수·활성 버전."""
+    """엔티티 라인 목록 + 코드 기본 프롬프트 — 빈 버전의 실체를 UI가 보여줄 수 있게."""
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
-        return {"lines": versioning.list_lines(cur, versioning.ENTITY_SPEC)}
+        return {"lines": versioning.list_lines(cur, versioning.ENTITY_SPEC),
+                "defaults": {"doc_prompt": _judge.DOC_PROMPT,
+                             "pack_prompt": _judge.PACK_PROMPT}}
 
 
 @router.get("/admin/entity-lines/{name}/versions")

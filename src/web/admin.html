@@ -192,6 +192,9 @@
 </section>
 <section class="card" id="sec-entity">
   <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <p class="hint" style="margin:4px 0 8px">엔티티의 <b>꼴(구조)은 코드에 고정</b>돼 있습니다 — 4계층: 도메인 › <b>목표(goal)</b> › <b>접근법(approach)</b> › 행동(도구).
+     이 탭은 그 꼴을 바꾸는 게 아니라, 문서에서 <b>목표·접근법을 어떻게 뽑아낼지</b>(판정 기준 + 출력 형식)의 프롬프트를 버전 관리합니다.
+     프롬프트가 빈 버전은 코드 기본을 쓰며 — 👁 상세에서 그 기본 전문(fits 판정·goal·approach 출력 형식)을 볼 수 있습니다.</p>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="schedrow" style="margin:0 0 6px"><input id="veName" placeholder="라인 이름 (새 라인 만들 때)" style="min-width:220px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></div>
@@ -1753,6 +1756,7 @@ function renderVersionManager(cfg) {
 async function vmLoadLines(cfg) {
   const box = $(cfg.lines); box.innerHTML = "⏳";
   const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
+  if (j.defaults) cfg.defaults = j.defaults;   // 코드 기본 프롬프트 — 빈 버전 뷰어에 전문 표시용
   box.innerHTML = "";
   if (!(j.lines || []).length) {
     box.innerHTML = "<span class='hint'>아직 라인이 없습니다 — 아래 폼에서 이름을 넣고 [＋ 새 라인 만들기]</span>"; return;
@@ -1839,10 +1843,15 @@ const ENTITY_VM = {
   readForm: () => ({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
   setForm: v => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
   summary: v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
-  viewSections: v => [
-    {label: "문서 판정 프롬프트 (doc_prompt)", text: v.doc_prompt},
-    {label: "묶음 판정 프롬프트 (pack_prompt)", text: v.pack_prompt},
-    {label: "메모", text: v.note}],
+  viewSections: v => {
+    const d = ENTITY_VM.defaults || {};   // 빈값=코드 기본 — 실제 기본 프롬프트 전문을 보여준다
+    return [
+      {label: "문서 판정 프롬프트 (doc_prompt)" + (v.doc_prompt ? " — 커스텀" : " — 코드 기본"),
+       text: v.doc_prompt || d.doc_prompt},
+      {label: "묶음 판정 프롬프트 (pack_prompt)" + (v.pack_prompt ? " — 커스텀" : " — 코드 기본"),
+       text: v.pack_prompt || d.pack_prompt},
+      {label: "메모", text: v.note}];
+  },
   validate: () => {
     if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return false; }
     if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return false; }
