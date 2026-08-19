@@ -175,11 +175,45 @@
   <button data-tab="users">계정 관리</button>
   <button data-tab="domains">도메인 시드</button>
   <button data-tab="sources">원천 테이블·구조화</button>
+  <button data-tab="versions">버전 관리</button>
   <button data-tab="models">모델</button>
   <button data-tab="mcp">MCP 서버</button>
   <button data-tab="agent">에이전트</button>
   <button data-tab="events">활동 로그</button>
 </nav>
+<section class="card" id="sec-versions">
+  <h3>버전 관리 <small>데이터·도메인·엔티티·클러스터를 버전으로 — 조합해 구조화하면 어떤 버전으로 만든 데이터인지 추적</small></h3>
+
+  <h4>① 데이터 (소스) <small>적재 시점 · 문서 수</small></h4>
+  <div id="verData"><span class="hint">불러오는 중…</span></div>
+
+  <h4>② 엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트</small></h4>
+  <div id="verEntity"><span class="hint">불러오는 중…</span></div>
+  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 엔티티 버전</summary>
+    <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
+    <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
+    <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
+    <textarea id="vePack" class="psta" spellcheck="false"></textarea>
+    <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" id="veAdd">엔티티 버전 생성</button><span class="hint" id="veMsg" style="margin:0"></span></div>
+  </details>
+
+  <h4>③ 클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값</small></h4>
+  <div id="verCluster"><span class="hint">불러오는 중…</span></div>
+  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 클러스터 버전</summary>
+    <div class="schedrow" style="margin-top:6px">
+      <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
+      <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
+      <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
+      <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
+      <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
+      <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" id="vcAdd">클러스터 버전 생성</button><span class="hint" id="vcMsg" style="margin:0"></span>
+    </div>
+  </details>
+
+  <p class="hint" style="margin-top:12px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭에서 관리합니다. 🔹 <b>버전을 조합해 구조화</b>하려면 [원천 테이블·구조화] 탭 → 소스 줄 클릭 → "✚ 새 조합 run 만들기"에서 도메인·엔티티·클러스터·모델·임베딩을 골라 실행하고, run 목록에서 어떤 조합으로 만든 데이터인지 확인합니다.</p>
+</section>
 <section class="card" id="sec-users">
   <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
   <table id="ulist"><thead><tr><th>아이디</th><th>상태</th><th>권한</th><th>가입일</th><th></th></tr></thead>
@@ -1581,8 +1615,80 @@ $("evq").addEventListener("keydown", e => { if (e.key === "Enter") { evPage = 1;
 $("evkind").onchange = $("evlevel").onchange = () => { evPage = 1; loadEvents(); };
 
 // ── 탭 라우터 — 탭 진입 시마다 해당 섹션 데이터를 새로 로드 (동기화 문제 원천 차단) ──
+// ── 버전 관리 탭 ─────────────────────────────────────────────
+function _verList(box, vers, kind, summ) {
+  box.innerHTML = "";
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th>버전</th><th>생성</th><th>설정</th><th>메모</th><th>기본</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  (vers || []).forEach(v => {
+    const tr = document.createElement("tr");
+    [`v${v.version}`, v.created || "", summ(v), v.note || ""].forEach(c => {
+      const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
+    const td = document.createElement("td");
+    if (v.is_default) { td.textContent = "★ 기본"; td.className = "sel"; }
+    else {
+      const b = document.createElement("button"); b.type = "button"; b.className = "ghost";
+      b.textContent = "기본으로";
+      b.onclick = async () => { await fetch(`/admin/${kind}-versions/${v.version}/default`,
+        {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}); loadVersions(); };
+      td.appendChild(b);
+    }
+    tr.appendChild(td); tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+}
+async function loadVersions() {
+  const [srcs, stat] = await Promise.all([
+    fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []})),
+    fetch("/admin/doc-status").then(r => r.json()).catch(() => ({sources: []}))]);
+  const cnt = {}; (stat.sources || []).forEach(s => cnt[s.source] = s);
+  const dbox = $("verData"); const srows = srcs.sources || [];
+  dbox.innerHTML = "";
+  if (!srows.length) dbox.innerHTML = `<span class="hint">등록된 소스가 없습니다</span>`;
+  else {
+    const t = document.createElement("table"); t.className = "vertable";
+    t.innerHTML = "<thead><tr><th>소스</th><th>도메인</th><th>적재 시점</th><th>문서 수</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    srows.forEach(s => {
+      const c = cnt[s.source_name] || {};
+      const tr = document.createElement("tr");
+      [s.source_name, s.domain || "-", (s.last_ingest_ts || "").replace("T", " ").slice(0, 16) || "-",
+       c.total != null ? `${c.total} (반영 ${c.done || 0})` : "-"].forEach(v => {
+        const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); dbox.appendChild(t);
+  }
+  const ev = await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}));
+  _verList($("verEntity"), ev.versions, "entity",
+           v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? " · 묶음:커스텀" : ""));
+  const cv = await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}));
+  _verList($("verCluster"), cv.versions, "cluster",
+           v => `자동병합≥${v.sim_high} · 후보≥${v.sim_threshold} · 후보수${v.select_max}`);
+}
+$("veAdd").onclick = async () => {
+  $("veMsg").textContent = "";
+  const r = await fetch("/admin/entity-versions", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value})});
+  const j = await r.json().catch(() => ({}));
+  $("veMsg").textContent = r.ok ? "✓ 생성됨" : (j.detail || `실패 ${r.status}`);
+  if (r.ok) { $("veDoc").value = $("vePack").value = $("veNote").value = ""; loadVersions(); }
+};
+$("vcAdd").onclick = async () => {
+  $("vcMsg").textContent = "";
+  const r = await fetch("/admin/cluster-versions", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
+      short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
+      select_max: parseInt($("vcSel").value), note: $("vcNote").value})});
+  const j = await r.json().catch(() => ({}));
+  $("vcMsg").textContent = r.ok ? "✓ 생성됨" : (j.detail || `실패 ${r.status}`);
+  if (r.ok) loadVersions();
+};
+
 const TABS = {
   users:   {secs: ["sec-users"], load: () => loadUsers()},
+  versions: {secs: ["sec-versions"], load: () => loadVersions()},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources(); loadTables();
