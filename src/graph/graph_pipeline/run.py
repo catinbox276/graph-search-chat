@@ -14,7 +14,7 @@ import yaml
 from core import config
 
 from .gate import judge_by_signals, session_turns, split_segments
-from .llm import EXTRACT_PROMPT, JUDGE_PROMPT, _llm_json
+from .llm import EXTRACT_PROMPT, JUDGE_PROMPT, _llm_json, fill_prompt
 from .merge import get_or_create
 from .schema import classify_domain, ddl
 from .weights import recompute_weights, retract_recurrences
@@ -33,6 +33,11 @@ def expects():
 
 def main():
     exp = expects()
+    # 엔티티(목표·접근법) 추출 프롬프트 override — 관리 페이지(app_settings). 빈값=코드 기본.
+    from core import settings
+    _st = settings.get_all()
+    judge_tmpl = (_st.get("entity_judge_prompt") or "").strip() or JUDGE_PROMPT
+    extract_tmpl = (_st.get("entity_extract_prompt") or "").strip() or EXTRACT_PROMPT
     con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     ddl(cur)
@@ -48,7 +53,7 @@ def main():
             # 태스크 세션(selfplay) — expect 기준 LLM 판정 (기존 흐름)
             tool_names = {c["name"] for c in calls}
             domain, hint = classify_domain(cur, tool_names)
-            prompt = JUDGE_PROMPT.format(
+            prompt = fill_prompt(judge_tmpl,
                 question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
                 answer=answer[:3000], expect=exp[task_id])
             if hint:
@@ -73,7 +78,7 @@ def main():
                 calls = [c for t in seg for c in t["calls"]]
                 tool_names = {c["name"] for c in calls}
                 domain, hint = classify_domain(cur, tool_names)
-                prompt = EXTRACT_PROMPT.format(
+                prompt = fill_prompt(extract_tmpl,
                     domain=domain,
                     question=seg[0]["q"][:2000],
                     tools=json.dumps(calls, ensure_ascii=False)[:2000],

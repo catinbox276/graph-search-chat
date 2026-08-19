@@ -17,7 +17,7 @@ from core import config, events, settings
 from graph import doc_pipeline
 from graph.doc_pipeline import scheduler
 from graph.doc_pipeline import judge as _judge
-from graph.graph_pipeline import ensure_domain_registry
+from graph.graph_pipeline import ensure_domain_registry, EXTRACT_PROMPT, JUDGE_PROMPT
 from ingestion import chunk_corpus, ingest_sources, source_registry
 from web.deps import check_admin, db_cursor
 
@@ -242,6 +242,8 @@ class PipelineSettingsIn(BaseModel):
     chunk_overlap: str = ""       # 인접 청크 겹침(자)
     struct_doc_prompt: str = ""   # 문서 판정/추출 프롬프트 override (빈값=코드 기본)
     struct_pack_prompt: str = ""  # 문서 묶음 판정 프롬프트 override (빈값=코드 기본)
+    entity_extract_prompt: str = ""  # 세션(UI) 엔티티 추출 프롬프트 override
+    entity_judge_prompt: str = ""    # 세션(셀프플레이) 판정 프롬프트 override
 
     @model_validator(mode="after")
     def _ranges(self):
@@ -256,14 +258,19 @@ class PipelineSettingsIn(BaseModel):
                 raise ValueError(f"{key}는 정수여야 합니다")
             if not lo <= v <= hi:
                 raise ValueError(f"{key}는 {lo}~{hi} 범위여야 합니다")
-        # 프롬프트 override — 길이 상한 + 필수 자리표시자(누락 시 문서 내용이 안 들어감)
-        for key in ("struct_doc_prompt", "struct_pack_prompt"):
+        # 프롬프트 override — 길이 상한 + 필수 자리표시자(누락 시 내용이 안 들어감)
+        for key in ("struct_doc_prompt", "struct_pack_prompt",
+                    "entity_extract_prompt", "entity_judge_prompt"):
             if len(getattr(self, key)) > 8000:
                 raise ValueError(f"{key}는 8000자 이내여야 합니다")
         if self.struct_doc_prompt.strip() and "{body}" not in self.struct_doc_prompt:
             raise ValueError("문서 프롬프트에는 {body} 자리표시자가 있어야 합니다")
         if self.struct_pack_prompt.strip() and "{docs}" not in self.struct_pack_prompt:
             raise ValueError("묶음 프롬프트에는 {docs} 자리표시자가 있어야 합니다")
+        for key in ("entity_extract_prompt", "entity_judge_prompt"):
+            v = getattr(self, key).strip()
+            if v and ("{question}" not in v or "{answer}" not in v):
+                raise ValueError(f"{key}에는 {{question}}과 {{answer}} 자리표시자가 있어야 합니다")
         return self
 
 
@@ -287,6 +294,10 @@ def admin_pipeline_settings():
             "struct_pack_prompt": st.get("struct_pack_prompt") or "",
             "default_doc_prompt": _judge.DOC_PROMPT,
             "default_pack_prompt": _judge.PACK_PROMPT,
+            "entity_extract_prompt": st.get("entity_extract_prompt") or "",
+            "entity_judge_prompt": st.get("entity_judge_prompt") or "",
+            "default_extract_prompt": EXTRACT_PROMPT,
+            "default_judge_prompt": JUDGE_PROMPT,
             "overridden": sorted(st.keys())}
 
 
@@ -297,6 +308,8 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn):
     vals["doc_extract_model"] = inp.doc_extract_model.strip()
     vals["struct_doc_prompt"] = inp.struct_doc_prompt.strip()
     vals["struct_pack_prompt"] = inp.struct_pack_prompt.strip()
+    vals["entity_extract_prompt"] = inp.entity_extract_prompt.strip()
+    vals["entity_judge_prompt"] = inp.entity_judge_prompt.strip()
     settings.set_many(vals)
     return {"ok": True, "note": "다음 전처리 배치 실행부터 반영 (빈값은 기본값 복귀)"}
 

@@ -24,10 +24,10 @@ JUDGE_PROMPT = """세션을 판정하고 지식을 추출하라. JSON만 출력.
 [판정 기준] {expect}
 
 출력 형식:
-{{"verdict": "success|fail|unknown",
+{"verdict": "success|fail|unknown",
   "goal": "사용자 목표 (10단어 이내, 일반화된 표현)",
   "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')",
-  "fail_reason": "실패 시 이유 한 줄, 성공이면 null"}}
+  "fail_reason": "실패 시 이유 한 줄, 성공이면 null"}
 
 판정 규칙:
 - success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
@@ -49,15 +49,27 @@ EXTRACT_PROMPT = """대화가 도메인 범위의 업무 지식인지 판정하�
 [최종 답변] {answer}
 
 출력 형식:
-{{"fits": true|false,
+{"fits": true|false,
   "grounded": true|false,
   "goal": "사용자 목표 (10단어 이내, 일반화된 표현, fits=true일 때만)",
-  "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')"}}
+  "approach": "해결 접근법 (15단어 이내, 도구+방법. 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인')"}
 
 fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
 조직 지식으로 축적할 가치가 없는 대화.
 grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
 모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함)."""
+
+_ENTITY_PLACEHOLDERS = ("domain", "question", "tools", "answer", "expect")
+
+
+def fill_prompt(tmpl: str, **kw) -> str:
+    """엔티티 추출 프롬프트 자리표시자만 치환 — JSON 예시 등 그 외 중괄호는 그대로 둔다
+    (관리자 편집 프롬프트의 중괄호 이스케이프 footgun 제거). doc_pipeline._fill과 동일 원리."""
+    out = tmpl
+    for k in _ENTITY_PLACEHOLDERS:
+        if k in kw:
+            out = out.replace("{" + k + "}", str(kw[k]))
+    return out
 
 
 def _llm_json(prompt: str) -> dict:

@@ -332,6 +332,15 @@
         <small>여러 문서를 한 번에 판정 · 자리표시자 {domain} {hint} {docs} — <b>{docs} 필수</b></small></label>
       <textarea id="psPackPrompt" class="psta" spellcheck="false"></textarea>
     </details>
+    <details class="structprompts">
+      <summary>엔티티 추출(세션) 프롬프트 (고급) — 대화에서 목표·접근법 추출. 비우면 코드 기본값</summary>
+      <label class="k2" for="psExtractPrompt">세션 지식 추출 프롬프트
+        <small>실사용 대화 → 그래프 · 자리표시자 {domain} {question} {tools} {answer} — <b>{question}·{answer} 필수</b></small></label>
+      <textarea id="psExtractPrompt" class="psta" spellcheck="false"></textarea>
+      <label class="k2" for="psJudgePrompt">태스크 판정 프롬프트
+        <small>셀프플레이 세션 판정 · 자리표시자 {question} {tools} {answer} {expect} — <b>{question}·{answer} 필수</b></small></label>
+      <textarea id="psJudgePrompt" class="psta" spellcheck="false"></textarea>
+    </details>
     <div class="psbtns">
       <button id="pssave">설정 저장</button>
       <button type="button" class="warn" id="psresetall"
@@ -1169,6 +1178,10 @@ async function loadPipelineSettings() {
   $("psDocPrompt").placeholder = s.default_doc_prompt || "";
   $("psPackPrompt").value = s.struct_pack_prompt || "";
   $("psPackPrompt").placeholder = s.default_pack_prompt || "";
+  $("psExtractPrompt").value = s.entity_extract_prompt || "";
+  $("psExtractPrompt").placeholder = s.default_extract_prompt || "";
+  $("psJudgePrompt").value = s.entity_judge_prompt || "";
+  $("psJudgePrompt").placeholder = s.default_judge_prompt || "";
 }
 $("psform").onsubmit = async (e) => {
   e.preventDefault();
@@ -1181,7 +1194,9 @@ $("psform").onsubmit = async (e) => {
                           doc_extract_model: $("psModel").value,
                           chunk_chars: $("psChunkC").value, chunk_overlap: $("psChunkO").value,
                           struct_doc_prompt: $("psDocPrompt").value,
-                          struct_pack_prompt: $("psPackPrompt").value}),
+                          struct_pack_prompt: $("psPackPrompt").value,
+                          entity_extract_prompt: $("psExtractPrompt").value,
+                          entity_judge_prompt: $("psJudgePrompt").value}),
   });
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;
