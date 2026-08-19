@@ -505,17 +505,21 @@ class ClusterVersionIn(BaseModel):
 
 
 @router.get("/admin/entity-versions")
-def admin_entity_versions():
-    """엔티티(추출 프롬프트) 버전 목록 — 최신순."""
+def admin_entity_versions(page: int = 1):
+    """엔티티(추출 프롬프트) 버전 목록 — 최신순, 10개 페이지."""
+    page = max(1, page)
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
+        cur.execute("SELECT COUNT(*) FROM entity_versions")
+        total = cur.fetchone()[0]
         cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
                               doc_prompt, pack_prompt, note, is_default
-                       FROM entity_versions ORDER BY version DESC""")
+                       FROM entity_versions ORDER BY version DESC
+                       OFFSET :1 ROWS FETCH NEXT 10 ROWS ONLY""", [(page - 1) * 10])
         rows = [{"version": int(r[0]), "created": r[1],
                  "doc_prompt": _lob_str(r[2]), "pack_prompt": _lob_str(r[3]),
                  "note": r[4] or "", "is_default": r[5] == "Y"} for r in cur.fetchall()]
-    return {"versions": rows}
+    return {"versions": rows, "total": total, "page": page, "pages": max(1, (total + 9) // 10)}
 
 
 @router.post("/admin/entity-versions")
@@ -544,19 +548,23 @@ def admin_entity_version_default(v: int):
 
 
 @router.get("/admin/cluster-versions")
-def admin_cluster_versions():
-    """클러스터(dedup) 버전 목록 — 최신순."""
+def admin_cluster_versions(page: int = 1):
+    """클러스터(dedup) 버전 목록 — 최신순, 10개 페이지."""
+    page = max(1, page)
     with db_cursor() as cur:
         _ensure_cluster_versions(cur)
+        cur.execute("SELECT COUNT(*) FROM cluster_versions")
+        total = cur.fetchone()[0]
         cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
                               sim_high, sim_threshold, short_name_chars, char_ratio,
                               select_max, note, is_default
-                       FROM cluster_versions ORDER BY version DESC""")
+                       FROM cluster_versions ORDER BY version DESC
+                       OFFSET :1 ROWS FETCH NEXT 10 ROWS ONLY""", [(page - 1) * 10])
         rows = [{"version": int(r[0]), "created": r[1], "sim_high": float(r[2]),
                  "sim_threshold": float(r[3]), "short_name_chars": int(r[4]),
                  "char_ratio": float(r[5]), "select_max": int(r[6]),
                  "note": r[7] or "", "is_default": r[8] == "Y"} for r in cur.fetchall()]
-    return {"versions": rows}
+    return {"versions": rows, "total": total, "page": page, "pages": max(1, (total + 9) // 10)}
 
 
 @router.post("/admin/cluster-versions")

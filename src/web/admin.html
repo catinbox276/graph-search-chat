@@ -190,31 +190,27 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 구조화</b>는 [원천 테이블·구조화] 탭 → 소스 클릭 → "✚ 새 조합 run"에서.</p>
 </section>
 <section class="card" id="sec-entity">
-  <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트</small></h3>
-  <div id="verEntity"><span class="hint">불러오는 중…</span></div>
-  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 엔티티 버전</summary>
-    <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
-    <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
-    <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
-    <textarea id="vePack" class="psta" spellcheck="false"></textarea>
-    <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" id="veAdd">엔티티 버전 생성</button><span class="hint" id="veMsg" style="margin:0"></span></div>
-  </details>
+  <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트 — 버전을 선택해 폼에 불러온 뒤 수정해 새 버전 생성</small></h3>
+  <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
+  <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
+  <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
+  <textarea id="vePack" class="psta" spellcheck="false"></textarea>
+  <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+    <span class="hint" id="veMsg" style="margin:0"></span></div>
+  <div id="verEntity" style="margin-top:8px"><span class="hint">불러오는 중…</span></div>
 </section>
 <section class="card" id="sec-cluster">
-  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값</small></h3>
+  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값 — 버전을 선택해 폼에 불러온 뒤 수정해 새 버전 생성</small></h3>
+  <div class="schedrow" style="margin:6px 0">
+    <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
+    <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
+    <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
+    <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
+    <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
+    <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+    <span class="hint" id="vcMsg" style="margin:0"></span>
+  </div>
   <div id="verCluster"><span class="hint">불러오는 중…</span></div>
-  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 클러스터 버전</summary>
-    <div class="schedrow" style="margin-top:6px">
-      <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
-      <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
-      <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
-      <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
-      <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
-      <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" id="vcAdd">클러스터 버전 생성</button><span class="hint" id="vcMsg" style="margin:0"></span>
-    </div>
-  </details>
 </section>
 <section class="card" id="sec-join">
   <h3>테이블 조인 버전 <small>테이블 간 관계(조인 키) — 사람이 직접 등록</small></h3>
@@ -1693,15 +1689,90 @@ async function loadDataVer() {
     dbox.appendChild(wrap);
   }
 }
-async function loadEntityVer() {
-  const ev = await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}));
-  _verList($("verEntity"), ev.versions, "entity",
-           v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? " · 묶음:커스텀" : ""));
+function _verBtn(label, fn) {
+  const b = document.createElement("button"); b.type = "button"; b.className = "ghost";
+  b.textContent = label; b.onclick = fn; return b;
 }
-async function loadClusterVer() {
-  const cv = await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}));
-  _verList($("verCluster"), cv.versions, "cluster",
-           v => `자동병합≥${v.sim_high} · 후보≥${v.sim_threshold} · 후보수${v.select_max}`);
+function _verPager(bar, j, page, reload) {
+  if (j.pages > 1) {
+    if (page > 1) bar.appendChild(_verBtn("◀", () => reload(page - 1)));
+    const info = document.createElement("span"); info.className = "hint"; info.style.margin = "0";
+    info.textContent = `${page} / ${j.pages} (총 ${j.total})`; bar.appendChild(info);
+    if (page < j.pages) bar.appendChild(_verBtn("▶", () => reload(page + 1)));
+  }
+}
+async function loadEntityVer(page = 1) {
+  page = page || 1;
+  const box = $("verEntity"); box.innerHTML = "⏳";
+  const j = await fetch(`/admin/entity-versions?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
+  box.innerHTML = "";
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  (j.versions || []).forEach(v => {
+    const tr = document.createElement("tr");
+    const sel = document.createElement("input"); sel.type = "radio"; sel.name = "entpick"; sel.value = v.version;
+    sel.onclick = () => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || "";
+      $("veNote").value = v.note || ""; $("veMsg").textContent = `v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기]`; };
+    const c0 = document.createElement("td"); c0.appendChild(sel); tr.appendChild(c0);
+    [`v${v.version}`, v.created || "", (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
+     v.note || "", v.is_default ? "★ 기본" : ""].forEach(x => { const c = document.createElement("td"); c.textContent = x; tr.appendChild(c); });
+    if (v.is_default) tr.classList.add("sel");
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
+  bar.appendChild(_verBtn("✚ 새 버전 만들기 (현재 폼)", async () => {
+    if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return; }
+    if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return; }
+    const r = await fetch("/admin/entity-versions", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value})});
+    const jj = await r.json().catch(() => ({})); $("veMsg").textContent = r.ok ? "✓ 새 버전 생성됨" : (jj.detail || `실패 ${r.status}`);
+    if (r.ok) loadEntityVer(1);
+  }));
+  bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
+    const p = box.querySelector("input[name=entpick]:checked"); if (!p) { $("veMsg").textContent = "버전을 먼저 선택하세요"; return; }
+    await fetch(`/admin/entity-versions/${p.value}/default`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    loadEntityVer(page);
+  }));
+  _verPager(bar, j, page, loadEntityVer); box.appendChild(bar);
+}
+async function loadClusterVer(page = 1) {
+  page = page || 1;
+  const box = $("verCluster"); box.innerHTML = "⏳";
+  const j = await fetch(`/admin/cluster-versions?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
+  box.innerHTML = "";
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>설정</th><th>메모</th><th>기본</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  (j.versions || []).forEach(v => {
+    const tr = document.createElement("tr");
+    const sel = document.createElement("input"); sel.type = "radio"; sel.name = "clspick"; sel.value = v.version;
+    sel.onclick = () => { $("vcHigh").value = v.sim_high; $("vcThr").value = v.sim_threshold; $("vcShort").value = v.short_name_chars;
+      $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max; $("vcNote").value = v.note || "";
+      $("vcMsg").textContent = `v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기]`; };
+    const c0 = document.createElement("td"); c0.appendChild(sel); tr.appendChild(c0);
+    [`v${v.version}`, v.created || "", `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}`,
+     v.note || "", v.is_default ? "★ 기본" : ""].forEach(x => { const c = document.createElement("td"); c.textContent = x; tr.appendChild(c); });
+    if (v.is_default) tr.classList.add("sel");
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
+  bar.appendChild(_verBtn("✚ 새 버전 만들기 (현재 폼)", async () => {
+    const r = await fetch("/admin/cluster-versions", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
+        short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
+        select_max: parseInt($("vcSel").value), note: $("vcNote").value})});
+    const jj = await r.json().catch(() => ({})); $("vcMsg").textContent = r.ok ? "✓ 새 버전 생성됨" : (jj.detail || `실패 ${r.status}`);
+    if (r.ok) loadClusterVer(1);
+  }));
+  bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
+    const p = box.querySelector("input[name=clspick]:checked"); if (!p) { $("vcMsg").textContent = "버전을 먼저 선택하세요"; return; }
+    await fetch(`/admin/cluster-versions/${p.value}/default`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    loadClusterVer(page);
+  }));
+  _verPager(bar, j, page, loadClusterVer); box.appendChild(bar);
 }
 async function loadJoinVer() {
   const jv = await fetch("/admin/join-versions").then(r => r.json()).catch(() => ({versions: []}));
@@ -1718,24 +1789,6 @@ $("vjAdd").onclick = async () => {
   const j = await r.json().catch(() => ({}));
   $("vjMsg").textContent = r.ok ? `✓ 생성됨 (관계 ${rels.length}건)` : (j.detail || `실패 ${r.status}`);
   if (r.ok) { $("vjRel").value = $("vjNote").value = ""; loadJoinVer(); }
-};
-$("veAdd").onclick = async () => {
-  $("veMsg").textContent = "";
-  const r = await fetch("/admin/entity-versions", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value})});
-  const j = await r.json().catch(() => ({}));
-  $("veMsg").textContent = r.ok ? "✓ 생성됨" : (j.detail || `실패 ${r.status}`);
-  if (r.ok) { $("veDoc").value = $("vePack").value = $("veNote").value = ""; loadEntityVer(); }
-};
-$("vcAdd").onclick = async () => {
-  $("vcMsg").textContent = "";
-  const r = await fetch("/admin/cluster-versions", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
-      short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
-      select_max: parseInt($("vcSel").value), note: $("vcNote").value})});
-  const j = await r.json().catch(() => ({}));
-  $("vcMsg").textContent = r.ok ? "✓ 생성됨" : (j.detail || `실패 ${r.status}`);
-  if (r.ok) loadClusterVer();
 };
 
 const TABS = {
