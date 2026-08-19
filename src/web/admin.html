@@ -172,17 +172,17 @@
 
 <main>
 <nav id="admtabs" class="admtabs">
-  <button data-tab="users">계정 관리</button>
-  <button data-tab="domains">도메인 시드</button>
-  <button data-tab="sources">원천 테이블·구조화</button>
-  <button data-tab="data">데이터 버전</button>
-  <button data-tab="entity">엔티티 버전</button>
-  <button data-tab="cluster">클러스터 버전</button>
-  <button data-tab="join">조인 버전</button>
   <button data-tab="models">모델</button>
   <button data-tab="mcp">MCP 서버</button>
   <button data-tab="agent">에이전트</button>
+  <button data-tab="domains">도메인 시드</button>
+  <button data-tab="entity">엔티티 버전</button>
+  <button data-tab="cluster">클러스터 버전</button>
+  <button data-tab="join">조인 버전</button>
+  <button data-tab="data">데이터 버전</button>
+  <button data-tab="sources">원천 테이블·구조화</button>
   <button data-tab="events">활동 로그</button>
+  <button data-tab="users">계정 관리</button>
 </nav>
 <section class="card" id="sec-data">
   <h3>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h3>
@@ -1767,7 +1767,7 @@ function showTab(name) {
 document.querySelectorAll("#admtabs button").forEach(b => {
   b.onclick = () => showTab(b.dataset.tab);
 });
-showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "users");
+showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "models");
 setInterval(() => { if (_tab === "sources") { loadDocStatus(); loadSchedule(); } }, 5000);  // 폴링은 해당 탭에서만
 </script>
 </body>
