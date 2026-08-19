@@ -13,7 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 
-from core import config, events, settings
+from core import config, events, settings, versioning
 from graph import doc_pipeline
 from graph.doc_pipeline import scheduler
 from graph.doc_pipeline import judge as _judge
@@ -454,45 +454,32 @@ def admin_source_structure(sname: str, run_id: str = ""):
                     "진행은 아래 처리 현황(5초 갱신)에서 실시간으로 올라갑니다."}
 
 
-# ── 엔티티·클러스터 버전 (도메인 버전과 같은 패턴 — 전용 버전관리 탭) ──────────
+# ── 엔티티·클러스터 버전 (이름별 라인 — core/versioning 공통 스토어) ─────────────
+# 라인(name)마다 독립 버전 히스토리: '새 라인'=새 이름 v1, '버전 업'=그 라인 MAX+1,
+# '기본'=활성 (name,version) 하나. create_run이 활성/선택 (name,version)을 스냅샷한다.
 def _ensure_entity_versions(cur):
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'ENTITY_VERSIONS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE entity_versions (
-            version NUMBER PRIMARY KEY, doc_prompt CLOB, pack_prompt CLOB,
-            note VARCHAR2(500), is_default CHAR(1) DEFAULT 'N',
-            created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
-    cur.execute("SELECT COUNT(*) FROM entity_versions")
-    if not cur.fetchone()[0]:   # v1 시드 = 현재 전역 프롬프트(빈값=코드 기본)
-        st = settings.get_all()
-        cur.execute("""INSERT INTO entity_versions (version, doc_prompt, pack_prompt, note, is_default)
-                       VALUES (1, :d, :p, '초기(현재 설정)', 'Y')""",
-                    {"d": (st.get("struct_doc_prompt") or None),
-                     "p": (st.get("struct_pack_prompt") or None)})
+    versioning.ensure(cur, versioning.ENTITY_SPEC)
 
 
 def _ensure_cluster_versions(cur):
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'CLUSTER_VERSIONS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE cluster_versions (
-            version NUMBER PRIMARY KEY, sim_high NUMBER, sim_threshold NUMBER,
-            short_name_chars NUMBER, char_ratio NUMBER, select_max NUMBER,
-            note VARCHAR2(500), is_default CHAR(1) DEFAULT 'N',
-            created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
-    cur.execute("SELECT COUNT(*) FROM cluster_versions")
-    if not cur.fetchone()[0]:   # v1 시드 = config 기본
-        cur.execute("""INSERT INTO cluster_versions (version, sim_high, sim_threshold,
-                         short_name_chars, char_ratio, select_max, note, is_default)
-                       VALUES (1, :sh, :st, :sn, :cr, :sm, '초기(config 기본)', 'Y')""",
-                    {"sh": config.DEDUP_SIM_HIGH, "st": config.DEDUP_SIM_THRESHOLD,
-                     "sn": config.DEDUP_SHORT_NAME_CHARS, "cr": config.DEDUP_CHAR_RATIO,
-                     "sm": config.DEDUP_SELECT_MAX})
+    versioning.ensure(cur, versioning.CLUSTER_SPEC)
 
 
-class EntityVersionIn(BaseModel):
+class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
     doc_prompt: str = ""
     pack_prompt: str = ""
     note: str = ""
+
+
+class EntityLineIn(EntityVersionIn):     # 새 라인 (이름 포함)
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("라인 이름을 입력하세요")
+        return v.strip()
 
 
 class ClusterVersionIn(BaseModel):
@@ -504,154 +491,234 @@ class ClusterVersionIn(BaseModel):
     note: str = ""
 
 
-@router.get("/admin/entity-versions")
-def admin_entity_versions(page: int = 1):
-    """엔티티(추출 프롬프트) 버전 목록 — 최신순, 10개 페이지."""
-    page = max(1, page)
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        cur.execute("SELECT COUNT(*) FROM entity_versions")
-        total = cur.fetchone()[0]
-        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
-                              doc_prompt, pack_prompt, note, is_default
-                       FROM entity_versions ORDER BY version DESC
-                       OFFSET :1 ROWS FETCH NEXT 10 ROWS ONLY""", [(page - 1) * 10])
-        rows = [{"version": int(r[0]), "created": r[1],
-                 "doc_prompt": _lob_str(r[2]), "pack_prompt": _lob_str(r[3]),
-                 "note": r[4] or "", "is_default": r[5] == "Y"} for r in cur.fetchall()]
-    return {"versions": rows, "total": total, "page": page, "pages": max(1, (total + 9) // 10)}
+class ClusterLineIn(ClusterVersionIn):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("라인 이름을 입력하세요")
+        return v.strip()
 
 
-@router.post("/admin/entity-versions")
-def admin_entity_version_add(inp: EntityVersionIn):
-    """새 엔티티 버전 생성 (기본 지정은 별도)."""
-    if inp.doc_prompt.strip() and "{body}" not in inp.doc_prompt:
+def _validate_entity(doc_prompt: str, pack_prompt: str):
+    if doc_prompt.strip() and "{body}" not in doc_prompt:
         raise HTTPException(400, "문서 프롬프트에는 {body} 자리표시자가 있어야 합니다")
-    if inp.pack_prompt.strip() and "{docs}" not in inp.pack_prompt:
+    if pack_prompt.strip() and "{docs}" not in pack_prompt:
         raise HTTPException(400, "묶음 프롬프트에는 {docs} 자리표시자가 있어야 합니다")
+
+
+def _entity_vals(inp) -> dict:
+    return {"doc_prompt": inp.doc_prompt.strip() or None,
+            "pack_prompt": inp.pack_prompt.strip() or None, "note": inp.note.strip() or None}
+
+
+def _cluster_vals(inp) -> dict:
+    return {"sim_high": inp.sim_high, "sim_threshold": inp.sim_threshold,
+            "short_name_chars": inp.short_name_chars, "char_ratio": inp.char_ratio,
+            "select_max": inp.select_max, "note": inp.note.strip() or None}
+
+
+# 엔티티 -----------------------------------------------------------------
+@router.get("/admin/entity-versions")
+def admin_entity_versions():
+    """전체 (라인, 버전) 평면 목록 — run 폼 드롭다운용."""
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
-        cur.execute("""INSERT INTO entity_versions (version, doc_prompt, pack_prompt, note)
-                       SELECT NVL(MAX(version), 0) + 1, :d, :p, :n FROM entity_versions""",
-                    {"d": inp.doc_prompt.strip() or None, "p": inp.pack_prompt.strip() or None,
-                     "n": inp.note.strip() or None})
-    return {"ok": True}
+        return {"versions": versioning.list_flat(cur, versioning.ENTITY_SPEC)}
 
 
-@router.post("/admin/entity-versions/{v}/default")
-def admin_entity_version_default(v: int):
+@router.get("/admin/entity-lines")
+def admin_entity_lines():
+    """엔티티 라인 목록 — 이름별 버전 수·활성 버전."""
     with db_cursor() as cur:
         _ensure_entity_versions(cur)
-        cur.execute("UPDATE entity_versions SET is_default = 'N'")
-        cur.execute("UPDATE entity_versions SET is_default = 'Y' WHERE version = :1", [v])
-    return {"ok": True}
+        return {"lines": versioning.list_lines(cur, versioning.ENTITY_SPEC)}
 
 
+@router.get("/admin/entity-lines/{name}/versions")
+def admin_entity_line_versions(name: str, page: int = 1):
+    """한 라인의 버전 목록 — 최신순, 10개 페이지."""
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        return versioning.list_versions(cur, versioning.ENTITY_SPEC, name, page)
+
+
+@router.post("/admin/entity-lines")
+def admin_entity_line_add(inp: EntityLineIn):
+    """새 라인 = 새 이름 v1 (기본 지정은 별도)."""
+    _validate_entity(inp.doc_prompt, inp.pack_prompt)
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        try:
+            versioning.new_line(cur, versioning.ENTITY_SPEC, inp.name, _entity_vals(inp))
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+    return {"ok": True, "note": f"라인 '{inp.name}' v1 생성됨 — 기본으로 쓰려면 [기본으로 지정]"}
+
+
+@router.post("/admin/entity-lines/{name}/versions")
+def admin_entity_version_up(name: str, inp: EntityVersionIn):
+    """버전 업 — 기존 라인에 새 버전 (기본 지정은 별도)."""
+    _validate_entity(inp.doc_prompt, inp.pack_prompt)
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        try:
+            v = versioning.version_up(cur, versioning.ENTITY_SPEC, name, _entity_vals(inp))
+        except KeyError:
+            raise HTTPException(404, f"없는 라인: {name} (버전 업은 기존 라인에만)")
+    return {"ok": True, "version": v, "note": f"{name} v{v} 생성됨 — 아직 기본이 아닙니다"}
+
+
+@router.post("/admin/entity-lines/{name}/versions/{v}/default")
+def admin_entity_version_default(name: str, v: int):
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        try:
+            versioning.set_default(cur, versioning.ENTITY_SPEC, name, v)
+        except KeyError:
+            raise HTTPException(404, f"없는 버전: {name} v{v}")
+    return {"ok": True, "note": f"{name} v{v}이(가) 기본 — 새 조합 run이 이 기준으로 스냅샷"}
+
+
+# 클러스터 ---------------------------------------------------------------
 @router.get("/admin/cluster-versions")
-def admin_cluster_versions(page: int = 1):
-    """클러스터(dedup) 버전 목록 — 최신순, 10개 페이지."""
-    page = max(1, page)
+def admin_cluster_versions():
+    """전체 (라인, 버전) 평면 목록 — run 폼 드롭다운용."""
     with db_cursor() as cur:
         _ensure_cluster_versions(cur)
-        cur.execute("SELECT COUNT(*) FROM cluster_versions")
-        total = cur.fetchone()[0]
-        cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
-                              sim_high, sim_threshold, short_name_chars, char_ratio,
-                              select_max, note, is_default
-                       FROM cluster_versions ORDER BY version DESC
-                       OFFSET :1 ROWS FETCH NEXT 10 ROWS ONLY""", [(page - 1) * 10])
-        rows = [{"version": int(r[0]), "created": r[1], "sim_high": float(r[2]),
-                 "sim_threshold": float(r[3]), "short_name_chars": int(r[4]),
-                 "char_ratio": float(r[5]), "select_max": int(r[6]),
-                 "note": r[7] or "", "is_default": r[8] == "Y"} for r in cur.fetchall()]
-    return {"versions": rows, "total": total, "page": page, "pages": max(1, (total + 9) // 10)}
+        return {"versions": versioning.list_flat(cur, versioning.CLUSTER_SPEC)}
 
 
-@router.post("/admin/cluster-versions")
-def admin_cluster_version_add(inp: ClusterVersionIn):
+@router.get("/admin/cluster-lines")
+def admin_cluster_lines():
     with db_cursor() as cur:
         _ensure_cluster_versions(cur)
-        cur.execute("""INSERT INTO cluster_versions (version, sim_high, sim_threshold,
-                         short_name_chars, char_ratio, select_max, note)
-                       SELECT NVL(MAX(version), 0) + 1, :sh, :st, :sn, :cr, :sm, :n
-                       FROM cluster_versions""",
-                    {"sh": inp.sim_high, "st": inp.sim_threshold, "sn": inp.short_name_chars,
-                     "cr": inp.char_ratio, "sm": inp.select_max, "n": inp.note.strip() or None})
-    return {"ok": True}
+        return {"lines": versioning.list_lines(cur, versioning.CLUSTER_SPEC)}
 
 
-@router.post("/admin/cluster-versions/{v}/default")
-def admin_cluster_version_default(v: int):
+@router.get("/admin/cluster-lines/{name}/versions")
+def admin_cluster_line_versions(name: str, page: int = 1):
     with db_cursor() as cur:
         _ensure_cluster_versions(cur)
-        cur.execute("UPDATE cluster_versions SET is_default = 'N'")
-        cur.execute("UPDATE cluster_versions SET is_default = 'Y' WHERE version = :1", [v])
-    return {"ok": True}
+        return versioning.list_versions(cur, versioning.CLUSTER_SPEC, name, page)
 
 
-# ── 테이블 조인 버전 (테이블 간 관계 정의 — 사람이 직접 등록) ─────────────────
-def _ensure_join_versions(cur):
-    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'JOIN_VERSIONS'")
+@router.post("/admin/cluster-lines")
+def admin_cluster_line_add(inp: ClusterLineIn):
+    """새 라인 = 새 이름 v1 (기본 지정은 별도)."""
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        try:
+            versioning.new_line(cur, versioning.CLUSTER_SPEC, inp.name, _cluster_vals(inp))
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+    return {"ok": True, "note": f"라인 '{inp.name}' v1 생성됨 — 기본으로 쓰려면 [기본으로 지정]"}
+
+
+@router.post("/admin/cluster-lines/{name}/versions")
+def admin_cluster_version_up(name: str, inp: ClusterVersionIn):
+    """버전 업 — 기존 라인에 새 버전 (기본 지정은 별도)."""
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        try:
+            v = versioning.version_up(cur, versioning.CLUSTER_SPEC, name, _cluster_vals(inp))
+        except KeyError:
+            raise HTTPException(404, f"없는 라인: {name} (버전 업은 기존 라인에만)")
+    return {"ok": True, "version": v, "note": f"{name} v{v} 생성됨 — 아직 기본이 아닙니다"}
+
+
+@router.post("/admin/cluster-lines/{name}/versions/{v}/default")
+def admin_cluster_version_default(name: str, v: int):
+    with db_cursor() as cur:
+        _ensure_cluster_versions(cur)
+        try:
+            versioning.set_default(cur, versioning.CLUSTER_SPEC, name, v)
+        except KeyError:
+            raise HTTPException(404, f"없는 버전: {name} v{v}")
+    return {"ok": True, "note": f"{name} v{v}이(가) 기본 — 새 조합 run이 이 기준으로 스냅샷"}
+
+
+# ── 매핑 버전 (원천 테이블 등록의 id·시간·필드 매핑 스냅샷 — 소스별) ──────────────
+def _ensure_mapping_versions(cur):
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'MAPPING_VERSIONS'")
     if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE join_versions (
-            version NUMBER PRIMARY KEY, relations CLOB, note VARCHAR2(500),
-            is_default CHAR(1) DEFAULT 'N', created TIMESTAMP DEFAULT SYSTIMESTAMP)""")
-    cur.execute("SELECT COUNT(*) FROM join_versions")
-    if not cur.fetchone()[0]:   # v1 시드 = 빈 관계
-        cur.execute("""INSERT INTO join_versions (version, relations, note, is_default)
-                       VALUES (1, '[]', '초기(빈 관계)', 'Y')""")
+        cur.execute("""CREATE TABLE mapping_versions (
+            source_name VARCHAR2(100) NOT NULL, version NUMBER NOT NULL,
+            id_column VARCHAR2(128), ts_column VARCHAR2(128), field_map CLOB,
+            note VARCHAR2(500), is_default CHAR(1) DEFAULT 'N',
+            created TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT mapping_versions_pk PRIMARY KEY (source_name, version))""")
 
 
-class JoinRelation(BaseModel):
-    from_table: str
-    from_col: str
-    to_table: str
-    to_col: str
+def _seed_mapping_v1(cur, sname: str):
+    """버전이 없으면 현재 source_registry 매핑을 v1(기본)으로 시드."""
+    cur.execute("SELECT COUNT(*) FROM mapping_versions WHERE source_name = :1", [sname])
+    if cur.fetchone()[0]:
+        return
+    cur.execute("SELECT id_column, ts_column, field_map FROM source_registry WHERE source_name = :1", [sname])
+    r = cur.fetchone()
+    if r:
+        cur.execute("""INSERT INTO mapping_versions (source_name, version, id_column, ts_column,
+                         field_map, note, is_default)
+                       VALUES (:1, 1, :2, :3, :4, '초기(현재 등록)', 'Y')""",
+                    [sname, r[0], r[1], _lob_str(r[2])])
 
 
-class JoinVersionIn(BaseModel):
-    relations: list[JoinRelation] = []   # 테이블 간 관계(조인 키) 목록
+class MappingVersionIn(BaseModel):
     note: str = ""
 
 
-@router.get("/admin/join-versions")
-def admin_join_versions():
-    """테이블 조인(관계) 버전 목록 — 최신순."""
+@router.get("/admin/sources/{sname}/mapping-versions")
+def admin_mapping_versions(sname: str, page: int = 1):
+    """소스 매핑(id·시간·필드) 버전 — 최신순, 10개 페이지. 없으면 현재 등록을 v1로 시드."""
     import json
+    page = max(1, page)
     with db_cursor() as cur:
-        _ensure_join_versions(cur)
+        _ensure_mapping_versions(cur)
+        _seed_mapping_v1(cur, sname)
+        cur.execute("SELECT COUNT(*) FROM mapping_versions WHERE source_name = :1", [sname])
+        total = cur.fetchone()[0]
         cur.execute("""SELECT version, TO_CHAR(created, 'YYYY-MM-DD HH24:MI'),
-                              relations, note, is_default
-                       FROM join_versions ORDER BY version DESC""")
+                              id_column, ts_column, field_map, note, is_default
+                       FROM mapping_versions WHERE source_name = :1
+                       ORDER BY version DESC OFFSET :2 ROWS FETCH NEXT 10 ROWS ONLY""",
+                    [sname, (page - 1) * 10])
         rows = []
         for r in cur.fetchall():
             try:
-                rel = json.loads(_lob_str(r[2]) or "[]")
+                fm = json.loads(_lob_str(r[4]) or "{}")
             except (json.JSONDecodeError, TypeError):
-                rel = []
-            rows.append({"version": int(r[0]), "created": r[1], "relations": rel,
-                         "note": r[3] or "", "is_default": r[4] == "Y"})
-    return {"versions": rows}
+                fm = {}
+            rows.append({"version": int(r[0]), "created": r[1], "id_column": r[2] or "",
+                         "ts_column": r[3] or "", "field_map": fm, "note": r[5] or "",
+                         "is_default": r[6] == "Y"})
+    return {"versions": rows, "total": total, "page": page, "pages": max(1, (total + 9) // 10)}
 
 
-@router.post("/admin/join-versions")
-def admin_join_version_add(inp: JoinVersionIn):
-    import json
-    rel = json.dumps([x.model_dump() for x in inp.relations], ensure_ascii=False)
+@router.post("/admin/sources/{sname}/mapping-versions")
+def admin_mapping_version_snapshot(sname: str, inp: MappingVersionIn):
+    """현재 원천 테이블 등록 매핑(id·시간·필드)을 새 버전으로 스냅샷."""
     with db_cursor() as cur:
-        _ensure_join_versions(cur)
-        cur.execute("""INSERT INTO join_versions (version, relations, note)
-                       SELECT NVL(MAX(version), 0) + 1, :r, :n FROM join_versions""",
-                    {"r": rel, "n": inp.note.strip() or None})
+        _ensure_mapping_versions(cur)
+        cur.execute("SELECT id_column, ts_column, field_map FROM source_registry WHERE source_name = :1", [sname])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"소스가 없습니다: {sname}")
+        cur.execute("""INSERT INTO mapping_versions (source_name, version, id_column, ts_column, field_map, note)
+                       SELECT :s, NVL(MAX(version), 0) + 1, :i, :t, :f, :n
+                       FROM mapping_versions WHERE source_name = :s""",
+                    {"s": sname, "i": r[0], "t": r[1], "f": _lob_str(r[2]), "n": inp.note.strip() or None})
     return {"ok": True}
 
 
-@router.post("/admin/join-versions/{v}/default")
-def admin_join_version_default(v: int):
+@router.post("/admin/sources/{sname}/mapping-versions/{v}/default")
+def admin_mapping_version_default(sname: str, v: int):
     with db_cursor() as cur:
-        _ensure_join_versions(cur)
-        cur.execute("UPDATE join_versions SET is_default = 'N'")
-        cur.execute("UPDATE join_versions SET is_default = 'Y' WHERE version = :1", [v])
+        _ensure_mapping_versions(cur)
+        cur.execute("UPDATE mapping_versions SET is_default = 'N' WHERE source_name = :1", [sname])
+        cur.execute("UPDATE mapping_versions SET is_default = 'Y' WHERE source_name = :1 AND version = :2", [sname, v])
     return {"ok": True}
 
 
@@ -1044,12 +1111,14 @@ def admin_source_runs(sname: str):
                    SUM(CASE WHEN d.status = 'done' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN d.status = 'excluded' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END),
-                   r.entity_version, r.cluster_version, r.join_version, r.data_version
+                   r.entity_version, r.cluster_version, r.join_version, r.data_version,
+                   r.entity_line, r.cluster_line
             FROM doc_runs r LEFT JOIN doc_results d ON d.run_id = r.run_id
             WHERE r.source_name = :1
             GROUP BY r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
                      r.settings, r.active, r.started, r.finished,
-                     r.entity_version, r.cluster_version, r.join_version, r.data_version
+                     r.entity_version, r.cluster_version, r.join_version, r.data_version,
+                     r.entity_line, r.cluster_line
             ORDER BY MAX(r.started) DESC""", [sname])
         rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
                  "chat_model": r[3], "embed_model": r[4],
@@ -1060,14 +1129,17 @@ def admin_source_runs(sname: str):
                  "entity_version": int(r[12]) if r[12] is not None else None,
                  "cluster_version": int(r[13]) if r[13] is not None else None,
                  "join_version": int(r[14]) if r[14] is not None else None,
-                 "data_version": int(r[15]) if r[15] is not None else None}
+                 "data_version": int(r[15]) if r[15] is not None else None,
+                 "entity_line": r[16] or "", "cluster_line": r[17] or ""}
                 for r in cur.fetchall()]
     return {"runs": rows}
 
 
 class RunCreateIn(BaseModel):
     domain_version: int | None = None  # 미지정=현재 기본 버전
+    entity_line: str = ""              # 엔티티 라인 이름 — 미지정=활성 라인
     entity_version: int | None = None  # 엔티티(추출 프롬프트) 버전 — 미지정=기본
+    cluster_line: str = ""             # 클러스터 라인 이름 — 미지정=활성 라인
     cluster_version: int | None = None # 클러스터(dedup) 버전 — 미지정=기본
     join_version: int | None = None    # 테이블 조인 버전 — 미지정=기본
     data_version: int | None = None    # 데이터 신선도 버전 — 미지정=기본
@@ -1095,10 +1167,12 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
             raise HTTPException(404, f"소스가 없습니다: {sname}")
         _ensure_entity_versions(cur)   # 버전 테이블 보장 (create_run이 참조)
         _ensure_cluster_versions(cur)
-        _ensure_join_versions(cur)
+        _ensure_mapping_versions(cur)
+        _seed_mapping_v1(cur, sname)
         _ensure_data_versions(cur)
         rid = create_run(cur, sname, domain_version=inp.domain_version,
-                         entity_version=inp.entity_version, cluster_version=inp.cluster_version,
+                         entity_line=inp.entity_line, entity_version=inp.entity_version,
+                         cluster_line=inp.cluster_line, cluster_version=inp.cluster_version,
                          join_version=inp.join_version, data_version=inp.data_version,
                          chat_model=inp.chat_model, embed_model=inp.embed_model,
                          body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,

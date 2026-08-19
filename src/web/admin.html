@@ -178,7 +178,7 @@
   <button data-tab="domains">도메인 시드</button>
   <button data-tab="entity">엔티티 버전</button>
   <button data-tab="cluster">클러스터 버전</button>
-  <button data-tab="join">조인 버전</button>
+  <button data-tab="mapping">매핑 버전</button>
   <button data-tab="data">데이터 버전</button>
   <button data-tab="sources">원천 테이블·구조화</button>
   <button data-tab="events">활동 로그</button>
@@ -190,37 +190,39 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 구조화</b>는 [원천 테이블·구조화] 탭 → 소스 클릭 → "✚ 새 조합 run"에서.</p>
 </section>
 <section class="card" id="sec-entity">
-  <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트 — 버전을 선택해 폼에 불러온 뒤 수정해 새 버전 생성</small></h3>
-  <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
-  <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
-  <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
-  <textarea id="vePack" class="psta" spellcheck="false"></textarea>
-  <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-    <span class="hint" id="veMsg" style="margin:0"></span></div>
-  <div id="verEntity" style="margin-top:8px"><span class="hint">불러오는 중…</span></div>
+  <h3>엔티티 버전 <small>문서 → 목표·접근법 추출 프롬프트 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <div id="entLines"><span class="hint">불러오는 중…</span></div>
+  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+    <div class="schedrow" style="margin:0 0 6px"><input id="veName" placeholder="라인 이름 (새 라인 만들 때)" style="min-width:220px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></div>
+    <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
+    <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
+    <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
+    <textarea id="vePack" class="psta" spellcheck="false"></textarea>
+    <div class="schedrow"><input id="veNote" placeholder="메모(선택)" style="flex:1;min-width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" class="ghost" id="entNew">＋ 새 라인 만들기</button>
+      <span class="hint" id="veMsg" style="margin:0"></span></div>
+  </div>
 </section>
 <section class="card" id="sec-cluster">
-  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값 — 버전을 선택해 폼에 불러온 뒤 수정해 새 버전 생성</small></h3>
-  <div class="schedrow" style="margin:6px 0">
-    <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
-    <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
-    <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
-    <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
-    <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
-    <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-    <span class="hint" id="vcMsg" style="margin:0"></span>
+  <h3>클러스터 버전 <small>비슷한 노드 병합(dedup) 임계값 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
+  <div id="clsLines"><span class="hint">불러오는 중…</span></div>
+  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+    <div class="schedrow" style="margin:6px 0">
+      <input id="vcName" placeholder="라인 이름 (새 라인)" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
+      <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
+      <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
+      <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
+      <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
+      <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
+      <button type="button" class="ghost" id="clsNew">＋ 새 라인 만들기</button>
+      <span class="hint" id="vcMsg" style="margin:0"></span>
+    </div>
   </div>
-  <div id="verCluster"><span class="hint">불러오는 중…</span></div>
 </section>
-<section class="card" id="sec-join">
-  <h3>테이블 조인 버전 <small>테이블 간 관계(조인 키) — 사람이 직접 등록</small></h3>
-  <div id="verJoin"><span class="hint">불러오는 중…</span></div>
-  <details style="margin-top:6px"><summary style="cursor:pointer;font-size:.82rem;color:var(--mut)">+ 새 테이블 조인 버전</summary>
-    <label class="k2">관계 목록 <small>한 줄에 하나: <code>테이블A.컬럼A -&gt; 테이블B.컬럼B</code></small></label>
-    <textarea id="vjRel" class="psta" spellcheck="false" placeholder="orders.customer_id -> customers.id&#10;orders.product_id -> products.id"></textarea>
-    <div class="schedrow"><input id="vjNote" placeholder="메모(선택)" style="flex:1;min-width:200px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" id="vjAdd">테이블 조인 버전 생성</button><span class="hint" id="vjMsg" style="margin:0"></span></div>
-  </details>
+<section class="card" id="sec-mapping">
+  <h3>매핑 버전 <small>원천 테이블 등록의 id·시간·필드 매핑 스냅샷 (소스별) — 매핑 수정은 [원천 테이블·구조화] 탭, 여기선 버전 스냅샷·기본 지정</small></h3>
+  <div id="verMapping"><span class="hint">불러오는 중…</span></div>
 </section>
 <section class="card" id="sec-users">
   <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
@@ -1099,7 +1101,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>조인</th><th>데이터</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>엔티티</th><th>클러스터</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1108,8 +1110,8 @@ async function loadRuns(src) {
     pick.type = "radio"; pick.name = "runpick"; pick.value = x.run_id;
     const c0 = document.createElement("td"); c0.appendChild(pick); tr.appendChild(c0);
     [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`,
-     x.entity_version != null ? `v${x.entity_version}` : "-",
-     x.cluster_version != null ? `v${x.cluster_version}` : "-",
+     x.entity_version != null ? `${x.entity_line || "?"}·v${x.entity_version}` : "-",
+     x.cluster_version != null ? `${x.cluster_line || "?"}·v${x.cluster_version}` : "-",
      x.join_version != null ? `v${x.join_version}` : "-",
      x.data_version != null ? `v${x.data_version}` : "-",
      x.chat_model, x.embed_model, x.settings, x.done, x.excluded, x.error,
@@ -1149,17 +1151,18 @@ async function renderRunForm(src) {
   const embeds = allm.filter(m => m.kind === "embedding");
   const entV = (await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
   const clsV = (await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
-  const joinV = (await fetch("/admin/join-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
+  const joinV = (await fetch(`/admin/sources/${encodeURIComponent(src)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []}))).versions || [];
   const dataV = (await fetch(`/admin/sources/${encodeURIComponent(src)}/data-versions`).then(r => r.json()).catch(() => ({versions: []}))).versions || [];
   const vopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
+  const vlopt = v => `<option value="${esc(v.name)}\t${v.version}">${esc(v.name)}·v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
   const dopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""} (${v.watermark || "-"}·${v.doc_count}건)</option>`;
   f.innerHTML = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
       <b style="font-size:.78rem">버전 조합:</b>
       <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
-      <select id="rfEntVer" title="엔티티 추출 버전 — 버전 관리 탭"><option value="">엔티티(기본)</option>${entV.map(vopt).join("")}</select>
-      <select id="rfClsVer" title="클러스터(dedup) 버전 — 버전 관리 탭"><option value="">클러스터(기본)</option>${clsV.map(vopt).join("")}</select>
-      <select id="rfJoinVer" title="테이블 조인 버전"><option value="">조인(기본)</option>${joinV.map(vopt).join("")}</select>
+      <select id="rfEntVer" title="엔티티 (라인·버전) — 버전 관리 탭"><option value="">엔티티(활성)</option>${entV.map(vlopt).join("")}</select>
+      <select id="rfClsVer" title="클러스터 (라인·버전) — 버전 관리 탭"><option value="">클러스터(활성)</option>${clsV.map(vlopt).join("")}</select>
+      <select id="rfJoinVer" title="매핑 버전(id·시간·필드)"><option value="">매핑(기본)</option>${joinV.map(vopt).join("")}</select>
       <select id="rfDataVer" title="데이터 신선도 버전(적재 시점)"><option value="">데이터(기본)</option>${dataV.map(dopt).join("")}</select>
       <select id="rfModel" title="판정 LLM"><option value="">LLM(기본)</option>
         ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
@@ -1174,7 +1177,8 @@ async function renderRunForm(src) {
     const body = {};
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
     iI("rfVer", "domain_version");
-    iI("rfEntVer", "entity_version"); iI("rfClsVer", "cluster_version");
+    const vl = (id, lk, vk) => { const s = $(id).value; if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
+    vl("rfEntVer", "entity_line", "entity_version"); vl("rfClsVer", "cluster_line", "cluster_version");
     iI("rfJoinVer", "join_version"); iI("rfDataVer", "data_version");
     if ($("rfModel").value) body.chat_model = $("rfModel").value;
     if ($("rfEmbed").value) body.embed_model = $("rfEmbed").value;
@@ -1632,29 +1636,6 @@ $("evkind").onchange = $("evlevel").onchange = () => { evPage = 1; loadEvents();
 
 // ── 탭 라우터 — 탭 진입 시마다 해당 섹션 데이터를 새로 로드 (동기화 문제 원천 차단) ──
 // ── 버전 관리 탭 ─────────────────────────────────────────────
-function _verList(box, vers, kind, summ) {
-  box.innerHTML = "";
-  const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>버전</th><th>생성</th><th>설정</th><th>메모</th><th>기본</th></tr></thead>";
-  const tb = document.createElement("tbody");
-  (vers || []).forEach(v => {
-    const tr = document.createElement("tr");
-    [`v${v.version}`, v.created || "", summ(v), v.note || ""].forEach(c => {
-      const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
-    const td = document.createElement("td");
-    if (v.is_default) { td.textContent = "★ 기본"; td.className = "sel"; }
-    else {
-      const b = document.createElement("button"); b.type = "button"; b.className = "ghost";
-      b.textContent = "기본으로";
-      b.onclick = async () => { await fetch(`/admin/${kind}-versions/${v.version}/default`,
-        {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-        ({entity: loadEntityVer, cluster: loadClusterVer, join: loadJoinVer}[kind] || (() => {}))(); };
-      td.appendChild(b);
-    }
-    tr.appendChild(td); tb.appendChild(tr);
-  });
-  t.appendChild(tb); box.appendChild(t);
-}
 async function loadDataVer() {
   const [srcs, stat] = await Promise.all([
     fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []})),
@@ -1701,102 +1682,165 @@ function _verPager(bar, j, page, reload) {
     if (page < j.pages) bar.appendChild(_verBtn("▶", () => reload(page + 1)));
   }
 }
-async function loadEntityVer(page = 1) {
-  page = page || 1;
-  const box = $("verEntity"); box.innerHTML = "⏳";
-  const j = await fetch(`/admin/entity-versions?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
+// ── 버전 관리 공통 컴포넌트 — 이름별 라인 목록 → 행 클릭=버전 패널 펼침. 엔티티·클러스터 공용 ──
+function renderVersionManager(cfg) {
+  $(cfg.newBtn).onclick = () => vmNewLine(cfg);
+  vmLoadLines(cfg);
+}
+async function vmLoadLines(cfg) {
+  const box = $(cfg.lines); box.innerHTML = "⏳";
+  const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
   box.innerHTML = "";
+  if (!(j.lines || []).length) {
+    box.innerHTML = "<span class='hint'>아직 라인이 없습니다 — 아래 폼에서 이름을 넣고 [＋ 새 라인 만들기]</span>"; return;
+  }
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th>라인</th><th>버전 수</th><th>활성 버전</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  j.lines.forEach(ln => {
+    const tr = document.createElement("tr"); tr.style.cursor = "pointer";
+    [ln.name, `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"]
+      .forEach(x => { const td = document.createElement("td"); td.textContent = x; tr.appendChild(td); });
+    if (ln.default_version != null) tr.classList.add("sel");
+    tr.onclick = () => { $(cfg.name).value = ln.name; vmToggle(cfg, ln.name, tr); };
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+}
+function vmToggle(cfg, name, tr) {
+  const nx = tr.nextElementSibling;
+  const open = nx && nx.classList.contains("verrow");
+  $(cfg.lines).querySelectorAll(".verrow").forEach(x => x.remove());
+  if (open) return;                         // 같은 라인 재클릭 = 접기
+  const row = document.createElement("tr"); row.className = "verrow";
+  const td = document.createElement("td"); td.colSpan = 3; row.appendChild(td); tr.after(row);
+  vmVersions(cfg, name, 1, td);
+}
+async function vmVersions(cfg, name, page, td) {
+  td.innerHTML = "⏳";
+  const j = await fetch(`${cfg.versions(name)}?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
+  td.innerHTML = "";
   const t = document.createElement("table"); t.className = "vertable";
   t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th></tr></thead>";
   const tb = document.createElement("tbody");
   (j.versions || []).forEach(v => {
-    const tr = document.createElement("tr");
-    const sel = document.createElement("input"); sel.type = "radio"; sel.name = "entpick"; sel.value = v.version;
-    sel.onclick = () => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || "";
-      $("veNote").value = v.note || ""; $("veMsg").textContent = `v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기]`; };
-    const c0 = document.createElement("td"); c0.appendChild(sel); tr.appendChild(c0);
-    [`v${v.version}`, v.created || "", (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
-     v.note || "", v.is_default ? "★ 기본" : ""].forEach(x => { const c = document.createElement("td"); c.textContent = x; tr.appendChild(c); });
-    if (v.is_default) tr.classList.add("sel");
-    tb.appendChild(tr);
+    const vr = document.createElement("tr");
+    const sel = document.createElement("input"); sel.type = "radio"; sel.name = cfg.radio; sel.value = v.version;
+    sel.onclick = () => { cfg.setForm(v); $(cfg.name).value = name;
+      $(cfg.msg).textContent = `${name} v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [버전 업]`; };
+    const c0 = document.createElement("td"); c0.appendChild(sel); vr.appendChild(c0);
+    [`v${v.version}`, v.created || "", cfg.summary(v), v.note || "", v.is_default ? "★ 기본" : ""]
+      .forEach(x => { const c = document.createElement("td"); c.textContent = x; vr.appendChild(c); });
+    if (v.is_default) vr.classList.add("sel");
+    tb.appendChild(vr);
   });
-  t.appendChild(tb); box.appendChild(t);
+  t.appendChild(tb); td.appendChild(t);
   const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
-  bar.appendChild(_verBtn("✚ 새 버전 만들기 (현재 폼)", async () => {
-    if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return; }
-    if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return; }
-    const r = await fetch("/admin/entity-versions", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value})});
-    const jj = await r.json().catch(() => ({})); $("veMsg").textContent = r.ok ? "✓ 새 버전 생성됨" : (jj.detail || `실패 ${r.status}`);
-    if (r.ok) loadEntityVer(1);
+  bar.appendChild(_verBtn("✚ 이 라인에 버전 업 (현재 폼)", async () => {
+    if (!cfg.validate()) return;
+    const r = await fetch(cfg.versions(name), {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(cfg.readForm())});
+    const jj = await r.json().catch(() => ({}));
+    $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "버전 업"}` : (jj.detail || `실패 ${r.status}`);
+    if (r.ok) { vmVersions(cfg, name, 1, td); vmLoadLines(cfg); }
   }));
   bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
-    const p = box.querySelector("input[name=entpick]:checked"); if (!p) { $("veMsg").textContent = "버전을 먼저 선택하세요"; return; }
-    await fetch(`/admin/entity-versions/${p.value}/default`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-    loadEntityVer(page);
+    const p = td.querySelector(`input[name=${cfg.radio}]:checked`);
+    if (!p) { $(cfg.msg).textContent = "버전을 먼저 선택하세요"; return; }
+    const r = await fetch(cfg.setDefault(name, p.value), {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    const jj = await r.json().catch(() => ({}));
+    $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "기본 지정"}` : (jj.detail || `실패 ${r.status}`);
+    if (r.ok) { vmVersions(cfg, name, page, td); vmLoadLines(cfg); }
   }));
-  _verPager(bar, j, page, loadEntityVer); box.appendChild(bar);
+  _verPager(bar, j, page, p => vmVersions(cfg, name, p, td)); td.appendChild(bar);
 }
-async function loadClusterVer(page = 1) {
-  page = page || 1;
-  const box = $("verCluster"); box.innerHTML = "⏳";
-  const j = await fetch(`/admin/cluster-versions?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
-  box.innerHTML = "";
-  const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>설정</th><th>메모</th><th>기본</th></tr></thead>";
-  const tb = document.createElement("tbody");
-  (j.versions || []).forEach(v => {
-    const tr = document.createElement("tr");
-    const sel = document.createElement("input"); sel.type = "radio"; sel.name = "clspick"; sel.value = v.version;
-    sel.onclick = () => { $("vcHigh").value = v.sim_high; $("vcThr").value = v.sim_threshold; $("vcShort").value = v.short_name_chars;
-      $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max; $("vcNote").value = v.note || "";
-      $("vcMsg").textContent = `v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기]`; };
-    const c0 = document.createElement("td"); c0.appendChild(sel); tr.appendChild(c0);
-    [`v${v.version}`, v.created || "", `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}`,
-     v.note || "", v.is_default ? "★ 기본" : ""].forEach(x => { const c = document.createElement("td"); c.textContent = x; tr.appendChild(c); });
-    if (v.is_default) tr.classList.add("sel");
-    tb.appendChild(tr);
-  });
-  t.appendChild(tb); box.appendChild(t);
-  const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
-  bar.appendChild(_verBtn("✚ 새 버전 만들기 (현재 폼)", async () => {
-    const r = await fetch("/admin/cluster-versions", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
-        short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
-        select_max: parseInt($("vcSel").value), note: $("vcNote").value})});
-    const jj = await r.json().catch(() => ({})); $("vcMsg").textContent = r.ok ? "✓ 새 버전 생성됨" : (jj.detail || `실패 ${r.status}`);
-    if (r.ok) loadClusterVer(1);
-  }));
-  bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
-    const p = box.querySelector("input[name=clspick]:checked"); if (!p) { $("vcMsg").textContent = "버전을 먼저 선택하세요"; return; }
-    await fetch(`/admin/cluster-versions/${p.value}/default`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-    loadClusterVer(page);
-  }));
-  _verPager(bar, j, page, loadClusterVer); box.appendChild(bar);
+async function vmNewLine(cfg) {
+  const name = $(cfg.name).value.trim();
+  if (!name) { $(cfg.msg).textContent = "새 라인 이름을 입력하세요"; return; }
+  if (!cfg.validate()) return;
+  const r = await fetch(cfg.linesEndpoint, {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, ...cfg.readForm()})});
+  const jj = await r.json().catch(() => ({}));
+  $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
+  if (r.ok) vmLoadLines(cfg);
 }
-async function loadJoinVer() {
-  const jv = await fetch("/admin/join-versions").then(r => r.json()).catch(() => ({versions: []}));
-  _verList($("verJoin"), jv.versions, "join", v => `관계 ${(v.relations || []).length}건`);
-}
-$("vjAdd").onclick = async () => {
-  $("vjMsg").textContent = "";
-  const rels = $("vjRel").value.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
-    const m = l.match(/^(.+?)\.(.+?)\s*->\s*(.+?)\.(.+?)$/);
-    return m ? {from_table: m[1].trim(), from_col: m[2].trim(), to_table: m[3].trim(), to_col: m[4].trim()} : null;
-  }).filter(Boolean);
-  const r = await fetch("/admin/join-versions", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({relations: rels, note: $("vjNote").value})});
-  const j = await r.json().catch(() => ({}));
-  $("vjMsg").textContent = r.ok ? `✓ 생성됨 (관계 ${rels.length}건)` : (j.detail || `실패 ${r.status}`);
-  if (r.ok) { $("vjRel").value = $("vjNote").value = ""; loadJoinVer(); }
+const ENTITY_VM = {
+  lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
+  linesEndpoint: "/admin/entity-lines",
+  versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
+  setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
+  readForm: () => ({doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
+  setForm: v => { $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
+  summary: v => (v.doc_prompt ? "문서:커스텀" : "문서:기본") + (v.pack_prompt ? "·묶음:커스텀" : ""),
+  validate: () => {
+    if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return false; }
+    if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return false; }
+    return true;
+  },
 };
+const CLUSTER_VM = {
+  lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
+  linesEndpoint: "/admin/cluster-lines",
+  versions: n => `/admin/cluster-lines/${encodeURIComponent(n)}/versions`,
+  setDefault: (n, v) => `/admin/cluster-lines/${encodeURIComponent(n)}/versions/${v}/default`,
+  readForm: () => ({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
+    short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
+    select_max: parseInt($("vcSel").value), note: $("vcNote").value}),
+  setForm: v => { $("vcHigh").value = v.sim_high; $("vcThr").value = v.sim_threshold; $("vcShort").value = v.short_name_chars;
+    $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max; $("vcNote").value = v.note || ""; },
+  summary: v => `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}`,
+  validate: () => true,
+};
+async function loadMappingVer() {
+  const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
+  const box = $("verMapping"); box.innerHTML = "";
+  if (!srcs.length) { box.innerHTML = `<span class="hint">등록된 소스가 없습니다</span>`; return; }
+  for (const s of srcs) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0";
+    const head = document.createElement("div"); head.className = "schedrow";
+    const info = document.createElement("b"); info.textContent = s.source_name + " ";
+    const snap = document.createElement("button"); snap.type = "button"; snap.textContent = "📸 현재 매핑 스냅샷";
+    snap.onclick = async () => {
+      await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions`,
+        {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({note: ""})});
+      loadMappingVer();
+    };
+    head.append(info, snap); wrap.appendChild(head);
+    const mv = await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions`)
+      .then(r => r.json()).catch(() => ({versions: []}));
+    const t = document.createElement("table"); t.className = "vertable"; t.style.marginTop = "4px";
+    t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>id 컬럼</th><th>시간 컬럼</th><th>필드 매핑</th><th>메모</th><th>기본</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    (mv.versions || []).forEach(v => {
+      const tr = document.createElement("tr");
+      const sel = document.createElement("input"); sel.type = "radio"; sel.name = "mappick_" + s.source_name; sel.value = v.version;
+      const c0 = document.createElement("td"); c0.appendChild(sel); tr.appendChild(c0);
+      [`v${v.version}`, v.created || "", v.id_column || "-", v.ts_column || "-",
+       Object.entries(v.field_map || {}).map(([k, c]) => `${k}=${c}`).join(", "),
+       v.note || "", v.is_default ? "★ 기본" : ""].forEach(x => { const c = document.createElement("td"); c.textContent = x; tr.appendChild(c); });
+      if (v.is_default) tr.classList.add("sel");
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); wrap.appendChild(t);
+    const bar = document.createElement("div"); bar.style.cssText = "margin-top:4px";
+    bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
+      const p = wrap.querySelector(`input[name="mappick_${s.source_name}"]:checked`);
+      if (!p) return;
+      await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions/${p.value}/default`,
+        {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+      loadMappingVer();
+    }));
+    wrap.appendChild(bar); box.appendChild(wrap);
+  }
+}
 
 const TABS = {
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
-  entity:  {secs: ["sec-entity"], load: () => loadEntityVer()},
-  cluster: {secs: ["sec-cluster"], load: () => loadClusterVer()},
-  join:    {secs: ["sec-join"], load: () => loadJoinVer()},
+  entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
+  cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
+  mapping: {secs: ["sec-mapping"], load: () => loadMappingVer()},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources(); loadTables();

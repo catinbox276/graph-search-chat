@@ -10,7 +10,7 @@ B-full 설계 (docs/plan 협의 2026-08-14):
 import json
 import uuid
 
-from core import config, settings
+from core import config, settings, versioning
 
 
 def ensure_runs(cur):
@@ -48,6 +48,11 @@ def ensure_runs(cur):
                        WHERE table_name = 'DOC_RUNS' AND column_name = :1""", [col])
         if not cur.fetchone()[0]:
             cur.execute(f"ALTER TABLE doc_runs ADD ({col} NUMBER)")
+    for col in ("ENTITY_LINE", "CLUSTER_LINE"):   # 엔티티·클러스터 라인 이름 (멱등)
+        cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                       WHERE table_name = 'DOC_RUNS' AND column_name = :1""", [col])
+        if not cur.fetchone()[0]:
+            cur.execute(f"ALTER TABLE doc_runs ADD ({col} VARCHAR2(100))")
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE doc_results (
@@ -142,14 +147,14 @@ def _lob(v) -> str:
     return (v.read() if hasattr(v, "read") else v) or ""
 
 
-def _default_ver(cur, table: str):
-    """버전 테이블의 기본 버전(없으면 최대). 테이블 없으면 None."""
+def _default_mapping_ver(cur, source_name: str):
     try:
-        cur.execute(f"SELECT version FROM {table} WHERE is_default = 'Y'")
+        cur.execute("SELECT version FROM mapping_versions WHERE source_name = :1 AND is_default = 'Y'",
+                    [source_name])
         r = cur.fetchone()
         if r:
             return int(r[0])
-        cur.execute(f"SELECT MAX(version) FROM {table}")
+        cur.execute("SELECT MAX(version) FROM mapping_versions WHERE source_name = :1", [source_name])
         r = cur.fetchone()
         return int(r[0]) if r and r[0] is not None else None
     except Exception:
@@ -170,14 +175,16 @@ def _default_data_ver(cur, source_name: str):
         return None
 
 
-def create_run(cur, source_name: str, domain_version=None, entity_version=None,
-               cluster_version=None, join_version=None, data_version=None,
+def create_run(cur, source_name: str, domain_version=None, entity_line="", entity_version=None,
+               cluster_line="", cluster_version=None, join_version=None, data_version=None,
                chat_model="", embed_model="", body_chars=None,
                pack_tokens=None, no_think=None, dedup=None) -> str:
-    """새 조합 run 생성 (비활성) — 도메인·엔티티·클러스터 버전 번호를 참조해
-    그 버전의 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/기본값.
+    """새 조합 run 생성 (비활성) — 도메인 버전 + 엔티티·클러스터 (라인, 버전) + 매핑·데이터
+    버전을 참조해 그 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/활성값.
     구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
     ensure_runs(cur)
+    versioning.ensure(cur, versioning.ENTITY_SPEC)    # name 컬럼·기본 라인 보장
+    versioning.ensure(cur, versioning.CLUSTER_SPEC)
     c = _combo(cur, source_name)
     st = json.loads(c["settings"])
     if body_chars is not None:
@@ -186,44 +193,51 @@ def create_run(cur, source_name: str, domain_version=None, entity_version=None,
         st["pack_tokens"] = pack_tokens
     if no_think is not None:
         st["no_think"] = no_think
-    # 엔티티 버전 선택 → 그 버전의 프롬프트를 스냅샷
-    ev = entity_version or _default_ver(cur, "entity_versions")
-    if ev is not None:
-        cur.execute("SELECT doc_prompt, pack_prompt FROM entity_versions WHERE version = :1", [ev])
+    # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인)
+    en_name, ev = (entity_line or None), entity_version
+    if not (en_name and ev):
+        en_name, ev = versioning.active(cur, "entity_versions")
+    if en_name and ev is not None:
+        cur.execute("SELECT doc_prompt, pack_prompt FROM entity_versions WHERE name = :1 AND version = :2",
+                    [en_name, ev])
         r = cur.fetchone()
         if r:
             st["doc_prompt"], st["pack_prompt"] = _lob(r[0]), _lob(r[1])
-    # 클러스터 버전 선택 → dedup 스냅샷
-    cv = cluster_version or _default_ver(cur, "cluster_versions")
-    if cv is not None:
+    # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
+    cl_name, cv = (cluster_line or None), cluster_version
+    if not (cl_name and cv):
+        cl_name, cv = versioning.active(cur, "cluster_versions")
+    if cl_name and cv is not None:
         cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio, select_max
-                       FROM cluster_versions WHERE version = :1""", [cv])
+                       FROM cluster_versions WHERE name = :1 AND version = :2""", [cl_name, cv])
         r = cur.fetchone()
         if r:
             st["dedup"] = {"sim_high": float(r[0]), "sim_threshold": float(r[1]),
                            "short_name_chars": int(r[2]), "char_ratio": float(r[3]),
                            "select_max": int(r[4])}
-    elif dedup:   # 버전 없을 때만 raw override (하위호환)
+    elif dedup:   # 라인 없을 때만 raw override (하위호환)
         st["dedup"] = {**st.get("dedup", {}),
                        **{k: v for k, v in dedup.items() if v is not None}}
-    # 테이블 조인 버전 → 관계 스냅샷(추적·향후 다중 테이블 조립용). 데이터 버전 → 기록.
-    jv = join_version or _default_ver(cur, "join_versions")
+    # 매핑 버전(join_version 컬럼 재사용) → 원천 등록 매핑(id·시간·필드) 스냅샷. 데이터 버전 → 기록.
+    jv = join_version or _default_mapping_ver(cur, source_name)
     if jv is not None:
         try:
-            cur.execute("SELECT relations FROM join_versions WHERE version = :1", [jv])
+            cur.execute("""SELECT id_column, ts_column, field_map FROM mapping_versions
+                           WHERE source_name = :1 AND version = :2""", [source_name, jv])
             r = cur.fetchone()
             if r:
-                st["join_relations"] = json.loads(_lob(r[0]) or "[]")
+                st["mapping"] = {"id_column": r[0], "ts_column": r[1],
+                                 "field_map": json.loads(_lob(r[2]) or "{}")}
         except Exception:
             pass
     dv = data_version or _default_data_ver(cur, source_name)
     rid = uuid.uuid4().hex
     cur.execute("""INSERT INTO doc_runs (run_id, source_name, domain, domain_version,
-                     entity_version, cluster_version, join_version, data_version,
-                     chat_model, embed_model, settings, active)
-                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, 'N')""",
+                     entity_line, entity_version, cluster_line, cluster_version,
+                     join_version, data_version, chat_model, embed_model, settings, active)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, 'N')""",
                 [rid, source_name, c["domain"], domain_version or c["domain_version"],
-                 ev, cv, jv, dv, (chat_model or c["chat_model"]).strip(),
+                 en_name, ev, cl_name, cv, jv, dv, (chat_model or c["chat_model"]).strip(),
                  (embed_model or c["embed_model"]).strip(),
                  json.dumps(st, ensure_ascii=False)])
     return rid
