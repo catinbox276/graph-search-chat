@@ -96,6 +96,28 @@
   .toolgrp[open] > summary::before { content: "▾ "; }
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
+  /* 파이프라인 캔버스 — 고정 DAG 노드 뷰 (n8n식 보기, 드래그 편집은 불필요라 없음) */
+  .plwrap { display: flex; align-items: stretch; overflow-x: auto; padding: 14px 4px; }
+  .plnode { position: relative; min-width: 148px; max-width: 200px; flex: 1;
+            border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px;
+            cursor: pointer; user-select: none; }
+  .plnode:hover { border-color: #9db3e8; }
+  .plnode.fixed { cursor: default; }
+  .plnode.custom { border-color: #4a7dff; box-shadow: 0 0 0 1px #4a7dff inset; }
+  .plnode .t { font-size: .7rem; color: var(--mut); margin-bottom: 3px; white-space: nowrap; }
+  .plnode .v { font-weight: 700; font-size: .84rem; word-break: break-all; }
+  .plnode .s { font-size: .69rem; color: var(--mut); margin-top: 4px; line-height: 1.35; }
+  .plnode .warn { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: .68rem;
+                  background: rgba(255, 160, 0, .18); }
+  .plarrow { display: flex; align-items: center; padding: 0 7px; color: var(--mut);
+             font-size: 1.05rem; flex: none; }
+  .plpop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; min-width: 250px;
+           max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 10px;
+           background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.16); padding: 6px; }
+  .plpop .it { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: .78rem; }
+  .plpop .it:hover { background: rgba(74,125,255,.08); }
+  .plpop .it.on { background: rgba(74,125,255,.14); font-weight: 700; }
+  .plpop .it small { color: var(--mut); display: block; }
   .diffrow td { background: rgba(255, 196, 60, .16); }
   .diffrow td:first-child { font-weight: 600; }
   .fgroup { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
@@ -177,6 +199,7 @@
 
 <main>
 <nav id="admtabs" class="admtabs">
+  <button data-tab="pipe">🔀 파이프라인</button>
   <button data-tab="models">모델</button>
   <button data-tab="mcp">MCP 서버</button>
   <button data-tab="agent">에이전트</button>
@@ -190,6 +213,22 @@
   <button data-tab="events">활동 로그</button>
   <button data-tab="users">계정 관리</button>
 </nav>
+<section class="card" id="sec-pipe">
+  <h3>🔀 파이프라인 <small>원천 → 그래프 전체 흐름 — 노드 클릭으로 버전을 고르고, 그 조합으로 run을 만듭니다</small></h3>
+  <div class="schedrow" style="margin:4px 0 0">
+    <select id="plSrc" title="파이프라인을 볼 소스"></select>
+    <select id="plModel" title="판정 LLM (빈값=기본)"><option value="">LLM(기본)</option></select>
+    <select id="plEmbed" title="임베딩 (빈값=기본)"><option value="">임베딩(기본)</option></select>
+    <button type="button" class="ghost" id="plReset" title="노드 선택을 전부 기본(활성)으로 되돌림">↺ 기본값</button>
+    <button type="button" id="plGo" title="지금 노드들에 표시된 조합으로 run 생성 (비활성 — 구조화·활성 전환은 아래 run 목록에서)">▶ 이 조합으로 run 생성</button>
+    <span class="hint" id="plMsg" style="margin:0"></span>
+  </div>
+  <div id="plBanner"></div>
+  <div id="plCanvas"><span class="hint">불러오는 중…</span></div>
+  <div id="plRuns"></div>
+  <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드. run을 [👁 조합]하면 캔버스가 그 run의 스냅샷을 보여줍니다.
+     세부 관리(버전 만들기·편집)는 각 탭에서, 여기서는 <b>고르고 조합해 실행</b>합니다.</p>
+</section>
 <section class="card" id="sec-data">
   <h3>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h3>
   <div id="verData"><span class="hint">불러오는 중…</span></div>
@@ -2461,7 +2500,252 @@ $("ppSave").onclick = async () => {
   if (r.ok) loadPresets();
 };
 
+// ── 🔀 파이프라인 캔버스 — 고정 DAG(원천→매핑→데이터→도메인→①추출→②병합→그래프) ──
+// 노드 클릭 = 그 차원의 버전 선택 팝오버. 조합이 완성되면 [▶ run 생성].
+// run [👁 조합] = 캔버스가 그 run의 스냅샷을 표시(보기 모드).
+const PL = {src: "", sel: {}, view: null, d: {}};
+
+async function loadPipeline() {
+  const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
+  PL.d.sources = srcs;
+  const ss = $("plSrc");
+  ss.innerHTML = srcs.map(s =>
+    `<option value="${esc(s.source_name)}">${esc(s.source_name)}${s.domain ? "" : " (도메인 미지정)"}</option>`).join("")
+    || `<option value="">소스 없음</option>`;
+  if (PL.src && srcs.some(s => s.source_name === PL.src)) ss.value = PL.src;
+  PL.src = ss.value;
+  ss.onchange = () => { PL.src = ss.value; PL.sel = {}; PL.view = null; plRefresh(); };
+  $("plReset").onclick = () => { PL.sel = {}; PL.view = null; $("plModel").value = ""; $("plEmbed").value = ""; plRender(); };
+  $("plGo").onclick = plCreateRun;
+  const [models, allm] = await Promise.all([
+    fetch("/models").then(r => r.json()).catch(() => ({llm: []})),
+    fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))]);
+  $("plModel").innerHTML = `<option value="">LLM(기본)</option>` +
+    (models.llm || []).map(m => `<option>${esc(m.name)}</option>`).join("");
+  $("plEmbed").innerHTML = `<option value="">임베딩(기본)</option>` +
+    (allm.models || []).filter(m => m.kind === "embedding").map(m => `<option>${esc(m.name)}</option>`).join("");
+  await plRefresh();
+}
+
+async function plRefresh() {
+  const src = PL.src;
+  if (!src) { $("plCanvas").innerHTML = `<span class="hint">등록된 소스가 없습니다 — [원천 테이블·구조화] 탭에서 먼저 등록하세요</span>`; return; }
+  $("plCanvas").innerHTML = `<span class="hint">⏳ 파이프라인 조회 중…</span>`;
+  const sinfo = (PL.d.sources || []).find(s => s.source_name === src) || {};
+  const dom = sinfo.domain || "";
+  const [maps, datas, ents, clus, runs, status, domv] = await Promise.all([
+    fetch(`/admin/sources/${encodeURIComponent(src)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []})),
+    fetch(`/admin/sources/${encodeURIComponent(src)}/data-versions`).then(r => r.json()).catch(() => ({versions: []})),
+    fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []})),
+    fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []})),
+    fetch(`/admin/sources/${encodeURIComponent(src)}/runs`).then(r => r.json()).catch(() => ({runs: []})),
+    fetch("/admin/doc-status").then(r => r.json()).catch(() => ({sources: []})),
+    dom ? fetch(`/admin/domains/${encodeURIComponent(dom)}/versions?page=1`).then(r => r.json()).catch(() => ({versions: []}))
+        : Promise.resolve({versions: []})]);
+  PL.d = {...PL.d, sinfo, dom, maps: maps.versions || [], datas: datas.versions || [],
+          ents: ents.versions || [], clus: clus.versions || [], runs: runs.runs || [],
+          stat: (status.sources || []).find(x => x.source === src) || {},
+          domv: domv.versions || []};
+  plRender();
+}
+
+function _plDefault(list) { return list.find(v => v.is_default) || list[0] || null; }
+
+function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop}) {
+  const n = document.createElement("div");
+  n.className = "plnode" + (custom ? " custom" : "") + (fixed ? " fixed" : "");
+  const t = document.createElement("div"); t.className = "t"; t.textContent = title;
+  const v = document.createElement("div"); v.className = "v"; v.textContent = value;
+  n.append(t, v);
+  if (sub) { const s = document.createElement("div"); s.className = "s"; s.textContent = sub; n.appendChild(s); }
+  if (warn) { const w = document.createElement("span"); w.className = "warn"; w.textContent = warn.text; w.title = warn.title || ""; n.appendChild(w); }
+  if (pop) n.onclick = ev => { ev.stopPropagation(); plOpenPop(n, pop); };
+  else if (onClick) n.onclick = onClick;
+  canvas.appendChild(n);
+  return n;
+}
+function plArrow(canvas) {
+  const a = document.createElement("div"); a.className = "plarrow"; a.textContent = "▶"; canvas.appendChild(a);
+}
+function plOpenPop(node, {title, items, current, onPick}) {
+  document.querySelectorAll(".plpop").forEach(p => p.remove());
+  const pop = document.createElement("div"); pop.className = "plpop";
+  const h = document.createElement("div"); h.style.cssText = "font-weight:700;font-size:.75rem;padding:2px 8px 6px";
+  h.textContent = title; pop.appendChild(h);
+  items.forEach(it => {
+    const d = document.createElement("div");
+    d.className = "it" + (String(it.value) === String(current) ? " on" : "");
+    d.textContent = it.label;
+    if (it.sub) { const sm = document.createElement("small"); sm.textContent = it.sub; d.appendChild(sm); }
+    d.onclick = ev => { ev.stopPropagation(); pop.remove(); onPick(it.value); };
+    pop.appendChild(d);
+  });
+  node.appendChild(pop);
+  setTimeout(() => document.addEventListener("click", () => pop.remove(), {once: true}), 0);
+}
+
+function plRender() {
+  const c = $("plCanvas"); c.innerHTML = "";
+  const wrap = document.createElement("div"); wrap.className = "plwrap"; c.appendChild(wrap);
+  const D = PL.d, sinfo = D.sinfo || {}, stat = D.stat || {};
+  const viewing = !!PL.view;                       // run 스냅샷 보기 모드
+  const R = PL.view || {};                          // 보기 모드일 때 run 값
+  const sel = viewing ? {} : PL.sel;                // 편집 모드일 때 선택값
+  const active = (D.runs || []).find(r => r.active);
+  // 배너
+  const bn = $("plBanner"); bn.innerHTML = "";
+  if (viewing) {
+    const b = document.createElement("div");
+    b.style.cssText = "margin:6px 0;padding:6px 10px;border:1px solid #4a7dff;border-radius:8px;font-size:.78rem;display:flex;gap:10px;align-items:center";
+    b.append(`👁 run ${R.started} 조합을 보는 중 (읽기 전용)`,
+      _verBtn("✏ 편집 모드로", () => { PL.view = null; plRender(); }));
+    bn.appendChild(b);
+  }
+  const defOr = (v, d) => v !== undefined && v !== null && v !== "" ? v : d;
+  // ① 원천 테이블
+  plNode(wrap, {title: "원천 테이블", value: sinfo.table_name || PL.src, fixed: true,
+    sub: `${stat.total != null ? stat.total + "건 적재" : "적재 현황 —"} · ${(sinfo.last_ingest_ts || "").slice(0, 16).replace("T", " ") || "미적재"}`,
+    onClick: () => showTab("sources")});
+  plArrow(wrap);
+  // ② 매핑
+  const mDef = _plDefault(D.maps);
+  const mSel = viewing ? R.join_version : defOr(sel.mapping, mDef && mDef.version);
+  const mRow = (D.maps || []).find(v => v.version === mSel) || mDef || {};
+  plNode(wrap, {title: "매핑 (id·시간·필드)", value: mSel != null ? `v${mSel}` : "—",
+    sub: mRow.id_column ? `id=${mRow.id_column}${mRow.ts_column ? " · ts=" + mRow.ts_column : ""}` : "",
+    custom: !viewing && sel.mapping != null && sel.mapping !== (mDef && mDef.version),
+    pop: viewing ? null : {title: "매핑 버전 선택", current: mSel,
+      items: (D.maps || []).map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
+        sub: `id=${v.id_column || "-"} · ts=${v.ts_column || "-"}`, value: v.version})),
+      onPick: v => { PL.sel.mapping = v; plRender(); }}});
+  plArrow(wrap);
+  // ③ 데이터
+  const dDef = _plDefault(D.datas);
+  const dSel = viewing ? R.data_version : defOr(sel.data, dDef && dDef.version);
+  const dRow = (D.datas || []).find(v => v.version === dSel) || {};
+  plNode(wrap, {title: "데이터 (신선도)", value: dSel != null ? `v${dSel}` : "—",
+    sub: dRow.watermark ? `${dRow.watermark} · ${dRow.doc_count}건` : "스냅샷 없음 (데이터 버전 탭)",
+    custom: !viewing && sel.data != null && sel.data !== (dDef && dDef.version),
+    pop: viewing ? null : {title: "데이터 버전 선택", current: dSel,
+      items: (D.datas || []).map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
+        sub: `${v.watermark || "-"} · ${v.doc_count}건`, value: v.version})),
+      onPick: v => { PL.sel.data = v; plRender(); }}});
+  plArrow(wrap);
+  // ④ 도메인
+  const dmDef = _plDefault(D.domv);
+  const dmSel = viewing ? R.domain_version : defOr(sel.domain_version, dmDef && dmDef.version);
+  plNode(wrap, {title: "도메인 (판정 기준)", value: D.dom ? `${D.dom} v${dmSel ?? "?"}` : "미지정",
+    sub: D.dom ? ((D.domv.find(v => v.version === dmSel) || {}).extract_hint || "").slice(0, 48)
+               : "소스 등록에서 도메인을 지정해야 구조화됩니다",
+    custom: !viewing && sel.domain_version != null && sel.domain_version !== (dmDef && dmDef.version),
+    pop: (viewing || !D.dom) ? null : {title: "도메인 버전 선택", current: dmSel,
+      items: D.domv.map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
+        sub: (v.extract_hint || "").slice(0, 60), value: v.version})),
+      onPick: v => { PL.sel.domain_version = v; plRender(); }}});
+  plArrow(wrap);
+  // ⑤ ①추출(엔티티) — value "라인·v"
+  const eDef = D.ents.find(v => v.is_default) || D.ents[0] || null;
+  const eSelKey = viewing
+    ? (R.entity_version != null ? `${R.entity_line}\t${R.entity_version}` : "")
+    : defOr(sel.entity, eDef ? `${eDef.name}\t${eDef.version}` : "");
+  const [eLn, eVr] = (eSelKey || "\t").split("\t");
+  plNode(wrap, {title: "① 추출 (엔티티)", value: eVr ? `${eLn}·v${eVr}` : "코드 기본",
+    sub: (D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "",
+    custom: !viewing && !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : ""),
+    pop: viewing ? null : {title: "추출 스키마 버전 선택", current: eSelKey,
+      items: D.ents.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
+        sub: v.note || "", value: `${v.name}\t${v.version}`})),
+      onPick: v => { PL.sel.entity = v; plRender(); }}});
+  plArrow(wrap);
+  // ⑥ ②병합(클러스터)
+  const cDef = D.clus.find(v => v.is_default) || D.clus[0] || null;
+  const cSelKey = viewing
+    ? (R.cluster_version != null ? `${R.cluster_line}\t${R.cluster_version}` : "")
+    : defOr(sel.cluster, cDef ? `${cDef.name}\t${cDef.version}` : "");
+  const [cLn, cVr] = (cSelKey || "\t").split("\t");
+  plNode(wrap, {title: "② 병합 (클러스터)", value: cVr ? `${cLn}·v${cVr}` : "코드 기본",
+    sub: (D.clus.find(v => `${v.name}\t${v.version}` === cSelKey) || {}).note || "",
+    custom: !viewing && !!sel.cluster && sel.cluster !== (cDef ? `${cDef.name}\t${cDef.version}` : ""),
+    pop: viewing ? null : {title: "병합 설정 버전 선택", current: cSelKey,
+      items: D.clus.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
+        sub: v.note || "", value: `${v.name}\t${v.version}`})),
+      onPick: v => { PL.sel.cluster = v; plRender(); }}});
+  plArrow(wrap);
+  // ⑦ 그래프 (결과)
+  plNode(wrap, {title: "지식그래프 (결과)", fixed: true,
+    value: stat.done != null ? `반영 ${stat.done}건` : "—",
+    sub: active ? `활성 run ${active.started}` : "활성 run 없음",
+    warn: active && (active.stale_dims || []).length
+      ? {text: "⚠ 구성 뒤처짐", title: active.stale_dims.join("\n")} : null,
+    onClick: () => showTab("sources")});
+  plRunsStrip();
+}
+
+function plRunsStrip() {
+  const box = $("plRuns"); box.innerHTML = "";
+  const runs = (PL.d.runs || []).slice(0, 5);
+  if (!runs.length) return;
+  const t = document.createElement("table"); t.className = "vertable";
+  t.innerHTML = "<thead><tr><th>run</th><th>조합</th><th>결과</th><th>상태</th><th></th></tr></thead>";
+  const tb = document.createElement("tbody");
+  runs.forEach(x => {
+    const tr = document.createElement("tr");
+    if (PL.view && PL.view.run_id === x.run_id) tr.classList.add("sel");
+    const combo = [`${x.domain || "-"} v${x.domain_version || "?"}`,
+      x.entity_version != null ? `${x.entity_line}·v${x.entity_version}` : null,
+      x.cluster_version != null ? `${x.cluster_line}·v${x.cluster_version}` : null]
+      .filter(Boolean).join(" · ");
+    [x.started, combo, `✅${x.done} ◽${x.excluded} ❌${x.error}`].forEach(v => {
+      const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
+    const st = document.createElement("td");
+    st.textContent = (x.labels || []).map(l => l === "active" ? "★active" : "@" + l).join(" ") +
+      ((x.stale_dims || []).length ? " ⚠" : "");
+    tr.appendChild(st);
+    const act = document.createElement("td");
+    act.appendChild(_verBtn(PL.view && PL.view.run_id === x.run_id ? "✏ 편집으로" : "👁 조합",
+      () => { PL.view = (PL.view && PL.view.run_id === x.run_id) ? null : x; plRender(); }));
+    act.appendChild(_verBtn("▶ 구조화", async () => {
+      const r = await fetch(`/admin/sources/${encodeURIComponent(PL.src)}/structure?run_id=${x.run_id}`, {method: "POST"});
+      const j = await r.json().catch(() => ({}));
+      $("plMsg").textContent = r.ok ? `▶ ${j.note || "구조화 시작"}` : (j.detail || `실패 ${r.status}`);
+    }));
+    if (!x.active) act.appendChild(_verBtn("★ 활성", async () => {
+      if (!confirm(`run ${x.started}을(를) 활성(사용자 노출)으로 전환할까요?`)) return;
+      const r = await fetch(`/admin/runs/${x.run_id}/activate`, {method: "POST"});
+      const j = await r.json().catch(() => ({}));
+      $("plMsg").textContent = r.ok ? `✓ ${j.note || "활성 전환"}` : (j.detail || `실패 ${r.status}`);
+      if (r.ok) plRefresh();
+    }));
+    tr.appendChild(act);
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const more = document.createElement("div"); more.className = "hint";
+  more.textContent = `최근 ${runs.length}개 — 전체 run·문서별 결과·비교는 [원천 테이블·구조화] 탭에서`;
+  box.appendChild(more);
+}
+
+async function plCreateRun() {
+  if (!PL.src) return;
+  if (!(PL.d.dom)) { $("plMsg").textContent = "도메인 미지정 소스 — 소스 등록에서 도메인을 먼저 지정하세요"; return; }
+  const body = {};
+  if (PL.sel.domain_version != null) body.domain_version = PL.sel.domain_version;
+  const lv = (s, lk, vk) => { if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
+  lv(PL.sel.entity, "entity_line", "entity_version");
+  lv(PL.sel.cluster, "cluster_line", "cluster_version");
+  if (PL.sel.mapping != null) body.join_version = PL.sel.mapping;
+  if (PL.sel.data != null) body.data_version = PL.sel.data;
+  if ($("plModel").value) body.chat_model = $("plModel").value;
+  if ($("plEmbed").value) body.embed_model = $("plEmbed").value;
+  const r = await fetch(`/admin/sources/${encodeURIComponent(PL.src)}/runs`, {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  $("plMsg").textContent = r.ok ? `✓ ${j.note || "run 생성"}` : (j.detail || `생성 실패 ${r.status}`);
+  if (r.ok) { PL.sel = {}; plRefresh(); }
+}
+
 const TABS = {
+  pipe:    {secs: ["sec-pipe"], load: () => loadPipeline()},
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
@@ -2491,7 +2775,7 @@ function showTab(name) {
 document.querySelectorAll("#admtabs button").forEach(b => {
   b.onclick = () => showTab(b.dataset.tab);
 });
-showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "models");
+showTab(TABS[location.hash.slice(1)] ? location.hash.slice(1) : "pipe");
 setInterval(() => { if (_tab === "sources") { loadDocStatus(); loadSchedule(); } }, 5000);  // 폴링은 해당 탭에서만
 </script>
 </body>
