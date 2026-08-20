@@ -9,10 +9,10 @@
   main { max-width: 1060px; margin: 0 auto; padding: 16px 16px 48px; }
   section.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
                  padding: 18px 20px; margin-bottom: 16px; }
-  section.card h3 { margin: 0 0 10px; font-size: 1rem; }
-  section.card h3 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .78rem; }
-  section.card h4 { margin: 16px 0 4px; font-size: .88rem; }
-  section.card h4 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .74rem; }
+  section.card h2 { margin: 0 0 10px; font-size: 1rem; }
+  section.card h2 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .78rem; }
+  section.card h3 { margin: 16px 0 4px; font-size: .88rem; }
+  section.card h3 small { font-weight: 400; color: var(--mut); margin-left: 6px; font-size: .74rem; }
   .tok { display: flex; align-items: center; gap: 8px; font-size: .82rem;
          color: var(--mut); margin-bottom: 10px; }
   input, select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
@@ -29,7 +29,7 @@
   form button { padding: 7px 12px; border-radius: 8px; border: 0; background: var(--path);
                 color: #fff; font-size: .85rem; cursor: pointer; }
   form button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
-  form button.warn { background: #fff; color: var(--fail); border: 1px solid var(--fail); }
+  form button.warn { background: #fff; color: var(--fail-ink); border: 1px solid var(--fail); }
   /* 파이프라인 단계 구분 + 즉시/예약 뱃지 */
   .stagerow { flex-basis: 100%; display: flex; align-items: baseline; gap: 8px;
               margin: 12px 0 2px; padding-top: 10px; border-top: 1px dashed var(--line); }
@@ -37,15 +37,65 @@
   .stagerow b { font-size: .84rem; } .stagerow small { color: var(--mut); font-size: .74rem; }
   .badge { font-size: .68rem; font-weight: 700; padding: 2px 7px; border-radius: 20px;
            white-space: nowrap; }
-  .badge.now { background: #16a34a1a; color: #16a34a; border: 1px solid #16a34a55; }
-  .badge.later { background: #f59e0b1a; color: #b45309; border: 1px solid #f59e0b55; }
+  .badge.now { background: #16a34a14; color: var(--ok-ink); border: 1px solid #16a34a66; }
+  .badge.later { background: #f59e0b14; color: var(--warn-ink); border: 1px solid #f59e0b77; }
+  /* ── 상태 레일 — 이 화면이 파이프라인 어디인지, 지금 활성값이 무엇인지, 다음 안전한 행동.
+     "이 화면이 뭘 하는 곳인지 모르겠다"를 문단이 아니라 한 줄로 답하는 자리 ── */
+  .rail { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+          margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line);
+          border-left: 3px solid var(--path); border-radius: 8px;
+          background: var(--bg); font-size: .8rem; line-height: 1.5; }
+  .rail .step { font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+                text-transform: uppercase; color: var(--mut); }
+  .rail b { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .rail .live { color: var(--ok-ink); font-weight: 700; }
+  .rail .sep { color: var(--line); }
+  .rail .next { margin-left: auto; color: var(--mut); }
+  /* 화면 설명 — 긴 문단을 기본 노출하지 않고 필요할 때 펼친다 */
+  details.explain { margin: 0 0 12px; font-size: .8rem; }
+  details.explain > summary { cursor: pointer; color: var(--path-ink); font-size: .78rem;
+                              font-weight: 600; padding: 2px 0; }
+  details.explain[open] > summary { margin-bottom: 6px; }
+  details.explain .body { color: var(--mut); line-height: 1.65; padding-left: 2px; }
+  details.explain .body b { color: var(--ink); }
+  details.explain .body ul { margin: 4px 0; padding-left: 18px; }
+  details.explain .body li { margin: 2px 0; }
+  /* 위험한 작업 묶음 — 되돌리기 어려운 동작을 접어 실수 클릭을 줄인다 */
+  details.danger { flex-basis: 100%; margin: 8px 0 0; }
+  details.danger > summary { cursor: pointer; font-size: .78rem; color: var(--fail-ink);
+                             font-weight: 600; }
+  details.danger .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+                        margin-top: 8px; }
+  /* ── 기본값 참조 — 빈값이면 코드 기본을 쓰는 입력의 공통 컨트롤.
+     기본값을 placeholder로만 보여주면 입력 시작하자마자 참조가 사라진다 ── */
+  .dflt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+          margin: 4px 0 2px; font-size: .74rem; }
+  .dflt .state { font-size: .68rem; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+                 border: 1px solid var(--line); white-space: nowrap; }
+  .dflt .state.def { color: var(--mut); }
+  .dflt .state.custom { color: var(--path-ink); border-color: var(--path); }
+  .dflt button { padding: 3px 9px; font-size: .74rem; border-radius: 7px;
+                 border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+                 cursor: pointer; }
+  .dflt button:hover { border-color: var(--path); color: var(--path-ink); }
+  .dfltbox { margin: 4px 0 8px; padding: 8px 10px; border: 1px dashed var(--line);
+             border-radius: 8px; background: var(--bg); }
+  .dfltbox pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap;
+                 word-break: break-word; font-size: .72rem; line-height: 1.5;
+                 color: var(--mut); }
   #dform #dname { width: 130px; } #dform #dtools { flex: 1; } #dform #dprio { width: 70px; }
   #dform #dhint { flex-basis: 100%; }
-  .hint { font-size: .74rem; color: var(--mut); line-height: 1.5; margin: 10px 0 0; }
-  .hint.err { color: var(--fail); min-height: 1em; margin-top: 4px; }
-  .hint.err.ok { color: var(--ok); }
+  /* 스크린리더 전용 — 시각적으로는 없지만 표 동작 열·페이지 제목처럼 이름이 필요한 곳 */
+  .sronly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+            overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* 입력 위 보이는 라벨 — title 툴팁만으로는 무엇을 넣는 칸인지 안 보인다 */
+  .fld { display: inline-flex; flex-direction: column; gap: 2px; }
+  .fld > span { font-size: .68rem; font-weight: 650; letter-spacing: .02em; color: var(--mut); }
+  .hint { font-size: .78rem; color: var(--mut); line-height: 1.6; margin: 10px 0 0; }
+  .hint.err { color: var(--fail-ink); min-height: 1em; margin-top: 4px; }
+  .hint.err.ok { color: var(--ok-ink); }
   #dryout { font-size: .76rem; line-height: 1.55; margin-top: 8px; }
-  #dryout .ok { color: var(--ok); } #dryout .no { color: var(--fail); }
+  #dryout .ok { color: var(--ok-ink); } #dryout .no { color: var(--fail-ink); }
   #docstat .prow { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: .78rem; }
   #docstat .prow .plabel { width: 200px; text-align: left; color: var(--mut);
                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -61,7 +111,7 @@
   .schedrow input[type=time] { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
   .schedstate { font-size: .76rem; color: var(--mut); }
   .schedstate .run { color: #16a34a; font-weight: 600; }
-  .schedstate .stop { color: var(--fail); font-weight: 600; }
+  .schedstate .stop { color: var(--fail-ink); font-weight: 600; }
   /* 문서별 결과: 한 줄 고정 — 긴 제목·사유는 …로 자르고 클릭하면 원본 모달 */
   #doclist table td { white-space: nowrap; }
   #doclist table td:nth-child(2), #doclist table td:nth-child(4) {
@@ -122,6 +172,11 @@
   .scPop input { width: 100%; box-sizing: border-box; margin: 3px 0; padding: 5px 8px;
                  border: 1px solid var(--line); border-radius: 6px; }
   .scPop .t { font-weight: 700; font-size: .76rem; margin-bottom: 4px; }
+  /* 가로 스크롤 영역임을 알리는 오른쪽 페이드 — 노드가 잘려 보이는 걸 '끝'으로 오해하지 않게 */
+  .plscroll { position: relative; }
+  .plscroll::after { content: ""; position: absolute; top: 0; right: 0; width: 34px;
+                     height: 100%; pointer-events: none; border-radius: 0 12px 12px 0;
+                     background: linear-gradient(to right, transparent, var(--card)); }
   /* 파이프라인 캔버스 — 고정 DAG 노드 뷰 (n8n식 보기, 드래그 편집은 불필요라 없음) */
   .plwrap { display: flex; align-items: stretch; overflow-x: auto; padding: 14px 4px; }
   .plnode { position: relative; min-width: 148px; max-width: 200px; flex: 1;
@@ -206,25 +261,25 @@
   .evbadge { display: inline-block; padding: 1px 8px; border-radius: 999px;
              font-size: .72rem; font-weight: 600; line-height: 1.6; }
   .evbadge.evk { background: color-mix(in srgb, var(--mut) 22%, transparent); color: var(--ink); }
-  .evbadge.evl-info  { background: color-mix(in srgb, #4a7dff 16%, transparent); color: #4a7dff; }
-  .evbadge.evl-warn  { background: color-mix(in srgb, #f08c00 22%, transparent); color: #e8590c; }
-  .evbadge.evl-error { background: color-mix(in srgb, var(--fail) 16%, transparent); color: var(--fail); }
+  .evbadge.evl-info  { background: color-mix(in srgb, #4a7dff 14%, transparent); color: var(--path-ink); }
+  .evbadge.evl-warn  { background: color-mix(in srgb, #f08c00 18%, transparent); color: var(--warn-ink); }
+  .evbadge.evl-error { background: color-mix(in srgb, var(--fail) 12%, transparent); color: var(--fail-ink); }
 </style>
 </head>
 <body>
 <header class="shell">
-  <span class="brand">지식그래프 챗<small>관리 콘솔</small></span>
-  <nav class="pathnav">
+  <h1 class="brand" style="margin:0;font-size:1rem">지식그래프 챗<small>관리 콘솔</small></h1>
+  <nav class="pathnav" aria-label="화면 이동">
     <a href="/">채팅</a><span class="edge"></span>
     <a href="/graph">지식그래프</a><span class="edge"></span>
     <a class="on" href="/admin">관리</a>
   </nav>
   <span class="spacer"></span>
-  <span id="who" style="display:none;font-size:12px;color:#8892a6;align-items:center;gap:8px"></span>
+  <span id="who" style="display:none;font-size:12px;color:var(--mut);align-items:center;gap:8px"></span>
 </header>
 
 <main>
-<nav id="admtabs" class="admtabs">
+<nav id="admtabs" class="admtabs" aria-label="관리 항목">
   <button data-tab="pipe">🔀 파이프라인</button>
   <button data-tab="models">모델</button>
   <button data-tab="mcp">MCP 서버</button>
@@ -240,41 +295,71 @@
   <button data-tab="users">계정 관리</button>
 </nav>
 <section class="card" id="sec-pipe">
-  <h3>🔀 파이프라인 <small>원천 → 그래프 전체 흐름 — 노드 클릭으로 버전을 고르고, 그 조합으로 run을 만듭니다</small></h3>
+  <h2>🔀 파이프라인 <small>원천 → 그래프 전체 흐름</small></h2>
+  <div class="rail" id="plRail"><span class="step">불러오는 중</span></div>
+  <details class="explain">
+    <summary>run이 여러 개인 이유 — 이 화면 읽는 법</summary>
+    <div class="body">
+      <b>run 하나 = 한 조합으로 문서를 판정한 결과 묶음</b>입니다. 조합이란 도메인 지침 ·
+      추출 스키마(① 추출) · 병합 설정(② 병합) · 매핑·데이터 버전 · 모델을 말합니다.<br>
+      여러 개가 쌓이는 건 <b>실험 이력</b>이고, 사용자에게 보이는 건 <b class="live">★ 활성 1개</b>뿐입니다.
+      <ul>
+        <li>노드를 클릭해 버전을 고르고 <b>[▶ 이 조합으로 run 생성]</b> — 이때는 아직 비활성(사용자 노출 없음)</li>
+        <li>run 목록에서 <b>[▶ 구조화]</b>로 문서를 판정 → 결과(반영·제외·오류) 확인</li>
+        <li>기존보다 좋으면 <b>[★ 활성]</b>으로 전환, 아니면 <b>[🗑]</b>으로 삭제</li>
+      </ul>
+      즉 <b>만들고 → 돌려보고 → 비교하고 → 하나만 채택</b>하는 구조입니다. 활성 run만 검색·추천에 쓰입니다.
+    </div>
+  </details>
   <div class="schedrow" style="margin:4px 0 0">
-    <select id="plSrc" title="파이프라인을 볼 소스"></select>
-    <select id="plModel" title="판정 LLM (빈값=기본)"><option value="">LLM(기본)</option></select>
-    <select id="plEmbed" title="임베딩 (빈값=기본)"><option value="">임베딩(기본)</option></select>
+    <label class="fld"><span>소스</span>
+      <select id="plSrc" title="파이프라인을 볼 소스"></select></label>
+    <label class="fld"><span>판정 LLM</span>
+      <select id="plModel" title="빈값=전처리 기본 모델"><option value="">기본 모델</option></select></label>
+    <label class="fld"><span>임베딩</span>
+      <select id="plEmbed" title="빈값=기본 임베딩"><option value="">기본 임베딩</option></select></label>
     <button type="button" class="ghost" id="plReset" title="노드 선택을 전부 기본(활성)으로 되돌림">↺ 기본값</button>
     <button type="button" id="plGo" title="지금 노드들에 표시된 조합으로 run 생성 (비활성 — 구조화·활성 전환은 아래 run 목록에서)">▶ 이 조합으로 run 생성</button>
     <button type="button" class="ghost" id="plStop" title="이 소스의 진행 중 구조화를 배치 경계에서 중지">⏹ 중지</button>
     <span class="hint" id="plMsg" style="margin:0"></span>
   </div>
   <div id="plBanner"></div>
-  <div id="plCanvas"><span class="hint">불러오는 중…</span></div>
+  <div id="plCanvas" class="plscroll"><span class="hint">불러오는 중…</span></div>
   <div id="plSchema" style="display:none"></div>
   <div id="plRuns"></div>
-  <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드. run을 [👁 조합]하면 캔버스가 그 run의 스냅샷을 보여줍니다.
-     <b>① 추출 노드를 더블클릭</b>하면 스키마 캔버스가 펼쳐져 엔티티·관계를 노드와 선으로 직접 설계할 수 있습니다.</p>
+  <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드 ·
+     <b>① 추출 노드 더블클릭</b> = 스키마 캔버스(엔티티·관계를 노드와 선으로 설계)</p>
 </section>
 <section class="card" id="sec-data">
-  <h3>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h3>
+  <h2>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h2>
   <div id="verData"><span class="hint">불러오는 중…</span></div>
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 구조화</b>는 [원천 테이블·구조화] 탭 → 소스 클릭 → "✚ 새 조합 run"에서.</p>
 </section>
 <section class="card" id="sec-entity">
-  <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
-  <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서·대화에서 뽑아내는 지식의 단위</b>입니다.
-     이 스키마는 <b>문서 구조화와 대화(세션) 추출 양쪽</b>에 적용됩니다 — 대화는 활성(★) 라인을 씁니다.
-     <b>계층 체인(2~5칸)</b>이 그래프 2층부터 순서대로 저장층이 됩니다 — 첫 칸=진입점 🔗(검색 시작),
-     ⭐ 검증귀속(성공/실패·추천이 붙는 칸)은 체인 중 한 칸(기본 마지막). 속성(9층)·관계는 자유.
-     키·표시명·설명 전부 변경 가능. (행동/도구는 대화에서만 자동 — 8층)</p>
+  <h2>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h2>
+  <div class="rail" id="entRail"><span class="step">불러오는 중</span></div>
+  <details class="explain">
+    <summary>엔티티가 무엇인지 — 이 화면 읽는 법</summary>
+    <div class="body">
+      <b>여기서 정의하는 건 "틀"이고, 구조화가 돌면 그 틀로 실제 노드가 찍혀 나옵니다.</b>
+      예를 들어 속성 <code>library</code> 하나를 정의하면 문서마다 Keras·pandas 같은 값이 뽑혀
+      그래프 노드가 되고, 같은 값은 전역 1개로 합쳐져 여러 문서가 그 노드를 공유합니다.
+      <ul>
+        <li><b>계층 체인</b>(2~5칸) — 그래프 2층부터 순서대로 쌓이는 뼈대. 첫 칸이 🔗 진입점(질문이 들어오면 여기서 검색 시작)</li>
+        <li><b>⭐ 검증귀속</b> — 성공/실패 카운트와 추천이 붙는 칸. 체인 중 하나를 고릅니다(기본 마지막)</li>
+        <li><b>속성</b>(9층) — 자유롭게 추가. 진입점에 연결됩니다. <b>관계</b>는 엔티티 사이 점선 연결</li>
+        <li>이 스키마는 <b>문서 구조화와 대화(세션) 추출 양쪽</b>에 쓰입니다 — 대화는 활성(★) 라인을 사용</li>
+      </ul>
+      키·표시명·설명은 전부 바꿔도 됩니다. <code>goal</code>·<code>approach</code>는 기본 이름일 뿐입니다.
+      (행동/도구 노드는 대화에서 자동 생성 — 8층)
+    </div>
+  </details>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="fgroup">
       <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 계층 체인(순서대로 저장) + 속성. 설명이 곧 추출 기준이고, 키·표시명·설명 모두 편집 가능합니다</small></div>
       <table class="vertable">
-        <thead><tr><th style="width:120px">역할</th><th style="width:130px">키 (영문 권장)</th><th style="width:120px">표시명</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:90px"></th></tr></thead>
+        <thead><tr><th style="width:120px">역할</th><th style="width:130px">키 (영문 권장)</th><th style="width:120px">표시명</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:90px"><span class="sronly">순서·삭제</span></th></tr></thead>
         <tbody id="veChain"></tbody>
         <tbody id="veTypes"></tbody>
       </table>
@@ -286,7 +371,7 @@
       <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
         <div class="fgroup-t" style="margin-bottom:4px">관계 <small>— 위 엔티티들 사이의 타입드 관계. 문서에서 함께 추출되어 그래프에 점선으로 연결됩니다 (선택)</small></div>
         <table class="vertable">
-          <thead><tr><th style="width:120px">키 (영문 권장)</th><th style="width:100px">표시명</th><th>설명 (추출 기준)</th><th style="width:130px">출발 타입</th><th style="width:130px">도착 타입</th><th style="width:36px"></th></tr></thead>
+          <thead><tr><th style="width:120px">키 (영문 권장)</th><th style="width:100px">표시명</th><th>설명 (추출 기준)</th><th style="width:130px">출발 타입</th><th style="width:130px">도착 타입</th><th style="width:36px"><span class="sronly">삭제</span></th></tr></thead>
           <tbody id="veRels"></tbody>
         </table>
         <div class="schedrow" style="margin:6px 0 0">
@@ -328,9 +413,21 @@
   </div>
 </section>
 <section class="card" id="sec-cluster">
-  <h3>② 병합 (클러스터) <small>파이프라인 2단계: ①에서 뽑은 문구를 그래프에 합치기(dedup) · 라인마다 독립 버전 — 라인 클릭=버전 목록</small></h3>
-  <p class="hint" style="margin:4px 0 8px">클러스터 = <b>룰 임계값</b>(자동병합·후보하한·이름 가드) + <b>LLM 후보선택 프롬프트</b>(애매 구간에서 "같은 의도의 후보 번호를 골라라"고 묻는 문구).
-     도메인 프롬프트와는 별개이며 도메인 지침은 병합에 쓰이지 않습니다. 프롬프트를 비우면 코드 기본 문구를 씁니다.</p>
+  <h2>② 병합 (클러스터) <small>①에서 뽑은 문구를 그래프에 합치기(dedup)</small></h2>
+  <div class="rail" id="clsRail"><span class="step">불러오는 중</span></div>
+  <details class="explain">
+    <summary>병합이 무엇을 하는지 — 이 화면 읽는 법</summary>
+    <div class="body">
+      같은 뜻인데 표현이 다른 문구(예: "도커 인터넷 연결 문제" / "컨테이너 네트워크 불통")를
+      <b>한 노드로 합치는 판정</b>입니다. 두 단계로 동작합니다.
+      <ul>
+        <li><b>룰 임계값</b> — 임베딩 유사도가 자동병합 기준을 넘고 이름 가드를 통과하면 LLM 없이 즉시 병합</li>
+        <li><b>LLM 후보선택</b> — 애매한 구간에서만 "같은 의도의 후보 번호를 골라라"고 물어 1회 판정</li>
+      </ul>
+      도메인 지침은 병합에 쓰이지 않습니다(추출 단계 전용). 프롬프트를 비우면 코드 기본 문구를 씁니다.
+      임계값을 낮추면 더 많이 합쳐지고(과병합 위험), 높이면 비슷한 노드가 갈라집니다.
+    </div>
+  </details>
   <div id="clsLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="schedrow" style="margin:6px 0">
@@ -352,25 +449,31 @@
   </div>
 </section>
 <section class="card" id="sec-mapping">
-  <h3>매핑 버전 <small>원천 테이블·id·시간·역할 매핑을 여기서 정의 — 저장하면 새 버전. [원천 테이블] 탭은 등록된 버전을 골라 씁니다</small></h3>
+  <h2>매핑 버전 <small>원천 테이블·id·시간·역할 매핑을 여기서 정의 — 저장하면 새 버전. [원천 테이블] 탭은 등록된 버전을 골라 씁니다</small></h2>
   <div class="fgroup">
     <div class="fgroup-t">매핑 편집 <small>— 기존 소스를 고르면 현재 매핑이 채워집니다. 새 소스는 [＋ 새 소스]로 이름을 직접 입력</small></div>
     <div class="schedrow">
-      <select id="mvSrc" title="편집할 소스 — 새로 만들려면 [＋ 새 소스]"><option value="">＋ 새 소스…</option></select>
-      <input id="mvName" placeholder="소스 이름 (새 소스일 때)" style="width:150px">
-      <select id="mvTable"><option value="">테이블…</option></select>
-      <select id="mvId"><option value="">id 컬럼…</option></select>
-      <select id="mvTs"><option value="">시간 컬럼 (없음=전량 1회)</option></select>
-      <input id="mvKind" placeholder="유형 (문제해결/가이드…)" style="width:150px">
+      <label class="fld"><span>편집할 소스</span>
+        <select id="mvSrc"><option value="">＋ 새 소스…</option></select></label>
+      <label class="fld"><span>소스 이름</span>
+        <input id="mvName" placeholder="새 소스일 때 입력" style="width:150px"></label>
+      <label class="fld"><span>원천 테이블</span>
+        <select id="mvTable"><option value="">선택…</option></select></label>
+      <label class="fld"><span>id 컬럼</span>
+        <select id="mvId"><option value="">선택…</option></select></label>
+      <label class="fld"><span>시간 컬럼</span>
+        <select id="mvTs"><option value="">없음 (전량 1회)</option></select></label>
+      <label class="fld"><span>유형</span>
+        <input id="mvKind" placeholder="문제해결/가이드…" style="width:150px"></label>
     </div>
     <div class="schedrow">
       <span class="hint" style="margin:0;flex-basis:100%">역할 매핑 — 본문(body) 또는 지문(question)+답(answer) 중 최소 하나:</span>
-      <select id="mv_title"><option value="">title 컬럼…</option></select>
-      <select id="mv_body"><option value="">body 컬럼…</option></select>
-      <select id="mv_question"><option value="">question 컬럼…</option></select>
-      <select id="mv_answer"><option value="">answer 컬럼…</option></select>
-      <select id="mv_meta"><option value="">meta 컬럼…</option></select>
-      <select id="mv_url"><option value="">url 컬럼…</option></select>
+      <label class="fld"><span>title</span><select id="mv_title"><option value="">없음</option></select></label>
+      <label class="fld"><span>body</span><select id="mv_body"><option value="">없음</option></select></label>
+      <label class="fld"><span>question</span><select id="mv_question"><option value="">없음</option></select></label>
+      <label class="fld"><span>answer</span><select id="mv_answer"><option value="">없음</option></select></label>
+      <label class="fld"><span>meta</span><select id="mv_meta"><option value="">없음</option></select></label>
+      <label class="fld"><span>url</span><select id="mv_url"><option value="">없음</option></select></label>
     </div>
     <div class="schedrow">
       <input id="mvNote" placeholder="버전 메모 (예: url 컬럼 추가)" style="flex:1;min-width:180px">
@@ -384,7 +487,7 @@
   <div id="verMapping" style="margin-top:10px"><span class="hint">불러오는 중…</span></div>
 </section>
 <section class="card" id="sec-presets">
-  <h3>조합 프리셋 <small>차원별 버전 선택을 이름 있는 세트로 저장 — 헬름차트처럼 조합해 소스에 적용(run 생성)</small></h3>
+  <h2>조합 프리셋 <small>차원별 버전 선택을 이름 있는 세트로 저장 — 헬름차트처럼 조합해 소스에 적용(run 생성)</small></h2>
   <p class="hint" style="margin:4px 0 8px">프리셋 = 도메인(+버전) · 엔티티 라인·버전 · 클러스터 라인·버전 · 모델 · 임베딩.
      소스별 항목(매핑·데이터 버전)은 [▶ 적용] 때 고릅니다. 도메인을 지정하면 소스 등록 도메인을 <b>오버라이드</b>합니다.</p>
   <div id="presetList"><span class="hint">불러오는 중…</span></div>
@@ -406,8 +509,8 @@
      생성된 run은 [원천 테이블·구조화] 탭에서 구조화·활성 전환합니다.</p>
 </section>
 <section class="card" id="sec-users">
-  <h3>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h3>
-  <table id="ulist"><thead><tr><th>아이디</th><th>상태</th><th>권한</th><th>가입일</th><th></th></tr></thead>
+  <h2>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h2>
+  <table id="ulist"><thead><tr><th>아이디</th><th>상태</th><th>권한</th><th>가입일</th><th><span class="sronly">동작</span></th></tr></thead>
     <tbody></tbody></table>
   <p class="hint">가입 직후는 <b>승인 대기</b> — 승인해야 로그인할 수 있습니다.
      관리자 권한은 재로그인 시부터 반영됩니다.</p>
@@ -415,8 +518,8 @@
 </section>
 
 <section class="card" id="sec-domains">
-  <h3>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h3>
-  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th><th></th></tr></thead>
+  <h2>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h2>
+  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th><th><span class="sronly">동작</span></th></tr></thead>
     <tbody></tbody></table>
   <form id="dform">
     <input id="dname" placeholder="도메인 이름" required>
@@ -444,19 +547,22 @@
 </section>
 
 <section class="card" id="sec-sources">
-  <h3>구조화 원천 테이블 <small>접점 2 — 저쪽 테이블은 읽기 전용, 등록은 사람 전용</small></h3>
-  <table id="slist"><thead><tr><th style="width:26px"><input type="checkbox" id="sall" title="현재 페이지 전체 선택/해제"></th>
+  <h2>구조화 원천 테이블 <small>접점 2 — 저쪽 테이블은 읽기 전용, 등록은 사람 전용</small></h2>
+  <table id="slist"><thead><tr><th style="width:26px"><label style="display:inline-flex"><input type="checkbox" id="sall"><span class="sronly">현재 페이지 전체 선택/해제</span></label></th>
     <th>소스</th><th>테이블</th><th>id</th><th>시간</th>
     <th>역할 매핑</th><th>유형</th><th>그래프 도메인</th><th>사용</th></tr></thead><tbody></tbody></table>
   <div id="spager" class="hint" style="display:flex;gap:8px;align-items:center"></div>
   <form id="sform">
-    <input id="sname" placeholder="목록에서 소스를 클릭해 선택" required readonly style="width:150px;background:var(--bg2, #f6f7f9)"
-           title="소스 선택 — 표의 행을 클릭하면 채워집니다. 새 소스·테이블·매핑 정의는 [매핑 버전] 탭에서">
-    <select id="smv" title="이 소스가 쓸 매핑 버전 — [적용]하면 원천 등록 매핑이 그 버전 값으로 교체됩니다(롤백 통로)">
-      <option value="">매핑 버전…</option></select>
+    <label class="fld"><span>선택된 소스</span>
+      <input id="sname" placeholder="표에서 행을 클릭" required readonly style="width:150px;background:#f6f7f9"
+             title="표의 행을 클릭하면 채워집니다. 새 소스·테이블·매핑 정의는 [매핑 버전] 탭에서"></label>
+    <label class="fld"><span>매핑 버전</span>
+      <select id="smv" title="[매핑 적용]하면 원천 등록 매핑이 그 버전 값으로 교체됩니다(롤백 통로)">
+        <option value="">선택…</option></select></label>
     <button type="button" class="ghost" id="smvApply" title="선택한 매핑 버전을 이 소스에 적용 + 기본 지정 — 조립이 달라지므로 이후 [⚠ 전량 재적재] 필요">매핑 적용</button>
-    <select id="sdomain" title="지정하면 야간 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프화 (기준 미달은 제외). 빈값=검색 전용">
-      <option value="">그래프 도메인 (없음=검색만)</option></select>
+    <label class="fld"><span>그래프 도메인</span>
+      <select id="sdomain" title="지정하면 야간 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프화 (기준 미달은 제외). 빈값=검색 전용">
+        <option value="">없음 (검색 전용)</option></select></label>
     <label><input type="checkbox" id="senabled" checked>사용</label>
     <label title="끄면 이 소스 문서의 원본 링크가 검색 결과·출처·문서 뷰에서 숨겨집니다 (본문 열람은 그대로) — 저장 즉시 반영"><input type="checkbox" id="surl" checked>원본 링크</label>
     <button id="ssave" title="선택한 소스의 운영 설정(도메인·사용·원본 링크)을 저장 — 테이블·매핑은 [매핑 버전] 탭에서 편집">① 운영 설정 저장</button>
@@ -465,7 +571,6 @@
     <span class="stagerow"><b>② 적재</b> <small>원천 테이블 → 검색 코퍼스 (corpus_docs·청크)</small>
       <span class="badge now">즉시</span></span>
     <button type="button" class="ghost" id="singest" title="원천 테이블 → corpus_docs 즉시 적재 + 청킹 (야간 배치를 안 기다림). 등록 직후 이걸 눌러야 드라이런·구조화할 문서가 생깁니다">지금 적재</button>
-    <button type="button" class="warn" id="sreingest" title="이 소스의 corpus_docs·청크를 지우고 워터마크를 리셋해 원천에서 전량 다시 적재. 필드 매핑을 바꿨거나 코퍼스를 새로 만들 때 — 그래프 기여도 회수(대화 세션 기여는 불변)">⚠ 전량 재적재</button>
     <span class="badge later" title="시간 컬럼이 있으면 야간 배치가 신규분만 증분 적재 (03:15 청킹·03:30 임베딩)">예약: 야간 03:10 증분 자동</span>
 
     <span class="stagerow"><b>⑤ 구조화</b> <small>검색 코퍼스 → 지식그래프 · <u>그래프 도메인 지정 소스만</u></small>
@@ -473,11 +578,19 @@
     <button type="button" class="ghost" id="sdry" title="미처리 문서 3건을 판정만 해봄 — 그래프에 반영 안 됨. 도메인·지침 튜닝용 (excluded 비율 미리보기)">드라이런(판정만)</button>
     <button type="button" id="sstruct" title="미처리 문서를 지금 판정·그래프 반영 (야간 03:40을 안 기다림). 미처리가 0이 될 때까지 끝까지 처리 — 다시 클릭 불필요. 백그라운드로 돌고 진행은 아래 처리 현황에서 실시간으로 보입니다">지금 구조화(끝까지)</button>
     <button type="button" class="ghost" id="sstop" title="진행 중인 구조화를 배치 경계에서 중지 — 구조화 중에는 초기화가 막히므로(409) 먼저 중지하세요">⏹ 구조화 중지</button>
-    <span class="badge later" title="지금은 문서를 '미처리'로 되돌리기만 — 실제 처리는 야간 03:40 배치나 위 [지금 구조화]가 함">예약</span>
     <button type="button" class="ghost" id="sretry" title="error 상태 문서를 미처리로 되돌림 — 야간 배치나 [지금 구조화]가 재시도">실패 재시도</button>
-    <button type="button" class="warn" id="sreset" title="이 소스가 그래프에 올린 문서 기여를 회수하고 전부 미처리로 되돌림 — 지침·모델 변경 후. 대화 세션 기여는 불변. 실제 재구조화는 [지금 구조화]/야간 배치가">⚠ 초기화 재처리</button>
-    <button type="button" class="warn" id="sdelete"
-            title="체크한 소스들의 파생 데이터 삭제 — 청크·코퍼스·그래프 문서 기여·소스 등록이 삭제됩니다 (원천 테이블 자체는 불변). delete 입력 확인 필요">⚠ 선택 삭제(파생 데이터)</button>
+
+    <details class="danger">
+      <summary>⚠ 되돌리기 어려운 작업 (재적재·초기화·삭제)</summary>
+      <div class="row">
+        <button type="button" class="warn" id="sreingest" title="이 소스의 corpus_docs·청크를 지우고 워터마크를 리셋해 원천에서 전량 다시 적재. 매핑을 바꿨거나 코퍼스를 새로 만들 때 — 그래프 기여도 회수(대화 세션 기여는 불변)">전량 재적재</button>
+        <button type="button" class="warn" id="sreset" title="이 소스가 그래프에 올린 문서 기여를 회수하고 전부 미처리로 되돌림 — 지침·모델 변경 후. 대화 세션 기여는 불변. 실제 재구조화는 [지금 구조화]/야간 배치가">초기화 재처리</button>
+        <button type="button" class="warn" id="sdelete"
+                title="체크한 소스들의 파생 데이터 삭제 — 청크·코퍼스·그래프 문서 기여·소스 등록이 삭제됩니다 (원천 테이블 자체는 불변). delete 입력 확인 필요">선택 삭제(파생 데이터)</button>
+        <span class="hint" style="margin:0;flex-basis:100%">전량 재적재·초기화는 <b>1개만 체크</b>한 상태에서,
+          삭제는 여러 개 체크해 일괄 실행됩니다. 원천 테이블 자체는 어떤 경우에도 바뀌지 않습니다(SELECT만).</span>
+      </div>
+    </details>
   </form>
   <div id="dryout"></div>
   <p class="hint"><b class="badge now" style="font-weight:700">즉시</b> = 누르면 지금 실행 ·
@@ -490,7 +603,7 @@
 </section>
 
 <section class="card" id="sec-status">
-  <h3>처리 현황 <small>문서 구조화 진행도 — 5초마다 갱신</small></h3>
+  <h2>처리 현황 <small>문서 구조화 진행도 — 5초마다 갱신</small></h2>
   <div id="schedbox">
     <div class="schedrow">
       <label><input type="checkbox" id="scEnabled"> 예약 활성</label>
@@ -512,7 +625,7 @@
 </section>
 
 <section class="card" id="sec-pipeline">
-  <h3>전처리 설정 <small>전역 — 저장하면 다음 배치(야간 03:40 또는 수동)부터, 재배포 불필요</small></h3>
+  <h2>전처리 설정 <small>전역 — 저장하면 다음 배치(야간 03:40 또는 수동)부터, 재배포 불필요</small></h2>
   <form id="psform">
     <div class="psgrid">
       <label class="k" for="psLimit">실행당 건수</label>
@@ -548,7 +661,7 @@
       <span class="d">추론 모델의 생각(thinking) 출력을 끄고 판정 (기본 켜짐 — 실측 7~8배 빠르고 판정 품질 동일)</span>
     </div>
     <details class="structprompts">
-      <summary>구조화 프롬프트 (고급) — 문서 판정/추출 지침. 비우면 코드 기본값(회색)</summary>
+      <summary>구조화 프롬프트 (고급) — 문서 판정/추출 지침. 비우면 코드 기본값</summary>
       <label class="k2" for="psDocPrompt">문서 판정 프롬프트
         <small>자리표시자 {domain} {hint} {kind} {title} {body} — <b>{body} 필수</b></small></label>
       <textarea id="psDocPrompt" class="psta" spellcheck="false"></textarea>
@@ -576,11 +689,11 @@
 </section>
 
 <section class="card" id="sec-models">
-  <h3>모델 레지스트리 <small>LLM·임베딩·리랭커 등록과 역할별 선택</small></h3>
-  <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th title="이 모델 전용 개발 키가 설정되어 있는지 — 값은 보관만 하고 노출하지 않습니다">키</th><th>기본</th><th>활성</th><th></th></tr></thead>
+  <h2>모델 레지스트리 <small>LLM·임베딩·리랭커 등록과 역할별 선택</small></h2>
+  <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th title="이 모델 전용 개발 키가 설정되어 있는지 — 값은 보관만 하고 노출하지 않습니다">키</th><th>기본</th><th>활성</th><th><span class="sronly">동작</span></th></tr></thead>
     <tbody></tbody></table>
   <form id="mform">
-    <select id="mkind"><option value="llm">llm</option><option value="embedding">embedding</option><option value="reranker">reranker</option></select>
+    <label class="fld"><span>종류</span><select id="mkind"><option value="llm">llm</option><option value="embedding">embedding</option><option value="reranker">reranker</option></select></label>
     <input id="mname" placeholder="served-model-name (호스트 /v1/models 값 그대로)" required style="flex:1;min-width:220px">
     <input id="murl" placeholder="base_url (예: http://vllm-embed:8000/v1 — 빈값=역할별 .env)" style="flex:1;min-width:260px">
     <input id="mkey" type="password" autocomplete="off" placeholder="개발 키 (빈값=변경 없음 / '-'=삭제해 전역 키 사용)" style="flex:1;min-width:220px"
@@ -600,17 +713,18 @@
 </section>
 
 <section class="card" id="sec-mcp">
-  <h3>MCP 서버 <small>주소를 등록하면 그 서버의 도구들이 에이전트에 자동 조립됩니다</small></h3>
-  <table id="mcplist"><thead><tr><th>이름</th><th>transport</th><th>주소/command</th><th>활성</th><th></th></tr></thead>
+  <h2>MCP 서버 <small>주소를 등록하면 그 서버의 도구들이 에이전트에 자동 조립됩니다</small></h2>
+  <table id="mcplist"><thead><tr><th>이름</th><th>transport</th><th>주소/command</th><th>활성</th><th><span class="sronly">동작</span></th></tr></thead>
     <tbody></tbody></table>
   <form id="mcpform">
     <input id="mcpname" placeholder="이름 (예: datahub)" required style="width:130px">
+    <label class="fld"><span>연결 방식</span>
     <select id="mcptr">
       <option value="streamable_http">streamable_http (표준 MCP)</option>
       <option value="sse">sse</option>
       <option value="rest">rest (사내 — GET /tools + POST /call)</option>
       <option value="stdio">stdio (로컬 실행 파일)</option>
-    </select>
+    </select></label>
     <input id="mcpurl" placeholder="http(s)://주소 — HTTP 계열 / 실행 파일명 — stdio" style="flex:1;min-width:280px">
     <button id="mcpadd">등록/수정</button>
     <span class="hint" id="mcpmsg" style="margin:0"></span>
@@ -620,18 +734,18 @@
 </section>
 
 <section class="card" id="sec-agent">
-  <h3>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h3>
-  <h4>정체성 <small>이름·소개·지원범위 — 비우면 코드 기본값(회색). 시스템 프롬프트·라우터에 함께 반영</small></h4>
+  <h2>에이전트 설정 <small>전역 — 저장 즉시 다음 질문부터 반영 (에이전트 재조립, 재배포 불필요)</small></h2>
+  <h3>정체성 <small>이름·소개·지원범위 — 비우면 회색으로 보이는 기본값을 씁니다. 시스템 프롬프트·라우터에 함께 반영</small></h3>
   <div class="idgrid">
     <label>이름</label><input id="agName" type="text">
     <label>지원범위</label><input id="agScope" type="text">
     <label>자기소개</label><input id="agIntro" type="text">
   </div>
-  <h4>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — 아래 회색 텍스트가 현재 기본값</small></h4>
+  <h3>시스템 프롬프트 <small>비워두면 코드 기본값 사용 — [기본값 불러오기]로 채워서 고치거나 [기본값 보기]로 나란히 비교</small></h3>
   <textarea id="agPrompt" spellcheck="false"></textarea>
-  <h4>라우터 지침 <small>입력 분류(triage) 프롬프트 — 비우면 코드 기본값(회색 placeholder)</small></h4>
+  <h3>라우터 지침 <small>입력 분류(triage) 프롬프트 — 비우면 코드 기본값. 아래 컨트롤로 불러오기·비교</small></h3>
   <textarea id="agTriage" spellcheck="false"></textarea>
-  <h4>답변 생성 <small>추론(생각하기) 모델의 생각 출력 — 검색·답변 에이전트에 적용</small></h4>
+  <h3>답변 생성 <small>추론(생각하기) 모델의 생각 출력 — 검색·답변 에이전트에 적용</small></h3>
   <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
     <input type="checkbox" id="agThink" checked><b>생각하기(thinking) 사용</b>
     <span class="hint" style="margin:0">— 끄면 enable_thinking=false로 더 빠름 (복잡한 추론엔 품질↓)</span>
@@ -640,7 +754,7 @@
     <input type="checkbox" id="agBlockHanzi"><b>한자 차단</b>
     <span class="hint" style="margin:0">— 한자(중국어)를 생성 단계에서 제외(guided_regex). 한글·영문·코드는 통과, 한자 자리에 대체어. ⚠ 도구호출과 궁합 확인 필요</span>
   </label>
-  <h4>도구 사용 여부 <small>끄면 에이전트가 그 도구를 아예 받지 않습니다 (builtin·MCP 공통)</small></h4>
+  <h3>도구 사용 여부 <small>끄면 에이전트가 그 도구를 아예 받지 않습니다 (builtin·MCP 공통)</small></h3>
   <label style="font-size:.8rem;display:flex;gap:6px;align-items:center;margin:6px 0">
     <input type="checkbox" id="agMcp" checked><b>DataHub MCP 사용</b>
     <span class="hint" style="margin:0">— 끄면 MCP 연결 자체를 건너뜀 (아래 MCP 도구 전체 비활성)</span>
@@ -655,8 +769,9 @@
 </section>
 
 <section class="card" id="sec-events">
-  <h3>활동 로그 <small>정상·비정상 전부 (요청·도구·배치·오류) — 최신순, 보관 180일</small></h3>
+  <h2>활동 로그 <small>정상·비정상 전부 (요청·도구·배치·오류) — 최신순, 보관 180일</small></h2>
   <form id="evform" style="margin-bottom:10px">
+    <label class="fld"><span>종류</span>
     <select id="evkind">
       <option value="">전체 종류</option>
       <option value="request">요청</option>
@@ -664,13 +779,14 @@
       <option value="batch">배치</option>
       <option value="error">오류</option>
       <option value="model">모델</option>
-    </select>
+    </select></label>
+    <label class="fld"><span>수준</span>
     <select id="evlevel">
       <option value="">전체 수준</option>
       <option value="info">info</option>
       <option value="warn">warn</option>
       <option value="error">error</option>
-    </select>
+    </select></label>
     <input id="evq" type="search" placeholder="source·요약 검색" style="flex:1;min-width:160px">
     <button type="button" id="evsearch">조회</button>
     <span class="hint" id="evmsg" style="margin:0"></span>
@@ -737,7 +853,7 @@ async function loadUsers() {
       const b = document.createElement("button");
       b.type = "button"; b.textContent = label;
       b.style.cssText = "margin-right:6px;padding:3px 10px;border-radius:6px;cursor:pointer;background:#fff;" +
-        (warn ? "border:1px solid var(--fail);color:var(--fail)" : "border:1px solid var(--line);color:var(--ink)");
+        (warn ? "border:1px solid var(--fail);color:var(--fail-ink)" : "border:1px solid var(--line);color:var(--ink)");
       b.onclick = () => userAct(u.user_id, action, label);
       btns.appendChild(b);
     };
@@ -822,8 +938,8 @@ async function renderDomainVersions(dname, page, td) {
   td.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성일</th><th>용도</th>" +
-                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th><th></th></tr></thead>";
+  t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th>버전</th><th>생성일</th><th>용도</th>" +
+                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th><th><span class='sronly'>동작</span></th></tr></thead>";
   const tb = document.createElement("tbody");
   const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
   j.versions.forEach(v => {
@@ -965,6 +1081,7 @@ function renderSources(selName) {
     const cbTd = document.createElement("td");
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.dataset.name = s.source_name;
+    cb.setAttribute("aria-label", `${s.source_name} 선택`);
     cb.onclick = (e) => e.stopPropagation();  // 체크는 행 클릭(폼 채우기)과 분리
     cbTd.appendChild(cb); tr.appendChild(cbTd);
     const fmap = Object.entries(s.field_map).map(([k, v]) => `${k}:${v}`).join(" ");
@@ -1258,7 +1375,7 @@ function pRow(label, s, agg) {
   return `<div class="prow${agg ? " agg" : ""}">
     <span class="plabel" title="${esc(label)}">${esc(label)}</span>
     <span class="pbar">${seg(s.done, "#16a34a")}${seg(s.excluded, "#9ca3af")}${seg(s.error, "#dc2626")}</span>
-    <span class="pnum">${pct}% — 반영 ${s.done} · 제외 ${s.excluded}${s.error ? ` · <b style="color:#dc2626">오류 ${s.error}</b>` : ""} · 미처리 ${s.pending}</span>
+    <span class="pnum">${pct}% — 반영 ${s.done} · 제외 ${s.excluded}${s.error ? ` · <b style="color:var(--fail-ink)">오류 ${s.error}</b>` : ""} · 미처리 ${s.pending}</span>
   </div>`;
 }
 // ── 예약 스케줄러 (문서 구조화) ──
@@ -1335,9 +1452,9 @@ async function openRunPanel(src) {
   const p = $("runpanel");
   p.innerHTML = "";
   if (!_runSrc) return;
-  p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${esc(src)} — 구조화 실행(run) 버전</h4>
+  p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${esc(src)} — 구조화 실행(run) 버전</h3>
     <div id="runlist">⏳</div><div id="runform"></div>
-    <h4 style="margin:10px 0 4px">📄 문서별 결과</h4>
+    <h4 style="margin:10px 0 4px">📄 문서별 결과</h3>
     <div id="docfilter"></div><div id="doclist"></div>`;
   loadRuns(src); loadRunDocs(src, "", 1);
 }
@@ -1349,7 +1466,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th title='비교할 run 체크 (2개 이상)'>🔍</th><th>시작</th><th>도메인</th><th>①추출</th><th>②병합</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th title='비교할 run 체크 (2개 이상)'>🔍</th><th>시작</th><th>도메인</th><th>①추출</th><th>②병합</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1725,15 +1842,72 @@ async function loadPipelineSettings() {
     (m?.llm || []).forEach(x => sel.add(new Option(x.name, x.name)));
   }
   sel.value = s.doc_extract_model || "";
-  $("psDocPrompt").value = s.struct_doc_prompt || "";
-  $("psDocPrompt").placeholder = s.default_doc_prompt || "";
-  $("psPackPrompt").value = s.struct_pack_prompt || "";
-  $("psPackPrompt").placeholder = s.default_pack_prompt || "";
-  $("psExtractPrompt").value = s.entity_extract_prompt || "";
-  $("psExtractPrompt").placeholder = s.default_extract_prompt || "";
-  $("psJudgePrompt").value = s.entity_judge_prompt || "";
-  $("psJudgePrompt").placeholder = s.default_judge_prompt || "";
+  // 기본값은 placeholder(입력 시작하면 사라짐)가 아니라 참조 컨트롤로 붙인다
+  bindDefaultable("psDocPrompt", s.struct_doc_prompt, s.default_doc_prompt, "문서 판정 프롬프트");
+  bindDefaultable("psPackPrompt", s.struct_pack_prompt, s.default_pack_prompt, "묶음 판정 프롬프트");
+  bindDefaultable("psExtractPrompt", s.entity_extract_prompt, s.default_extract_prompt,
+                  "세션 추출 프롬프트");
+  bindDefaultable("psJudgePrompt", s.entity_judge_prompt, s.default_judge_prompt,
+                  "태스크 판정 프롬프트");
 }
+
+// ── 기본값 참조 — "빈값=코드 기본"인 입력의 공통 컨트롤 ──────────────────────
+// 기본값을 placeholder로만 보여주면 한 글자 입력하는 순간 참조가 사라져, 무엇을 고치는
+// 중인지 알 수 없다. 그래서 ① 상태 배지(기본값 사용 중 / 커스텀) ② [기본값 불러오기]
+// (기본 텍스트를 편집기에 채워 그 위에서 고치게) ③ [기본값 보기](펼쳐 옆에 두고 비교)
+// ④ [비우기](다시 기본값 사용)를 붙인다. 저장 규약은 그대로 — 빈값이면 코드 기본.
+function bindDefaultable(id, value, deflt, label) {
+  const ta = $(id);
+  if (!ta) return;
+  ta.value = value || "";
+  ta.placeholder = `비워 두면 코드 기본값을 씁니다 — 아래 [기본값 불러오기]로 채워서 고치세요`;
+  const dflt = (deflt || "").trim();
+  let bar = document.getElementById(id + "_dflt");
+  if (!bar) {   // 컨트롤 줄 + 접힘 참조 상자를 textarea 뒤에 1회 생성
+    bar = document.createElement("div");
+    bar.className = "dflt"; bar.id = id + "_dflt";
+    const st = document.createElement("span"); st.className = "state"; st.id = id + "_state";
+    const load = document.createElement("button"); load.type = "button";
+    load.textContent = "기본값 불러오기";
+    load.title = `${label}의 코드 기본값을 편집칸에 채웁니다 — 그 위에서 고치세요`;
+    const show = document.createElement("button"); show.type = "button";
+    show.textContent = "기본값 보기";
+    show.title = "기본값을 아래에 펼쳐 편집칸과 비교합니다";
+    const clr = document.createElement("button"); clr.type = "button";
+    clr.textContent = "비우기(기본값 사용)";
+    clr.title = "커스텀을 지우고 코드 기본값으로 되돌립니다";
+    bar.append(st, load, show, clr);
+    const box = document.createElement("div");
+    box.className = "dfltbox"; box.id = id + "_box"; box.style.display = "none";
+    const pre = document.createElement("pre");
+    box.appendChild(pre);
+    ta.insertAdjacentElement("afterend", box);
+    ta.insertAdjacentElement("afterend", bar);
+    const sync = () => {
+      const custom = !!ta.value.trim();
+      st.textContent = custom ? "커스텀 사용 중" : "기본값 사용 중";
+      st.className = "state " + (custom ? "custom" : "def");
+      clr.disabled = !custom;
+      load.disabled = !dfltOf(id);
+    };
+    load.onclick = () => { ta.value = dfltOf(id); ta.focus(); sync(); };
+    show.onclick = () => {
+      const open = box.style.display === "none";
+      box.style.display = open ? "" : "none";
+      pre.textContent = dfltOf(id) || "(코드 기본값 없음)";
+      show.textContent = open ? "기본값 숨기기" : "기본값 보기";
+    };
+    clr.onclick = () => { ta.value = ""; sync(); };
+    ta.addEventListener("input", sync);
+    bar._sync = sync;
+  }
+  _DFLT[id] = dflt;               // 최신 기본값 보관 (서버 조립 결과가 바뀔 수 있음)
+  const box = document.getElementById(id + "_box");
+  if (box && box.style.display !== "none") box.querySelector("pre").textContent = dflt;
+  bar._sync();
+}
+const _DFLT = {};
+const dfltOf = id => _DFLT[id] || "";
 $("psform").onsubmit = async (e) => {
   e.preventDefault();
   $("psmsg").textContent = "";
@@ -1908,16 +2082,16 @@ async function loadAgentSettings() {
   const r = await fetch("/admin/agent-settings").catch(() => null);
   if (!r?.ok) { $("agTools").innerHTML = `<span class="hint">조회 실패 — 관리자 인증을 확인하세요</span>`; return; }
   const s = await r.json();
-  $("agPrompt").value = s.system_prompt;
-  $("agPrompt").placeholder = s.default_prompt;
   $("agMcp").checked = s.mcp_enabled;
   $("agThink").checked = !s.no_think;  // no_think=true면 체크 해제(생각 끔)
   $("agBlockHanzi").checked = !!s.block_hanzi;
+  // 짧은 한 줄 값은 기본값을 placeholder로 두는 게 자연스럽다 (참조가 통째로 가려지지 않음)
   $("agName").value = s.agent_name || "";   $("agName").placeholder = s.default_name || "";
   $("agScope").value = s.agent_scope || "";  $("agScope").placeholder = s.default_scope || "";
   $("agIntro").value = s.agent_intro || "";  $("agIntro").placeholder = s.default_intro || "";
-  $("agTriage").value = s.triage_prompt || "";
-  $("agTriage").placeholder = s.default_triage_prompt || "";
+  // 긴 프롬프트는 기본값 참조 컨트롤로 (불러오기·비교·되돌리기)
+  bindDefaultable("agPrompt", s.system_prompt, s.default_prompt, "시스템 프롬프트");
+  bindDefaultable("agTriage", s.triage_prompt, s.default_triage_prompt, "라우터 프롬프트");
   const box = $("agTools");
   // 갱신 전 그룹 열림 상태 보존 (기본: 전부 펼침)
   const openState = {};
@@ -1937,15 +2111,22 @@ async function loadAgentSettings() {
     det.className = "toolgrp"; det.dataset.grp = g;
     det.open = openState[g] !== false;  // 기본 펼침, 사용자가 접은 건 유지
     const sum = document.createElement("summary");
-    const gcb = document.createElement("input");  // 그룹 일괄 on/off
-    gcb.type = "checkbox"; gcb.title = "이 그룹 전체 켜기/끄기";
-    gcb.onclick = (e) => { e.stopPropagation();  // 내장(fixed=disabled)은 건드리지 않음
-      det.querySelectorAll(".agtool:not(:disabled)").forEach(c => { c.checked = gcb.checked; }); };
     const gname = document.createElement("b"); gname.textContent = g;
     const gcnt = document.createElement("span"); gcnt.className = "src";
     gcnt.textContent = `${tools.length}개`;
-    sum.append(gcb, " ", gname, " ", gcnt);
+    sum.append(gname, " ", gcnt);          // summary는 순수 토글 — 안에 컨트롤을 넣지 않는다
     det.appendChild(sum);
+    // 그룹 일괄 on/off는 펼친 안쪽 첫 줄에 (summary 안에 두면 키보드 포커스가 토글과 충돌)
+    const gbulk = document.createElement("label");
+    gbulk.className = "treechild";
+    const gcb = document.createElement("input");
+    gcb.type = "checkbox"; gcb.setAttribute("aria-label", `${g} 그룹 전체 켜기/끄기`);
+    gcb.onclick = () => {   // 내장(fixed=disabled)은 건드리지 않음
+      det.querySelectorAll(".agtool:not(:disabled)").forEach(c => { c.checked = gcb.checked; }); };
+    const gbt = document.createElement("span"); gbt.className = "desc";
+    gbt.textContent = "이 그룹 전체 켜기/끄기";
+    gbulk.append(gcb, gbt);
+    det.appendChild(gbulk);
     tools.forEach(t => {
       const lab = document.createElement("label");
       lab.className = "treechild" + (t.fixed ? " agtool fixed" : "");
@@ -1992,7 +2173,7 @@ $("agForm").onsubmit = async (e) => {
 
 // ── 활동 로그 ────────────────────────────────────────────────
 let evPage = 1;
-const EV_LVL_COLOR = {error: "var(--fail)", warn: "#b45309", info: "inherit"};
+const EV_LVL_COLOR = {error: "var(--fail-ink)", warn: "var(--warn-ink)", info: "inherit"};
 async function loadEvents() {
   const p = new URLSearchParams({kind: $("evkind").value, level: $("evlevel").value,
                                  q: $("evq").value.trim(), page: evPage, page_size: 50});
@@ -2114,17 +2295,56 @@ async function openDocOriginal(src, srcId, title) {
     sec.append(h, pre); box.appendChild(sec);
   });
 }
-$("evmClose").onclick = () => $("evModal").close();
+// ── 접근성 보정 패스 — 이름 없는 컨트롤에 접근 가능한 이름을 부여한다 ─────────────
+// 목록·버전 표의 라디오·체크박스는 JS가 행마다 만들어서 라벨을 달 자리가 없고, 보조
+// 컨트롤은 title 툴팁만 있는 경우가 있다. 주요 폼에는 보이는 라벨(.fld)을 붙였고,
+// 여기서는 남는 동적 요소를 훑어 이름을 채운다 (axe label / label-title-only).
+function a11yPass(root) {
+  (root || document).querySelectorAll(
+    "input:not([aria-label]), select:not([aria-label]), textarea:not([aria-label])"
+  ).forEach(el => {
+    if (el.closest("label") || (el.id && document.querySelector(`label[for="${el.id}"]`))) {
+      if (el.title && el.type !== "checkbox" && el.type !== "radio") return;  // 라벨 있음
+    }
+    if (el.title) { el.setAttribute("aria-label", el.title); return; }
+    if (el.type === "radio" || el.type === "checkbox") {
+      // 같은 행의 첫 텍스트 셀을 이름으로 (예: "v3 선택")
+      const row = el.closest("tr");
+      const txt = row ? [...row.children].map(c => c.textContent.trim()).find(t => t) : "";
+      el.setAttribute("aria-label", (txt || "행") + " 선택");
+      return;
+    }
+    if (el.placeholder) el.setAttribute("aria-label", el.placeholder);
+  });
+}
+// 탭 전환·목록 갱신마다 새 DOM이 생기므로 관찰해서 자동 적용 (디바운스)
+let _a11yT = null;
+new MutationObserver(() => {
+  clearTimeout(_a11yT);
+  _a11yT = setTimeout(() => a11yPass(document), 120);
+}).observe(document.body, {childList: true, subtree: true});
+document.addEventListener("DOMContentLoaded", () => a11yPass(document));
+
+const closeVerModal = () => $("evModal").close();
+$("evmClose").onclick = closeVerModal;
 $("evModal").addEventListener("click", ev => {   // 배경 클릭 = 닫기
   if (ev.target === $("evModal")) $("evModal").close();
 });
 // 버전 상세 뷰어 — 도메인·엔티티·클러스터 공용 (evModal 재사용).
 // sections: [{label, text}] — text는 <pre>에 textContent(전문 그대로, XSS 안전).
-function openVerModal(title, sections) {
+function openVerModal(title, sections, actions) {
   // 섹션 타입: {label, text} 텍스트 · {label, table:{head,rows,badge0}} 표(badge0=첫 컬럼 배지)
   //           · {label, text, collapsed:true} 긴 내용 접힘 — 전부 textContent(XSS 안전)
+  // actions: [{label, title, fn}] — 상세를 보다가 바로 편집으로 넘어가는 통로 (읽기 전용 막다름 방지)
   $("evmTitle").textContent = title;
   const box = $("evmBody"); box.innerHTML = "";
+  if ((actions || []).length) {
+    const bar = document.createElement("div");
+    bar.className = "schedrow"; bar.style.margin = "0 0 10px";
+    actions.forEach(a => bar.appendChild(_verBtn(a.label, () => { closeVerModal(); a.fn(); },
+                                                 a.title)));
+    box.appendChild(bar);
+  }
   (sections || []).forEach(s => {
     const sec = document.createElement("div"); sec.className = "evsec";
     if (s.table) {
@@ -2216,9 +2436,11 @@ async function loadDataVer() {
     dbox.appendChild(wrap);
   }
 }
-function _verBtn(label, fn) {
+function _verBtn(label, fn, title) {
   const b = document.createElement("button"); b.type = "button"; b.className = "ghost";
-  b.textContent = label; b.onclick = fn; return b;
+  b.textContent = label; b.onclick = fn;
+  if (title) b.title = title;
+  return b;
 }
 function _verPager(bar, j, page, reload) {
   if (j.pages > 1) {
@@ -2233,9 +2455,32 @@ function renderVersionManager(cfg) {
   $(cfg.newBtn).onclick = () => vmNewLine(cfg);
   vmLoadLines(cfg);
 }
+// 라인 화면의 상태 레일 — 지금 활성(★) 라인·버전이 무엇이고 그게 어디에 쓰이는지
+function vmRail(cfg, lines) {
+  const rail = document.getElementById(cfg.rail || "");
+  if (!rail) return;
+  rail.innerHTML = "";
+  const add = (txt, cls) => { const s = document.createElement("span");
+    if (cls) s.className = cls; s.textContent = txt; rail.appendChild(s); };
+  const act = (lines || []).find(l => l.active && l.default_version != null);
+  add(cfg.step || "", "step");
+  if (act) {
+    add(`활성 ${act.name}·v${act.default_version}`, "live");
+    add("·", "sep");
+    add(cfg.usedFor || "");
+  } else {
+    add("활성 라인 없음 — 코드 기본값으로 동작합니다");
+  }
+  add("·", "sep");
+  add(`라인 ${(lines || []).length}개`);
+  add("다음 → " + (act ? "고칠 게 있으면 라인을 클릭해 버전을 폼으로 불러오세요"
+                       : "아래 폼에서 라인을 만들고 [기본으로 지정]"), "next");
+}
+
 async function vmLoadLines(cfg) {
   const box = $(cfg.lines); box.innerHTML = "⏳";
   const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
+  vmRail(cfg, j.lines);
   if (j.defaults) cfg.defaults = j.defaults;   // 코드 기본 프롬프트 — 빈 버전 뷰어에 전문 표시용
   if (j.defaults && cfg.scaffold && $(cfg.scaffold))   // 스캐폴드 읽기 전용 표시 (한글 주석)
     $(cfg.scaffold).textContent =
@@ -2277,7 +2522,7 @@ async function vmVersions(cfg, name, page, td) {
   const j = await fetch(`${cfg.versions(name)}?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
   td.innerHTML = "";
   const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th><th></th></tr></thead>";
+  t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th><th><span class='sronly'>동작</span></th></tr></thead>";
   const tb = document.createElement("tbody");
   (j.versions || []).forEach(v => {
     const vr = document.createElement("tr");
@@ -2288,8 +2533,15 @@ async function vmVersions(cfg, name, page, td) {
     [`v${v.version}`, v.created || "", cfg.summary(v), v.note || "", v.is_default ? "★ 기본" : ""]
       .forEach(x => { const c = document.createElement("td"); c.textContent = x; vr.appendChild(c); });
     const cv = document.createElement("td");   // 👁 상세 — 내부 구조(프롬프트 전문) 뷰어
+    const toForm = () => {   // 상세를 보다가 바로 편집으로 (읽기 전용 막다름 방지)
+      sel.checked = true; cfg.setForm(v); $(cfg.name).value = name;
+      $(cfg.msg).textContent = `${name} v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [버전 업]`;
+      $(cfg.name).scrollIntoView({behavior: "smooth", block: "center"});
+    };
     cv.appendChild(_verBtn("👁 상세", async () =>
-      openVerModal(`${cfg.title} · ${name} v${v.version}`, await cfg.viewSections(v))));
+      openVerModal(`${cfg.title} · ${name} v${v.version}`, await cfg.viewSections(v),
+                   [{label: "✏ 이 값을 폼으로 불러와 수정", fn: toForm,
+                     title: "이 버전 값을 아래 편집 폼에 채웁니다 — 고친 뒤 [버전 업]하면 새 버전"}])));
     vr.appendChild(cv);
     if (v.is_default) vr.classList.add("sel");
     tb.appendChild(vr);
@@ -2537,6 +2789,8 @@ function annotatePh(t) {
 }
 const ENTITY_VM = {
   title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
+  rail: "entRail", step: "① 추출 (엔티티)",
+  usedFor: "문서 구조화와 대화 추출이 이 스키마로 값을 뽑습니다",
   hasDescr: true, scaffold: "entScaffold",
   linesEndpoint: "/admin/entity-lines",
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
@@ -2596,6 +2850,8 @@ const ENTITY_VM = {
 };
 const CLUSTER_VM = {
   title: "② 병합(클러스터)", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
+  rail: "clsRail", step: "② 병합 (클러스터)",
+  usedFor: "같은 뜻의 노드를 하나로 합치는 기준입니다",
   linesEndpoint: "/admin/cluster-lines",
   versions: n => `/admin/cluster-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/cluster-lines/${encodeURIComponent(n)}/versions/${v}/default`,
@@ -2625,7 +2881,7 @@ const CLUSTER_VM = {
 };
 // ── 매핑 편집기 — 테이블·id·시간·역할 매핑을 여기서 정의 (원천 탭은 등록된 버전만 선택) ──
 const mvmsg = (t, ok) => { const e = $("mvMsg"); e.textContent = t;
-  e.style.color = ok ? "var(--ok)" : "var(--mut)"; };
+  e.style.color = ok ? "var(--ok-ink)" : "var(--mut)"; };
 let _mvSrcs = [];   // 매핑 편집기용 소스 캐시
 
 // 등록된 값이 select 옵션에 없으면(테이블 삭제됨·화이트리스트 밖) 옵션을 만들어 표시 —
@@ -2709,7 +2965,7 @@ async function loadMappingVer() {
     const mv = await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions`)
       .then(r => r.json()).catch(() => ({versions: []}));
     const t = document.createElement("table"); t.className = "vertable"; t.style.marginTop = "4px";
-    t.innerHTML = "<thead><tr><th></th><th>버전</th><th>생성</th><th>id 컬럼</th><th>시간 컬럼</th><th>필드 매핑</th><th>메모</th><th>기본</th></tr></thead>";
+    t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th>버전</th><th>생성</th><th>id 컬럼</th><th>시간 컬럼</th><th>필드 매핑</th><th>메모</th><th>기본</th></tr></thead>";
     const tb = document.createElement("tbody");
     (mv.versions || []).forEach(v => {
       const tr = document.createElement("tr");
@@ -2782,7 +3038,7 @@ async function loadPresets() {
   }
   const t = document.createElement("table"); t.className = "vertable";
   t.innerHTML = "<thead><tr><th>이름</th><th>도메인</th><th>①추출</th><th>②병합</th>" +
-                "<th>LLM</th><th>임베딩</th><th>메모</th><th>수정</th><th></th></tr></thead>";
+                "<th>LLM</th><th>임베딩</th><th>메모</th><th>수정</th><th><span class='sronly'>동작</span></th></tr></thead>";
   const tb = document.createElement("tbody");
   j.presets.forEach(p => {
     const tr = document.createElement("tr"); tr.style.cursor = "pointer";
@@ -2987,9 +3243,39 @@ function plOpenPop(node, {title, items, current, onPick, multi}) {
   setTimeout(() => document.addEventListener("click", () => pop.remove(), {once: true}), 0);
 }
 
+// 상태 레일 — 지금 무엇이 활성인지, 다음에 뭘 하면 되는지 한 줄. 문단 설명의 대체물.
+function plRail() {
+  const rail = $("plRail"); if (!rail) return;
+  rail.innerHTML = "";
+  const D = PL.d, runs = D.runs || [], active = runs.find(r => r.active);
+  const add = (txt, cls) => { const s = document.createElement("span");
+    if (cls) s.className = cls; s.textContent = txt; rail.appendChild(s); return s; };
+  const sep = () => add("·", "sep");
+  add("파이프라인", "step");
+  add(PL.src || "소스 없음");
+  sep();
+  if (active) {
+    add(`활성 run ${active.started}`, "live");
+    sep();
+    add(`반영 ${active.done} · 제외 ${active.excluded}${active.error ? " · 오류 " + active.error : ""}`);
+  } else {
+    add("활성 run 없음 — 사용자에게 노출되는 결과가 없습니다");
+  }
+  const pend = runs.filter(r => !r.active).length;
+  if (pend) { sep(); add(`대기 run ${pend}개`); }
+  const nx = !runs.length ? "노드에서 버전을 골라 [▶ 이 조합으로 run 생성]"
+    : !active ? "run 목록에서 [▶ 구조화] 후 [★ 활성]"
+    : (active.stale_dims || []).length ? "구성이 최신 기본과 다릅니다 — [⧉ 복제해 새 run]으로 갱신"
+    : "바꿀 게 있으면 노드를 클릭해 새 조합을 만드세요";
+  add("다음 → " + nx, "next");
+}
+
 function plRender() {
   const c = $("plCanvas"); c.innerHTML = "";
-  const wrap = document.createElement("div"); wrap.className = "plwrap"; c.appendChild(wrap);
+  const wrap = document.createElement("div"); wrap.className = "plwrap";
+  wrap.tabIndex = 0; wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "파이프라인 단계 — 노드를 클릭해 버전을 고릅니다");
+  c.appendChild(wrap);
   const D = PL.d, sinfo = D.sinfo || {}, stat = D.stat || {};
   const viewing = !!PL.view;                       // run 스냅샷 보기 모드
   const R = PL.view || {};                          // 보기 모드일 때 run 값
@@ -3092,6 +3378,7 @@ function plRender() {
       ? {text: "⚠ 구성 뒤처짐", title: active.stale_dims.join("\n")} : null,
     onClick: () => showTab("sources")});
   plRunsStrip();
+  plRail();
 }
 
 function plRunsStrip() {
@@ -3099,7 +3386,9 @@ function plRunsStrip() {
   const runs = (PL.d.runs || []).slice(0, 5);
   if (!runs.length) return;
   const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>run</th><th>조합</th><th>결과</th><th>상태</th><th></th></tr></thead>";
+  t.innerHTML = "<thead><tr><th>run</th><th>조합</th>"
+    + "<th title='✅ 그래프 반영 · ◽ 기준 미달로 제외 · ❌ 판정 오류'>결과 (반영·제외·오류)</th>"
+    + "<th>상태</th><th><span class='sronly'>동작</span></th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
     const tr = document.createElement("tr");
@@ -3234,6 +3523,8 @@ function scBuild() {
   h.textContent = "노드 드래그=이동 · 노드 클릭=편집 · 파란 ● 포트를 끌어 다른 노드에 놓기=관계 만들기 · 보라 선 라벨 클릭=관계 편집";
   box.appendChild(h);
   const wrap = document.createElement("div"); wrap.className = "scWrap"; wrap.id = "scWrap";
+  wrap.tabIndex = 0; wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "스키마 설계 캔버스 — 노드 드래그·클릭으로 편집");
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "scEdges"); svg.id = "scSvg";
   wrap.appendChild(svg); box.appendChild(wrap);

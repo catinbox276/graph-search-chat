@@ -7,9 +7,17 @@
   --ok:   #159a5b;   /* 검증된 경로 (초록) */
   --warn: #d97706;   /* 주의 (호박) */
   --fail: #dc2626;   /* 실패 이력 (빨강) */
-  --mut:  color-mix(in srgb, var(--ink) 55%, var(--bg));
-  --line: color-mix(in srgb, var(--ink) 14%, var(--bg));
-  --card: color-mix(in srgb, var(--bg) 92%, var(--ink));
+  /* 보조 텍스트 — 55%는 작은 글씨에서 대비 3:1로 WCAG AA(4.5:1) 미달이라 72%로.
+     힌트·라벨이 실제로 읽히는 게 이 콘솔의 기본 요건 (axe color-contrast 37건 원인) */
+  --mut:  color-mix(in srgb, var(--ink) 72%, var(--bg));
+  --line: color-mix(in srgb, var(--ink) 18%, var(--bg));
+  --card: color-mix(in srgb, var(--bg) 96%, var(--ink));
+  /* 밝은 배경 위 '텍스트용' 상태색 — 원색(--ok/--warn/--fail)은 점·테두리용,
+     글자에는 대비 확보한 진한 변형을 쓴다 */
+  --ok-ink:   #0f6b32;
+  --warn-ink: #8a5300;
+  --fail-ink: #b3261e;
+  --path-ink: #1a49c9;
 }
 * { box-sizing: border-box; }
 body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--ink); }
