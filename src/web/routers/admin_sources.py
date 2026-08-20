@@ -638,17 +638,45 @@ def admin_entity_line_versions(name: str, page: int = 1):
 class EntityPreviewIn(BaseModel):
     criteria: str = ""
     etypes: list[dict] = []
+    fill_sample: bool = False   # true면 실제 문서 1건 + 도메인 지침으로 채운 완성본도 반환
 
 
 @router.post("/admin/entity-preview")
 def admin_entity_preview(inp: EntityPreviewIn):
     """스키마·지침으로 조립된 프롬프트 미리보기 — UI가 서버와 동일한 조립 결과를 표시
-    (프론트에 조립 로직을 복제하지 않는다)."""
+    (프론트에 조립 로직을 복제하지 않는다). fill_sample=true면 자리표시자를 실제
+    값(도메인·지침·샘플 문서)으로 채운 완성본을 함께 준다 — '보자마자 아는' 미리보기."""
     schema = _judge.norm_schema(inp.etypes)
     d, p = _judge.build_prompts(schema, inp.criteria)
-    return {"doc_prompt": d, "pack_prompt": p,
-            "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
-                     "attrs": [a["key"] for a in schema["attrs"]]}}
+    out = {"doc_prompt": d, "pack_prompt": p,
+           "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
+                    "attrs": [a["key"] for a in schema["attrs"]]}}
+    if inp.fill_sample:
+        with db_cursor() as cur:
+            cur.execute("""SELECT s.source_name, s.domain, NVL(s.content_kind, ' '),
+                                  NVL(d.extract_hint, ' ')
+                           FROM source_registry s
+                           JOIN domain_registry d ON d.name = s.domain
+                           WHERE s.enabled = 'Y' AND s.domain IS NOT NULL
+                           FETCH FIRST 1 ROWS ONLY""")
+            r = cur.fetchone()
+            if r:
+                sname, domain, kind, hint = r
+                cur.execute("""SELECT src_id, NVL(title, ' '), body FROM corpus_docs
+                               WHERE source_name = :1 FETCH FIRST 1 ROWS ONLY""", [sname])
+                doc = cur.fetchone()
+                if doc:
+                    st = settings.get_all()
+                    body_chars = settings.get_int(st, "doc_body_chars", config.DOC_BODY_CHARS)
+                    body = doc[2].read() if hasattr(doc[2], "read") else (doc[2] or "")
+                    out["doc_prompt_filled"] = _judge._fill(
+                        d, domain=domain,
+                        hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
+                        kind=(kind or "").strip(), title=(doc[1] or "").strip()[:300],
+                        body=_judge._clip(body, body_chars))
+                    out["sample"] = {"source": sname, "src_id": doc[0],
+                                     "title": (doc[1] or "").strip()[:120]}
+    return out
 
 
 @router.post("/admin/entity-lines")

@@ -238,7 +238,11 @@
     </div>
     <details style="margin:6px 0">
       <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 위 1·2로 생성되는 실제 프롬프트 · 출력 형식은 코드가 생성해 잠금</summary>
-      <div class="schedrow" style="margin:4px 0 0"><button type="button" class="ghost" id="entPvBtn">🔄 현재 폼으로 미리보기</button></div>
+      <div class="schedrow" style="margin:4px 0 0">
+        <button type="button" class="ghost" id="entPvBtn">🔄 현재 폼으로 미리보기</button>
+        <button type="button" class="ghost" id="entPvFillBtn">📄 실제 문서로 채워보기</button>
+        <span class="hint" style="margin:0">〔자동 입력: …〕 = 실행 때 문서·도메인 값이 자동으로 채워지는 칸</span>
+      </div>
       <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
     </details>
     <details style="margin:6px 0">
@@ -1853,10 +1857,10 @@ async function vmLoadLines(cfg) {
   const box = $(cfg.lines); box.innerHTML = "⏳";
   const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
   if (j.defaults) cfg.defaults = j.defaults;   // 코드 기본 프롬프트 — 빈 버전 뷰어에 전문 표시용
-  if (j.defaults && cfg.scaffold && $(cfg.scaffold))   // 스캐폴드 읽기 전용 표시
+  if (j.defaults && cfg.scaffold && $(cfg.scaffold))   // 스캐폴드 읽기 전용 표시 (한글 주석)
     $(cfg.scaffold).textContent =
-      "── 문서 판정 스캐폴드 ──\n" + (j.defaults.doc_prompt || "") +
-      "\n\n── 묶음 판정 스캐폴드 ──\n" + (j.defaults.pack_prompt || "");
+      "── 문서 판정 스캐폴드 (기본) ──\n" + annotatePh(j.defaults.doc_prompt || "") +
+      "\n\n── 묶음 판정 스캐폴드 (기본) ──\n" + annotatePh(j.defaults.pack_prompt || "");
   box.innerHTML = "";
   if (!(j.lines || []).length) {
     box.innerHTML = "<span class='hint'>아직 라인이 없습니다 — 아래 폼에서 이름을 넣고 [＋ 새 라인 만들기]</span>"; return;
@@ -1984,22 +1988,42 @@ function veTypesSet(arr) {   // etypes → 폼 (entry/solution 없으면 기본�
       .forEach(t => veTypeRow(t.key, t.label, t.desc));
 }
 $("veTypeAdd").onclick = () => veTypeRow("", "", "");
-$("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 서버 조립 미리보기
+$("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 서버 조립 미리보기 (한글 주석)
   $("entScaffold").textContent = "조립 중…";
   const pv = await entPreview($("veCrit").value, veTypesRead());
   $("entScaffold").textContent = pv
-    ? "── 문서 판정 프롬프트 ──\n" + pv.doc_prompt + "\n\n── 묶음 판정 프롬프트 ──\n" + pv.pack_prompt
+    ? "── 문서 판정 프롬프트 ──\n" + annotatePh(pv.doc_prompt) +
+      "\n\n── 묶음 판정 프롬프트 ──\n" + annotatePh(pv.pack_prompt)
     : "미리보기 실패";
+};
+$("entPvFillBtn").onclick = async () => {   // 실제 문서 1건으로 채운 완성본 — 보자마자 아는 미리보기
+  $("entScaffold").textContent = "실제 문서로 채우는 중…";
+  const pv = await entPreview($("veCrit").value, veTypesRead(), true);
+  if (pv && pv.doc_prompt_filled) {
+    $("entScaffold").textContent =
+      `📄 샘플: [${pv.sample.source}:${pv.sample.src_id}] ${pv.sample.title}\n` +
+      "── 이 문서가 실제로 LLM에게 가는 모습 ──\n" + pv.doc_prompt_filled;
+  } else {
+    $("entScaffold").textContent = "채울 샘플 문서가 없습니다 (도메인 지정된 소스에 적재 문서 필요)";
+  }
 };
 function parseEtypes(v) {   // 백엔드는 etypes를 JSON 문자열로 반환
   try { const a = JSON.parse(v || "[]"); return Array.isArray(a) ? a : []; }
   catch { return []; }
 }
-async function entPreview(criteria, etypes) {   // 서버 조립 — 프론트에 조립 로직 복제 금지
+async function entPreview(criteria, etypes, fillSample) {   // 서버 조립 — 프론트에 조립 로직 복제 금지
   const r = await fetch("/admin/entity-preview", {method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({criteria: criteria || "", etypes: etypes || []})});
+    body: JSON.stringify({criteria: criteria || "", etypes: etypes || [],
+                          fill_sample: !!fillSample})});
   return r.ok ? r.json() : null;
+}
+// 자리표시자를 한글 주석으로 표시 (표시만 — 실제 템플릿은 불변)
+const _PH_KO = {domain: "도메인 이름", hint: "도메인 추출 지침", kind: "문서 유형",
+                title: "문서 제목", body: "문서 본문", docs: "문서 목록 (묶음)"};
+function annotatePh(t) {
+  return Object.entries(_PH_KO).reduce(
+    (s, [k, l]) => s.split("{" + k + "}").join("〔자동 입력: " + l + "〕"), t || "");
 }
 const ENTITY_VM = {
   title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
@@ -2034,12 +2058,14 @@ const ENTITY_VM = {
                                   ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 5층"])]}},
                   {label: "판정 지침 (문서 포함/제외 기준)", text: v.criteria, empty: "(없음 — 코드 기본 기준)"}];
     if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
-      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt, collapsed: true},
-                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt, collapsed: true});
+      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.doc_prompt), collapsed: true},
+                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.pack_prompt), collapsed: true});
     } else {
       const pv = await entPreview(v.criteria, et);
-      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과)", text: pv && pv.doc_prompt, collapsed: true},
-                {label: "적용될 묶음 프롬프트 (서버 조립 결과)", text: pv && pv.pack_prompt, collapsed: true});
+      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과 — 〔자동 입력〕은 실행 때 채워짐)",
+                 text: annotatePh(pv && pv.doc_prompt), collapsed: true},
+                {label: "적용될 묶음 프롬프트 (서버 조립 결과)",
+                 text: annotatePh(pv && pv.pack_prompt), collapsed: true});
     }
     secs.push({label: "메모", text: v.note, empty: "(없음)"});
     return secs;
