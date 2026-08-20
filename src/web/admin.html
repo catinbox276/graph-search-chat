@@ -96,6 +96,31 @@
   .toolgrp[open] > summary::before { content: "▾ "; }
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
+  /* 스키마 캔버스 — 엔티티 노드 드래그 배치 + 포트 드래그로 관계 선 긋기 (n8n식) */
+  .scWrap { position: relative; height: 430px; border: 1.5px solid var(--line); border-radius: 12px;
+            overflow: hidden; margin: 8px 0;
+            background-image: radial-gradient(circle, rgba(120,130,160,.18) 1px, transparent 1px);
+            background-size: 22px 22px; }
+  .scEdges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .scEdges .lbl { pointer-events: auto; cursor: pointer; font-size: 11px; fill: #7c5cd6; font-weight: 700; }
+  .scNode { position: absolute; min-width: 118px; max-width: 180px; padding: 8px 12px;
+            border: 2px solid #c084fc; border-radius: 10px; background: #fff;
+            cursor: grab; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  .scNode:active { cursor: grabbing; }
+  .scNode.entry { border-color: #0891b2; } .scNode.solution { border-color: #12b886; }
+  .scNode .r { font-size: .66rem; color: var(--mut); }
+  .scNode .k { font-weight: 700; font-size: .82rem; word-break: break-all; }
+  .scNode .l { font-size: .72rem; color: var(--mut); }
+  .scPort { position: absolute; right: -8px; top: calc(50% - 8px); width: 16px; height: 16px;
+            border-radius: 50%; background: #4a7dff; border: 2.5px solid #fff;
+            cursor: crosshair; box-shadow: 0 0 0 1px #4a7dff; }
+  .scPort:hover { transform: scale(1.25); }
+  .scNode.linktarget { box-shadow: 0 0 0 3px rgba(74,125,255,.45); }
+  .scPop { position: absolute; z-index: 60; min-width: 250px; border: 1px solid var(--line);
+           border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 10px; }
+  .scPop input { width: 100%; box-sizing: border-box; margin: 3px 0; padding: 5px 8px;
+                 border: 1px solid var(--line); border-radius: 6px; }
+  .scPop .t { font-weight: 700; font-size: .76rem; margin-bottom: 4px; }
   /* 파이프라인 캔버스 — 고정 DAG 노드 뷰 (n8n식 보기, 드래그 편집은 불필요라 없음) */
   .plwrap { display: flex; align-items: stretch; overflow-x: auto; padding: 14px 4px; }
   .plnode { position: relative; min-width: 148px; max-width: 200px; flex: 1;
@@ -225,9 +250,10 @@
   </div>
   <div id="plBanner"></div>
   <div id="plCanvas"><span class="hint">불러오는 중…</span></div>
+  <div id="plSchema" style="display:none"></div>
   <div id="plRuns"></div>
   <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드. run을 [👁 조합]하면 캔버스가 그 run의 스냅샷을 보여줍니다.
-     세부 관리(버전 만들기·편집)는 각 탭에서, 여기서는 <b>고르고 조합해 실행</b>합니다.</p>
+     <b>① 추출 노드를 더블클릭</b>하면 스키마 캔버스가 펼쳐져 엔티티·관계를 노드와 선으로 직접 설계할 수 있습니다.</p>
 </section>
 <section class="card" id="sec-data">
   <h3>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h3>
@@ -2624,7 +2650,7 @@ async function plRefresh() {
 
 function _plDefault(list) { return list.find(v => v.is_default) || list[0] || null; }
 
-function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop}) {
+function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop, onDbl}) {
   const n = document.createElement("div");
   n.className = "plnode" + (custom ? " custom" : "") + (fixed ? " fixed" : "");
   const t = document.createElement("div"); t.className = "t"; t.textContent = title;
@@ -2634,6 +2660,8 @@ function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop}) 
   if (warn) { const w = document.createElement("span"); w.className = "warn"; w.textContent = warn.text; w.title = warn.title || ""; n.appendChild(w); }
   if (pop) n.onclick = ev => { ev.stopPropagation(); plOpenPop(n, pop); };
   else if (onClick) n.onclick = onClick;
+  if (onDbl) n.ondblclick = ev => { ev.stopPropagation();
+    document.querySelectorAll(".plpop").forEach(p => p.remove()); onDbl(); };
   canvas.appendChild(n);
   return n;
 }
@@ -2723,8 +2751,9 @@ function plRender() {
     : defOr(sel.entity, eDef ? `${eDef.name}\t${eDef.version}` : "");
   const [eLn, eVr] = (eSelKey || "\t").split("\t");
   plNode(wrap, {title: "① 추출 (엔티티)", value: eVr ? `${eLn}·v${eVr}` : "코드 기본",
-    sub: (D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "",
+    sub: ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🎨더블클릭=설계",
     custom: !viewing && !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : ""),
+    onDbl: () => scOpen(eVr ? eLn : "", eVr ? parseInt(eVr) : null),
     pop: viewing ? null : {title: "추출 스키마 버전 선택", current: eSelKey,
       items: D.ents.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
         sub: v.note || "", value: `${v.name}\t${v.version}`})),
@@ -2815,6 +2844,291 @@ async function plCreateRun() {
   const j = await r.json().catch(() => ({}));
   $("plMsg").textContent = r.ok ? `✓ ${j.note || "run 생성"}` : (j.detail || `생성 실패 ${r.status}`);
   if (r.ok) { PL.sel = {}; plRefresh(); }
+}
+
+// ── 스키마 캔버스 — ①추출 노드 더블클릭: 엔티티·관계를 노드와 선으로 직접 설계 (n8n식) ──
+// 노드 드래그=이동 · 노드 클릭=편집 · 파란 포트를 끌어 다른 노드에 놓기=관계 생성 · 선 라벨 클릭=관계 편집
+const SC = {line: "", ver: null, base: null, nodes: [], rels: [], els: {}};
+const _SC_ROLE = {entry: "진입점 🔗 · 그래프 2층", solution: "추천단위 ⭐ · 그래프 3층", attr: "속성 ✏ · 그래프 5층"};
+
+async function scOpen(line, ver) {
+  let base = {criteria: "", descr: "", note: "", doc_prompt: "", pack_prompt: "", etypes: "[]", rtypes: "[]"};
+  if (line && ver != null)
+    base = await fetch(`/admin/entity-lines/${encodeURIComponent(line)}/versions/${ver}`)
+      .then(r => r.ok ? r.json() : base).catch(() => base);
+  SC.line = line || ""; SC.ver = ver; SC.base = base;
+  const et = parseEtypes(base.etypes);
+  const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
+  const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
+  SC.nodes = [{key: e.key, label: e.label || "", desc: e.desc || "", role: "entry", x: 30, y: 60},
+              {key: s.key, label: s.label || "", desc: s.desc || "", role: "solution", x: 60, y: 250}];
+  et.filter(t => t.role !== "entry" && t.role !== "solution").forEach((t, i) =>
+    SC.nodes.push({key: t.key, label: t.label || "", desc: t.desc || "", role: "attr",
+                   x: 340 + (i % 3) * 205, y: 50 + Math.floor(i / 3) * 130}));
+  SC.rels = parseEtypes(base.rtypes);
+  scBuild(); scRender();
+  $("plSchema").scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function scBuild() {
+  const box = $("plSchema"); box.style.display = ""; box.innerHTML = "";
+  const head = document.createElement("div"); head.className = "schedrow"; head.style.marginTop = "10px";
+  const t = document.createElement("b");
+  t.textContent = `🎨 스키마 설계 — ${SC.line ? `${SC.line}·v${SC.ver} 기반` : "코드 기본 기반 (새 라인으로 저장)"}`;
+  const add = document.createElement("button"); add.type = "button"; add.textContent = "＋ 엔티티";
+  add.title = "속성(5층) 엔티티 노드 추가";
+  add.onclick = () => {
+    let i = 1; while (SC.nodes.some(n => n.key === "type" + i)) i++;
+    SC.nodes.push({key: "type" + i, label: "", desc: "", role: "attr",
+                   x: 340 + ((SC.nodes.length - 2) % 3) * 205, y: 50 + Math.floor((SC.nodes.length - 2) / 3) * 130});
+    scRender();
+  };
+  const close = document.createElement("button"); close.type = "button"; close.className = "ghost"; close.textContent = "✕ 닫기";
+  close.onclick = () => { box.style.display = "none"; box.innerHTML = ""; };
+  const msg = document.createElement("span"); msg.className = "hint"; msg.id = "scvMsg"; msg.style.margin = "0";
+  head.append(t, add, close, msg); box.appendChild(head);
+  const h = document.createElement("p"); h.className = "hint"; h.style.margin = "2px 0";
+  h.textContent = "노드 드래그=이동 · 노드 클릭=편집 · 파란 ● 포트를 끌어 다른 노드에 놓기=관계 만들기 · 보라 선 라벨 클릭=관계 편집";
+  box.appendChild(h);
+  const wrap = document.createElement("div"); wrap.className = "scWrap"; wrap.id = "scWrap";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "scEdges"); svg.id = "scSvg";
+  wrap.appendChild(svg); box.appendChild(wrap);
+  const cr = document.createElement("div"); cr.className = "schedrow";
+  const cl = document.createElement("span"); cl.textContent = "판정 지침:"; cl.style.fontSize = ".78rem";
+  const crit = document.createElement("textarea"); crit.id = "scCrit"; crit.rows = 2;
+  crit.style.cssText = "flex:1;min-width:300px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;font-size:.78rem";
+  crit.placeholder = "문서 포함/제외 기준 (비우면 코드 기본)"; crit.value = SC.base.criteria || "";
+  cr.append(cl, crit); box.appendChild(cr);
+  const sv = document.createElement("div"); sv.className = "schedrow";
+  const note = document.createElement("input"); note.id = "scNote"; note.placeholder = "버전 메모";
+  note.style.cssText = "width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px";
+  note.value = "";
+  sv.appendChild(note);
+  if (SC.line) {
+    const up = document.createElement("button"); up.type = "button";
+    up.textContent = `✚ ${SC.line}에 버전 업`;
+    up.onclick = () => scSave(`/admin/entity-lines/${encodeURIComponent(SC.line)}/versions`, null);
+    sv.appendChild(up);
+  }
+  const nn = document.createElement("input"); nn.id = "scNewName"; nn.placeholder = "새 라인 이름 (예: qa-스키마)";
+  nn.style.cssText = "width:180px;padding:5px 8px;border:1px solid var(--line);border-radius:6px";
+  const nl = document.createElement("button"); nl.type = "button"; nl.className = "ghost"; nl.textContent = "＋ 새 라인 v1";
+  nl.onclick = () => {
+    const name = nn.value.trim();
+    if (!name) { $("scvMsg").textContent = "새 라인 이름을 입력하세요"; return; }
+    scSave("/admin/entity-lines", name);
+  };
+  sv.append(nn, nl); box.appendChild(sv);
+  const sh = document.createElement("p"); sh.className = "hint"; sh.style.margin = "2px 0";
+  sh.textContent = "저장해도 기본은 그대로 — 위 ① 추출 노드에서 새 버전을 골라 run으로 조합·검증 후 활성하세요. 프롬프트 상세·미리보기는 [① 추출] 탭.";
+  box.appendChild(sh);
+}
+
+function scRender() {
+  const wrap = $("scWrap");
+  wrap.querySelectorAll(".scNode, .scPop").forEach(n => n.remove());
+  SC.els = {};
+  SC.nodes.forEach(n => { const el = scNodeEl(n); wrap.appendChild(el); SC.els[n.key] = el; });
+  scDrawEdges();
+}
+
+function scNodeEl(n) {
+  const el = document.createElement("div");
+  el.className = "scNode " + n.role; el.dataset.key = n.key;
+  el.style.left = n.x + "px"; el.style.top = n.y + "px";
+  const r = document.createElement("div"); r.className = "r"; r.textContent = _SC_ROLE[n.role];
+  const k = document.createElement("div"); k.className = "k"; k.textContent = n.key;
+  const l = document.createElement("div"); l.className = "l"; l.textContent = n.label || "(표시명 없음)";
+  el.append(r, k, l); el.title = n.desc || "";
+  const port = document.createElement("div"); port.className = "scPort";
+  port.title = "끌어서 다른 노드에 놓으면 관계가 생깁니다";
+  el.appendChild(port);
+  el.onmousedown = ev => scNodeDrag(n, el, ev);
+  port.onmousedown = ev => scPortDrag(n, el, ev);
+  return el;
+}
+
+function scNodeDrag(n, el, ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const wrap = $("scWrap"), wr = wrap.getBoundingClientRect();
+  const sx = ev.clientX, sy = ev.clientY, ox = n.x, oy = n.y;
+  let moved = false;
+  const mv = e2 => {
+    const dx = e2.clientX - sx, dy = e2.clientY - sy;
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    n.x = Math.max(0, Math.min(wr.width - el.offsetWidth - 4, ox + dx));
+    n.y = Math.max(0, Math.min(wr.height - el.offsetHeight - 4, oy + dy));
+    el.style.left = n.x + "px"; el.style.top = n.y + "px";
+    scDrawEdges();
+  };
+  const up = () => {
+    document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
+    if (!moved) scNodePop(n);
+  };
+  document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+}
+
+function scPortDrag(n, el, ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault(); ev.stopPropagation();
+  const wrap = $("scWrap"), wr = wrap.getBoundingClientRect(), svg = $("scSvg");
+  const x1 = n.x + el.offsetWidth, y1 = n.y + el.offsetHeight / 2;
+  const tmp = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  tmp.setAttribute("fill", "none"); tmp.setAttribute("stroke", "#4a7dff");
+  tmp.setAttribute("stroke-width", "2"); tmp.setAttribute("stroke-dasharray", "5,4");
+  svg.appendChild(tmp);
+  let target = null;
+  const mv = e2 => {
+    const x2 = e2.clientX - wr.left, y2 = e2.clientY - wr.top;
+    tmp.setAttribute("d", `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2 - 60} ${y2}, ${x2} ${y2}`);
+    const over = document.elementFromPoint(e2.clientX, e2.clientY);
+    const nd = over && over.closest ? over.closest(".scNode") : null;
+    document.querySelectorAll(".scNode.linktarget").forEach(q => q.classList.remove("linktarget"));
+    target = null;
+    if (nd && nd.dataset.key !== n.key) { nd.classList.add("linktarget"); target = nd.dataset.key; }
+  };
+  const up = e2 => {
+    document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
+    tmp.remove();
+    document.querySelectorAll(".scNode.linktarget").forEach(q => q.classList.remove("linktarget"));
+    if (target) scRelPop(n.key, target, e2.clientX - wr.left, e2.clientY - wr.top, null);
+  };
+  document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+}
+
+function _scPopShell(x, y) {
+  document.querySelectorAll(".scPop").forEach(p => p.remove());
+  const wrap = $("scWrap"), wr = wrap.getBoundingClientRect();
+  const pop = document.createElement("div"); pop.className = "scPop";
+  pop.style.left = Math.min(x, wr.width - 270) + "px";
+  pop.style.top = Math.min(y, wr.height - 200) + "px";
+  pop.onmousedown = ev => ev.stopPropagation();
+  wrap.appendChild(pop);
+  return pop;
+}
+function _scIn(pop, ph, val) {
+  const i = document.createElement("input"); i.placeholder = ph; i.value = val || "";
+  pop.appendChild(i); return i;
+}
+function _scBtnRow(pop, btns) {
+  const row = document.createElement("div"); row.className = "schedrow"; row.style.marginTop = "6px";
+  btns.forEach(([label, fn, ghost]) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label;
+    if (ghost) b.className = "ghost";
+    b.onclick = fn; row.appendChild(b);
+  });
+  pop.appendChild(row);
+}
+
+function scNodePop(n) {
+  const pop = _scPopShell(n.x + 20, n.y + 30);
+  const t = document.createElement("div"); t.className = "t"; t.textContent = `${_SC_ROLE[n.role]} 편집`;
+  pop.appendChild(t);
+  const ik = _scIn(pop, "키 (영문 권장)", n.key);
+  const il = _scIn(pop, "표시명", n.label);
+  const id = _scIn(pop, "설명 — 무엇을 뽑을지의 기준", n.desc);
+  const btns = [["저장", () => {
+    const key = ik.value.trim();
+    if (!key) { $("scvMsg").textContent = "키는 비울 수 없습니다"; return; }
+    if (SC.nodes.some(q => q !== n && q.key === key)) { $("scvMsg").textContent = `키 중복: ${key}`; return; }
+    if (key !== n.key) SC.rels.forEach(r => {
+      if (r.source === n.key) r.source = key;
+      if (r.target === n.key) r.target = key;
+    });
+    n.key = key; n.label = il.value.trim(); n.desc = id.value.trim();
+    $("scvMsg").textContent = ""; scRender();
+  }]];
+  if (n.role === "attr") btns.push(["🗑 삭제", () => {
+    SC.nodes = SC.nodes.filter(q => q !== n);
+    SC.rels = SC.rels.filter(r => r.source !== n.key && r.target !== n.key);
+    scRender();
+  }, true]);
+  btns.push(["취소", () => pop.remove(), true]);
+  _scBtnRow(pop, btns);
+  ik.focus();
+}
+
+function scRelPop(srcKey, dstKey, x, y, rel) {
+  const pop = _scPopShell(x, y);
+  const nm = k => { const q = SC.nodes.find(z => z.key === k); return q && q.label ? `${k}(${q.label})` : k; };
+  const t = document.createElement("div"); t.className = "t";
+  t.textContent = (rel ? "관계 편집: " : "새 관계: ") + `${nm(srcKey)} → ${nm(dstKey)}`;
+  pop.appendChild(t);
+  const ik = _scIn(pop, "관계 키 (예: uses)", rel ? rel.key : "");
+  const il = _scIn(pop, "표시명 (예: 사용)", rel ? rel.label : "");
+  const id = _scIn(pop, "설명 — 언제 이 관계인지", rel ? rel.desc : "");
+  const btns = [[rel ? "저장" : "＋ 추가", () => {
+    const key = ik.value.trim();
+    if (!key) { $("scvMsg").textContent = "관계 키를 입력하세요"; return; }
+    if (SC.rels.some(r => r !== rel && r.key === key)) { $("scvMsg").textContent = `관계 키 중복: ${key}`; return; }
+    if (rel) { rel.key = key; rel.label = il.value.trim(); rel.desc = id.value.trim(); }
+    else SC.rels.push({key, label: il.value.trim(), desc: id.value.trim(), source: srcKey, target: dstKey});
+    $("scvMsg").textContent = ""; scRender();
+  }]];
+  if (rel) btns.push(["🗑 삭제", () => { SC.rels = SC.rels.filter(r => r !== rel); scRender(); }, true]);
+  btns.push(["취소", () => pop.remove(), true]);
+  _scBtnRow(pop, btns);
+  ik.focus();
+}
+
+function scDrawEdges() {
+  const svg = $("scSvg");
+  if (!svg) return;
+  svg.innerHTML = `<defs>
+    <marker id="scArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7c5cd6"/></marker>
+    <marker id="scArrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9aa3b2"/></marker></defs>`;
+  const draw = (srcK, dstK, lbl, rel) => {
+    const s = SC.nodes.find(q => q.key === srcK), d = SC.nodes.find(q => q.key === dstK);
+    const se = SC.els[srcK], de = SC.els[dstK];
+    if (!s || !d || !se || !de || srcK === dstK) return;
+    const x1 = s.x + se.offsetWidth, y1 = s.y + se.offsetHeight / 2;
+    const x2 = d.x, y2 = d.y + de.offsetHeight / 2;
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2 - 60} ${y2}, ${x2} ${y2}`);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", rel ? "#7c5cd6" : "#9aa3b2");
+    p.setAttribute("stroke-width", "1.8");
+    if (rel) p.setAttribute("stroke-dasharray", "5,4");
+    p.setAttribute("marker-end", rel ? "url(#scArr)" : "url(#scArrG)");
+    svg.appendChild(p);
+    const tx = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    tx.setAttribute("x", (x1 + x2) / 2); tx.setAttribute("y", (y1 + y2) / 2 - 7);
+    tx.setAttribute("text-anchor", "middle");
+    tx.setAttribute("class", "lbl");
+    if (!rel) { tx.setAttribute("fill", "#9aa3b2"); tx.setAttribute("font-weight", "400"); }
+    tx.textContent = lbl;
+    if (rel) tx.onclick = () => scRelPop(rel.source, rel.target, (x1 + x2) / 2, (y1 + y2) / 2, rel);
+    svg.appendChild(tx);
+  };
+  const e = SC.nodes.find(q => q.role === "entry"), s = SC.nodes.find(q => q.role === "solution");
+  if (e && s) draw(e.key, s.key, "(계층 2층→3층 — 고정)", null);
+  SC.rels.forEach(r => draw(r.source, r.target, r.key, r));
+}
+
+async function scSave(url, newName) {
+  const body = {criteria: $("scCrit").value, descr: SC.base.descr || "",
+    etypes: SC.nodes.map(n => ({role: n.role, key: n.key, label: n.label, desc: n.desc})),
+    rtypes: SC.rels, doc_prompt: SC.base.doc_prompt || "", pack_prompt: SC.base.pack_prompt || "",
+    note: $("scNote").value};
+  if (newName) body.name = newName;
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"},
+                              body: JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    $("scvMsg").textContent = typeof j.detail === "string" ? j.detail
+      : (j.detail && j.detail[0] && j.detail[0].msg) || `저장 실패 ${r.status}`;
+    return;
+  }
+  const line = newName || SC.line, ver = newName ? 1 : j.version;
+  $("scvMsg").textContent = `✓ ${j.note || "저장됨"}`;
+  PL.sel.entity = `${line}\t${ver}`;   // 새 버전을 파이프라인 선택에 바로 반영
+  await plRefresh();
+  await scOpen(line, ver);             // 저장된 버전 기준으로 캔버스 재적재
+  $("scvMsg").textContent = `✓ ${line} v${ver} 저장 — ① 추출 노드에 선택됨. [▶ 이 조합으로 run 생성]으로 검증하세요`;
 }
 
 const TABS = {

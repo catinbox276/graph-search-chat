@@ -662,6 +662,22 @@ def admin_entity_line_versions(name: str, page: int = 1):
         return versioning.list_versions(cur, versioning.ENTITY_SPEC, name, page)
 
 
+@router.get("/admin/entity-lines/{name}/versions/{v}")
+def admin_entity_version_get(name: str, v: int):
+    """버전 단건 조회 — 스키마 캔버스가 특정 (라인, 버전)의 내용을 로드할 때."""
+    with db_cursor() as cur:
+        _ensure_entity_versions(cur)
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, descr, etypes, rtypes, note
+                       FROM entity_versions WHERE name = :1 AND version = :2""", [name, v])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"없는 버전: {name} v{v}")
+    return {"name": name, "version": v,
+            "doc_prompt": _lob_str(r[0]), "pack_prompt": _lob_str(r[1]),
+            "criteria": _lob_str(r[2]), "descr": r[3] or "",
+            "etypes": _lob_str(r[4]), "rtypes": _lob_str(r[5]), "note": r[6] or ""}
+
+
 class EntityPreviewIn(BaseModel):
     criteria: str = ""
     etypes: list[dict] = []
