@@ -102,6 +102,7 @@ class Session_(Base):
     answer = Column(CLOB)
     verdict = Column(String(20))       # success|fail|unknown|retracted (게이트 판정)
     user_id = Column(String(64))       # 자체 계정 로그인 사용자
+    judged_with = Column(String(200))  # 판정에 쓴 (엔티티·클러스터 라인 버전) — 재현성 귀속
 
 
 # ── 지식그래프 4계층 ────────────────────────────────────────────

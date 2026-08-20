@@ -14,8 +14,8 @@ import yaml
 from core import config
 
 from .gate import judge_by_signals, session_turns, split_segments
-from .llm import EXTRACT_PROMPT, JUDGE_PROMPT, _llm_json, fill_prompt
-from .merge import get_or_create
+from .llm import _llm_json, fill_prompt
+from .merge import apply_extras, default_merge_cfg, get_or_create
 from .schema import classify_domain, ddl
 from .weights import recompute_weights, retract_recurrences
 
@@ -31,16 +31,72 @@ def expects():
     return out
 
 
+def _active_snapshots(cur):
+    """활성 엔티티·클러스터 라인 스냅샷 — (schema, criteria, mc, judged_with) 반환.
+    세션 추출도 스키마 라인(문서와 공유)으로 조립 (경량 스키마화 — 라인 없으면 코드 기본).
+    doc_pipeline.judge는 lazy import — judge가 graph_pipeline을 import해 상단 import는 순환."""
+    from core import versioning
+    from graph.doc_pipeline import judge as _j
+
+    def _lob(v):
+        return v.read() if hasattr(v, "read") else (v or "")
+
+    def _jl(v):
+        try:
+            out = json.loads(_lob(v) or "[]")
+            return out if isinstance(out, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    schema, crit, mc, en, ev, cn, cv = _j.DEFAULT_SCHEMA, "", None, None, None, None, None
+    try:
+        en, ev = versioning.active(cur, "entity_versions")
+        if en and ev is not None:
+            cur.execute("""SELECT criteria, etypes, rtypes FROM entity_versions
+                           WHERE name = :1 AND version = :2""", [en, ev])
+            r = cur.fetchone()
+            if r:
+                crit = _lob(r[0])
+                schema = _j.norm_schema(_jl(r[1]), _jl(r[2]))
+        cn, cv = versioning.active(cur, "cluster_versions")
+        if cn and cv is not None:
+            cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
+                                  select_max, select_prompt
+                           FROM cluster_versions WHERE name = :1 AND version = :2""", [cn, cv])
+            r = cur.fetchone()
+            if r:
+                mc = {"sim_high": float(r[0]), "sim_threshold": float(r[1]),
+                      "short_name_chars": int(r[2]), "char_ratio": float(r[3]),
+                      "select_max": int(r[4]), "select_prompt": _lob(r[5]) or ""}
+    except Exception as e:   # 버전 테이블 미생성 등 — 코드 기본으로 동작 (기존과 동일)
+        print(f"[경고] 활성 라인 조회 실패 — 코드 기본 스키마 사용: {e}", flush=True)
+    mc = {**default_merge_cfg(), **(mc or {}), "embed_model": "",
+          "layer_kind": {2: schema["entry"].get("label") or schema["entry"]["key"],
+                         3: schema["solution"].get("label") or schema["solution"]["key"]}}
+    judged_with = (f"엔티티 {en}·v{ev}" if en and ev is not None else "엔티티 코드기본") + \
+                  (f" · 클러스터 {cn}·v{cv}" if cn and cv is not None else "")
+    return schema, crit, mc, judged_with
+
+
 def main():
     exp = expects()
-    # 엔티티(목표·접근법) 추출 프롬프트 override — 관리 페이지(app_settings). 빈값=코드 기본.
-    from core import settings
-    _st = settings.get_all()
-    judge_tmpl = (_st.get("entity_judge_prompt") or "").strip() or JUDGE_PROMPT
-    extract_tmpl = (_st.get("entity_extract_prompt") or "").strip() or EXTRACT_PROMPT
     con = oracledb.connect(user=config.ORACLE_USER, password=config.ORACLE_PASSWORD, dsn=config.ORACLE_DSN)
     cur = con.cursor()
     ddl(cur)
+    # 프롬프트 결정 — 관리 원문 override(app_settings) > 활성 라인 스키마 조립 > 코드 기본.
+    from core import settings
+    from graph.doc_pipeline import judge as _j   # lazy — 순환 import 회피
+    schema, crit, mc, judged_with = _active_snapshots(cur)
+    ek, sk = schema["entry"]["key"], schema["solution"]["key"]
+    _st = settings.get_all()
+    judge_tmpl = (_st.get("entity_judge_prompt") or "").strip() \
+        or _j.build_session_judge_prompt(schema, crit)
+    extract_tmpl = (_st.get("entity_extract_prompt") or "").strip() \
+        or _j.build_session_extract_prompt(schema, crit)
+    print(f"세션 추출 구성: {judged_with} · 키 {ek}/{sk}"
+          f"{' · 속성 ' + str(len(schema['attrs'])) + '종' if schema['attrs'] else ''}"
+          f"{' · 관계 ' + str(len(schema['relations'])) + '종' if schema['relations'] else ''}",
+          flush=True)
     cur.execute("""SELECT id, question, tool_calls, answer FROM sessions
                    WHERE turn = 1 AND verdict IS NULL ORDER BY id""")
     rows = [(r[0], r[1].read(), r[2].read(), r[3].read()) for r in cur.fetchall()]
@@ -53,10 +109,11 @@ def main():
             # 태스크 세션(selfplay) — expect 기준 LLM 판정 (기존 흐름)
             tool_names = {c["name"] for c in calls}
             domain, hint = classify_domain(cur, tool_names)
-            prompt = fill_prompt(judge_tmpl,
+            prompt = fill_prompt(judge_tmpl, domain=domain,
+                hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
                 question=q, tools=json.dumps(calls, ensure_ascii=False)[:2000],
                 answer=answer[:3000], expect=exp[task_id])
-            if hint:
+            if hint and "{hint}" not in judge_tmpl:  # 구식 원문 override 호환 — 접미 주입
                 prompt += f"\n\n[도메인 추출 지침 — {domain}] {hint}"
             j = _llm_json(prompt)
             verdict = j.get("verdict", "unknown")
@@ -80,10 +137,11 @@ def main():
                 domain, hint = classify_domain(cur, tool_names)
                 prompt = fill_prompt(extract_tmpl,
                     domain=domain,
+                    hint=(hint or "").strip() or "(지침 없음 — 도메인명 기준으로 판정)",
                     question=seg[0]["q"][:2000],
                     tools=json.dumps(calls, ensure_ascii=False)[:2000],
                     answer=seg[-1]["a"][:3000])
-                if hint:
+                if hint and "{hint}" not in extract_tmpl:  # 구식 원문 override 호환
                     prompt += f"\n\n[도메인 추출 지침 — {domain}] {hint}"
                 j = _llm_json(prompt)
                 # 도메인 게이트(문서와 대칭): 잡담·일반 상식은 그래프 기여 없음
@@ -112,20 +170,28 @@ def main():
                 contribs = []
             sig_detail = " | ".join(details) + \
                 (f" [{len(segs)}세그먼트]" if len(segs) > 1 else "")
-        cur.execute("UPDATE sessions SET verdict = :1 WHERE id = :2 AND turn = 1",
-                    [verdict, sid])
+        cur.execute("UPDATE sessions SET verdict = :1, judged_with = :2 "
+                    "WHERE id = :3 AND turn = 1",
+                    [verdict, judged_with[:200], sid])
         for domain, j, v, tool_names in contribs:
-            if not (j.get("goal") and j.get("approach")):
+            if not (j.get(ek) and j.get(sk)):   # 스키마 키 — 커스텀 키(예: situation)도 동작
                 continue
-            d = get_or_create(cur, 1, domain, None, "session", sid, use_embedding=False)
-            g = get_or_create(cur, 2, j["goal"], d, "session", sid)
-            a = get_or_create(cur, 3, j["approach"], g, "session", sid)
+            gv, sv = str(j[ek]).strip()[:400], str(j[sk]).strip()[:400]
+            d = get_or_create(cur, 1, domain, None, "session", sid,
+                              use_embedding=False, mc=mc)
+            g = get_or_create(cur, 2, gv, d, "session", sid, mc=mc)
+            a = get_or_create(cur, 3, sv, g, "session", sid, mc=mc)
             if v == "fail":
                 cur.execute("""UPDATE nodes SET fail_flag='Y', fail_reason=:1
                                WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], a])
             for tool in sorted(tool_names):
                 get_or_create(cur, 4, f"tool:{tool}", a, "session", sid,
-                              use_embedding=False)
+                              use_embedding=False, mc=mc)
+            # 속성(5층)·관계 — 문서 파이프라인과 대칭 (apply_extras 공용, ref=세션id)
+            ej = {t["key"]: j.get(t["key"]) for t in schema["attrs"]}
+            val2node = {(ek, gv): g, (sk, sv): a}
+            apply_extras(cur, schema, ej, j.get("relations"), g, val2node,
+                         "session", sid)
         # 채택 판정: 이 세션에 노출된 제안 노드를 실제로 사용했는가 (유도 vs 자발 구분의 기초)
         cur.execute("""UPDATE suggestions s SET adopted =
             CASE WHEN EXISTS (SELECT 1 FROM node_evidence ev

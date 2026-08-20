@@ -262,7 +262,8 @@
 </section>
 <section class="card" id="sec-entity">
   <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
-  <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서에서 뽑아내는 지식의 단위</b>입니다.
+  <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서·대화에서 뽑아내는 지식의 단위</b>입니다.
+     이 스키마는 <b>문서 구조화와 대화(세션) 추출 양쪽</b>에 적용됩니다 — 대화는 활성(★) 라인을 씁니다.
      <b>키·표시명·설명은 전부 변경 가능</b>하고, <b>역할</b>이 그래프에서의 자리를 정합니다 —
      진입점(2층, 경로 추천의 시작)·추천단위(3층, 검증·가중치가 붙는 곳)는 각 1개, 속성(5층)은 자유.
      goal·approach는 기본 스키마의 이름일 뿐 바꿔도 됩니다. (행동/도구는 대화에서만 나옴)</p>
@@ -537,12 +538,13 @@
       <textarea id="psPackPrompt" class="psta" spellcheck="false"></textarea>
     </details>
     <details class="structprompts">
-      <summary>엔티티 추출(세션) 프롬프트 (고급) — 대화에서 목표·접근법 추출. 비우면 코드 기본값</summary>
+      <summary>엔티티 추출(세션) 프롬프트 (고급) — 대화에서 지식 추출. <b>비우면 활성 엔티티 라인 스키마로 조립</b></summary>
       <label class="k2" for="psExtractPrompt">세션 지식 추출 프롬프트
-        <small>실사용 대화 → 그래프 · 자리표시자 {domain} {question} {tools} {answer} — <b>{question}·{answer} 필수</b></small></label>
+        <small>실사용 대화 → 그래프 · 자리표시자 {domain} {hint} {question} {tools} {answer} — <b>{question}·{answer} 필수</b>.
+        비우면 [① 추출] 탭의 활성 라인 스키마(키·속성·관계·지침)로 자동 조립 — 조립 결과는 라인 뷰어(👁)에서 확인</small></label>
       <textarea id="psExtractPrompt" class="psta" spellcheck="false"></textarea>
       <label class="k2" for="psJudgePrompt">태스크 판정 프롬프트
-        <small>셀프플레이 세션 판정 · 자리표시자 {question} {tools} {answer} {expect} — <b>{question}·{answer} 필수</b></small></label>
+        <small>셀프플레이 세션 판정 · 자리표시자 {domain} {hint} {question} {tools} {answer} {expect} — <b>{question}·{answer} 필수</b>. 비우면 활성 라인 스키마로 조립</small></label>
       <textarea id="psJudgePrompt" class="psta" spellcheck="false"></textarea>
     </details>
     <div class="psbtns">
@@ -2365,7 +2367,9 @@ async function entPreview(criteria, etypes, fillSample, rtypes) {   // 서버 �
 }
 // 자리표시자를 한글 주석으로 표시 (표시만 — 실제 템플릿은 불변)
 const _PH_KO = {domain: "도메인 이름", hint: "도메인 추출 지침", kind: "문서 유형",
-                title: "문서 제목", body: "문서 본문", docs: "문서 목록 (묶음)"};
+                title: "문서 제목", body: "문서 본문", docs: "문서 목록 (묶음)",
+                question: "사용자 질문", tools: "도구 호출 내역", answer: "최종 답변",
+                expect: "판정 기준 (tasks.yaml)"};
 function annotatePh(t) {
   return Object.entries(_PH_KO).reduce(
     (s, [k, l]) => s.split("{" + k + "}").join("〔자동 입력: " + l + "〕"), t || "");
@@ -2417,7 +2421,11 @@ const ENTITY_VM = {
       secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과 — 〔자동 입력〕은 실행 때 채워짐)",
                  text: annotatePh(pv && pv.doc_prompt), collapsed: true},
                 {label: "적용될 묶음 프롬프트 (서버 조립 결과)",
-                 text: annotatePh(pv && pv.pack_prompt), collapsed: true});
+                 text: annotatePh(pv && pv.pack_prompt), collapsed: true},
+                {label: "적용될 세션(대화) 추출 프롬프트 (이 라인이 활성일 때 — 서버 조립 결과)",
+                 text: annotatePh(pv && pv.session_prompt), collapsed: true},
+                {label: "적용될 세션(태스크) 판정 프롬프트 (서버 조립 결과)",
+                 text: annotatePh(pv && pv.session_judge_prompt), collapsed: true});
     }
     secs.push({label: "메모", text: v.note, empty: "(없음)"});
     return secs;

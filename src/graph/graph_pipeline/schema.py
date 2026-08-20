@@ -62,6 +62,12 @@ def ddl(cur):
                    WHERE table_name = 'SESSIONS' AND column_name = 'USER_ID'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE sessions ADD (user_id VARCHAR2(64))")
+    # judged_with — 이 세션을 어떤 (엔티티·클러스터 라인 버전)으로 판정했는지 기록.
+    # 재현성 최소 단위 — 세션 run(활성 전환) 기계 없이도 귀속이 남는다.
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'SESSIONS' AND column_name = 'JUDGED_WITH'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE sessions ADD (judged_with VARCHAR2(200))")
     # entity_type — 관리자 정의 타입 엔티티(layer 5)의 타입 라벨 (코어 1~4층은 NULL).
     # 범용 노드 + 타입 라벨 패턴 (Graphiti/GraphRAG 방식 — DDL 반복 없이 타입 확장)
     cur.execute("""SELECT COUNT(*) FROM user_tab_columns

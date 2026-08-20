@@ -79,6 +79,42 @@ def upsert_relation(cur, rtype: str, src_id: str, dst_id: str,
                 {"s": src_id, "d": dst_id, "t": rtype, "f": ref, "rid": run_id})
 
 
+def apply_extras(cur, sc, ej, rj, anchor, val2node, ev_kind, ref,
+                 run_id: str = "-", count: bool = True) -> tuple:
+    """스키마의 속성(5층)·관계(rtypes)를 판정 결과에서 병합 — (attrs_out, rels_out) 반환.
+    문서·세션 파이프라인 공용. ej: {속성키: 값}(호출자가 legacy 폴백 처리),
+    rj: LLM의 relations 리스트(검증 전), anchor: 속성이 붙는 진입점 노드,
+    val2node: (타입키, 값)→노드id — 진입점·추천단위를 담아 오면 속성이 여기 추가됨.
+    관계는 스키마 타입·이 판정의 추출값 화이트리스트 검증(코드) 후 저장,
+    위반 행은 조용히 폐기 (Graphiti: 목록 밖 이름 = reject)."""
+    attrs_out = {}
+    for ak, av in list((ej or {}).items())[:30]:
+        if isinstance(av, (str, int, float)) and str(av).strip():
+            ak_, av_ = str(ak).strip()[:100], str(av).strip()[:400]
+            attrs_out[ak_] = av_
+            nid = upsert_entity(cur, ak_, av_, anchor, ev_kind, ref,
+                                run_id=run_id, count=count)
+            val2node[(ak_, av_)] = nid
+    rdefs = {r["key"]: r for r in sc.get("relations") or []}
+    rels_out = []
+    if rdefs and isinstance(rj, list):
+        for rel in rj[:30]:
+            if not isinstance(rel, dict):
+                continue
+            rd = rdefs.get(str(rel.get("type", "")).strip())
+            sv = str(rel.get("source", "")).strip()[:400]
+            tv = str(rel.get("target", "")).strip()[:400]
+            if not (rd and sv and tv):
+                continue
+            sn = val2node.get((rd["source"], sv))
+            tn = val2node.get((rd["target"], tv))
+            if not (sn and tn) or sn == tn:
+                continue   # 추출값 목록 밖 / self-edge → 폐기
+            upsert_relation(cur, rd["key"], sn, tn, ref, run_id=run_id)
+            rels_out.append({"type": rd["key"], "source": sv, "target": tv})
+    return attrs_out, rels_out
+
+
 def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:
     """임베딩 ≥HIGH 자동 병합 가드 — 짧은 이름 제외 + 문자 유사도 AND 조건.
     임베딩 코사인 단독 즉시 병합은 업계 관행에 없음 (Graphiti 3-gram Jaccard,

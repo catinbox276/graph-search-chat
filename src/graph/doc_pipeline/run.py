@@ -12,7 +12,7 @@ import oracledb
 
 from core import config, settings
 from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
-from graph.graph_pipeline.merge import default_merge_cfg, upsert_entity, upsert_relation
+from graph.graph_pipeline.merge import apply_extras, default_merge_cfg
 
 from . import runs
 from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, classify_doc, judge_pack
@@ -235,42 +235,18 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
                                       run_id=run_id, count=count, mc=mc)
                     a3 = get_or_create(cur, 3, str(j[sk])[:400], g, "doc", ref,
                                        run_id=run_id, count=count, mc=mc)
-                    # 속성(attr) 엔티티(layer 5) — 진입점 노드에 연결.
+                    # 속성(attr, 5층)·관계(rtypes) — 세션 파이프라인과 공용 apply_extras.
                     # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
                     ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
                     legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
                     if not any(v for v in ej.values()) and isinstance(legacy, dict):
                         ej = legacy
-                    # 타입키·값 → 노드 (관계 해석용) — 진입점·추천단위·속성 전부 대상
                     val2node = {(ek, str(j[ek]).strip()[:400]): g,
                                 (sk, str(j[sk]).strip()[:400]): a3}
-                    for ak, av in list(ej.items())[:30]:
-                        if isinstance(av, (str, int, float)) and str(av).strip():
-                            ak_, av_ = str(ak).strip()[:100], str(av).strip()[:400]
-                            attrs_out[ak_] = av_
-                            nid = upsert_entity(cur, ak_, av_, g, "doc", ref,
-                                                run_id=run_id, count=count)
-                            val2node[(ak_, av_)] = nid
-                    # 관계(rtypes) — 스키마 타입·이 문서의 추출값 화이트리스트 검증(코드) 후 저장.
-                    # 위반 행은 조용히 폐기 (Graphiti: 목록 밖 이름 = reject)
-                    rdefs = {r["key"]: r for r in sc.get("relations") or []}
-                    rels_out = []
-                    rj = j.get("relations")
-                    if rdefs and isinstance(rj, list):
-                        for rel in rj[:30]:
-                            if not isinstance(rel, dict):
-                                continue
-                            rd = rdefs.get(str(rel.get("type", "")).strip())
-                            sv = str(rel.get("source", "")).strip()[:400]
-                            tv = str(rel.get("target", "")).strip()[:400]
-                            if not (rd and sv and tv):
-                                continue
-                            sn = val2node.get((rd["source"], sv))
-                            tn = val2node.get((rd["target"], tv))
-                            if not (sn and tn) or sn == tn:
-                                continue   # 추출값 목록 밖 / self-edge → 폐기
-                            upsert_relation(cur, rd["key"], sn, tn, ref, run_id=run_id)
-                            rels_out.append({"type": rd["key"], "source": sv, "target": tv})
+                    ats, rels_out = apply_extras(cur, sc, ej, j.get("relations"),
+                                                 g, val2node, "doc", ref,
+                                                 run_id=run_id, count=count)
+                    attrs_out.update(ats)
                     if rels_out:
                         attrs_out["_relations"] = rels_out   # run별 결과에 함께 기록
                     status, note = "done", str(j.get("reason") or "")[:1000]

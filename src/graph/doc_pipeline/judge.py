@@ -51,24 +51,25 @@ def norm_schema(etypes, rtypes=None) -> dict:
     return out
 
 
-def _out_fields(schema: dict, brief: bool = False) -> str:
-    """출력 형식 JSON의 스키마 필드 부분 — desc가 추출 기준으로 들어간다."""
+def _out_fields(schema: dict, brief: bool = False, src: str = "문서") -> str:
+    """출력 형식 JSON의 스키마 필드 부분 — desc가 추출 기준으로 들어간다.
+    src: 추출 원천 표기 ("문서" 또는 "대화" — 세션 스캐폴드 공용)."""
     e, s = schema["entry"], schema["solution"]
     suffix = "" if brief else " (한 문장, fits=true일 때만)"
     lines = [f' "{e["key"]}": "{e["desc"] or e["label"]}{suffix}"',
              f' "{s["key"]}": "{s["desc"] or s["label"]}{suffix}"']
     for a in schema["attrs"]:
         lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
-                     f' (문서에서 확인될 때만 — 없으면 이 키를 생략)"')
+                     f' ({src}에서 확인될 때만 — 없으면 이 키를 생략)"')
     if schema.get("relations"):
         lines.append(' "relations": [{"type": "<관계 타입 키>", '
                      '"source": "<출발 엔티티 값>", "target": "<도착 엔티티 값>"}]')
     return ",\n".join(lines)
 
 
-def _rel_block(schema: dict) -> str:
+def _rel_block(schema: dict, src: str = "문서") -> str:
     """관계 타입 카탈로그 + 추출 규칙 — Graphiti extract_edges의 FACT_TYPES/RULES 포팅.
-    관계가 정의된 스키마에서만 프롬프트에 붙는다."""
+    관계가 정의된 스키마에서만 프롬프트에 붙는다. src: "문서" 또는 "대화"."""
     rels = schema.get("relations") or []
     if not rels:
         return ""
@@ -80,11 +81,11 @@ def _rel_block(schema: dict) -> str:
         for r in rels)
     return f"""
 
-관계 추출 규칙 — fits=true면 아래 관계 타입에 해당하는 사실만 "relations" 배열로 추출하라:
+관계 추출 규칙 — 추출했다면 아래 관계 타입에 해당하는 사실만 "relations" 배열로 추출하라:
 {lines}
-- source/target에는 반드시 위 필드들로 이 문서에서 추출한 엔티티 값을 그대로 쓴다
+- source/target에는 반드시 위 필드들로 이 {src}에서 추출한 엔티티 값을 그대로 쓴다
   (목록에 없는 이름을 쓰면 그 관계는 폐기된다). source와 target은 서로 달라야 한다.
-- 문서에 명시되었거나 명백히 함의된 관계만 — 추측 금지. 해당 없으면 빈 배열 []."""
+- {src}에 명시되었거나 명백히 함의된 관계만 — 추측 금지. 해당 없으면 빈 배열 []."""
 
 
 def _crit_block(criteria: str) -> str:
@@ -136,6 +137,72 @@ fits=false로 판정할 것: 도메인과 무관 / {e["label"]}도 {s["label"]}�
 
 def build_prompts(schema: dict | None = None, criteria: str = "") -> tuple:
     return build_doc_prompt(schema, criteria), build_pack_prompt(schema, criteria)
+
+
+# ── 세션(대화) 스캐폴드 — 같은 스키마 라인이 문서+대화 양쪽에 적용된다 ──
+# 자리표시자 치환은 graph_pipeline.llm.fill_prompt ({domain}{hint}{question}{tools}{answer}{expect}).
+# graph_pipeline.run이 lazy import로 사용 (모듈 상단 import는 순환 — judge가 graph_pipeline을 import).
+
+def build_session_extract_prompt(schema: dict | None = None, criteria: str = "") -> str:
+    """UI 세션 추출 프롬프트 — fits/grounded 게이트 문구는 원문 유지, 추출 키만 스키마에서.
+    fits: 도메인 게이트(잡담·일반 상식 차단), grounded: 공로 귀속(도구 기여 없는 답변 보류)."""
+    sc = schema or DEFAULT_SCHEMA
+    e, s = sc["entry"], sc["solution"]
+    return f"""대화가 도메인 범위의 업무 지식인지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
+
+도메인: {{domain}}
+도메인 추출 지침: {{hint}}{_crit_block(criteria)}
+
+[첫 질문] {{question}}
+[사용한 도구] {{tools}}
+[최종 답변] {{answer}}
+
+출력 형식:
+{{"fits": true|false,
+  "grounded": true|false,
+{_out_fields(sc, src="대화")}}}
+
+값은 간결하게 — {e["label"]}은(는) 10단어 이내(일반화된 표현), {s["label"]}은(는) 15단어 이내(도구+방법.
+예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인').
+
+fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
+조직 지식으로 축적할 가치가 없는 대화.
+grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
+모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함).{_rel_block(sc, src="대화")}"""
+
+
+def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -> str:
+    """태스크 세션(selfplay) 판정+추출 프롬프트 — verdict 규칙 원문 유지, 추출 키만 스키마에서."""
+    sc = schema or DEFAULT_SCHEMA
+    e, s = sc["entry"], sc["solution"]
+    return f"""세션을 판정하고 지식을 추출하라. JSON만 출력.
+
+도메인: {{domain}}
+도메인 추출 지침: {{hint}}{_crit_block(criteria)}
+
+[질문] {{question}}
+[사용한 도구] {{tools}}
+[답변] {{answer}}
+[판정 기준] {{expect}}
+
+출력 형식:
+{{"verdict": "success|fail|unknown",
+{_out_fields(sc, brief=True, src="대화")},
+  "fail_reason": "실패 시 이유 한 줄, 성공이면 null"}}
+
+값은 간결하게 — {e["label"]}은(는) 10단어 이내(일반화된 표현), {s["label"]}은(는) 15단어 이내(도구+방법).
+
+판정 규칙:
+- success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
+- fail: 접근 자체가 막힌 경우만 — 데이터/글이 존재하지 않아 목표 달성이 불가능했고 답변이 이를 인정함
+  (기준이 '실패 인정'이면 인정했을 때 fail)
+- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우{_rel_block(sc, src="대화")}"""
+
+
+def build_session_prompts(schema: dict | None = None, criteria: str = "") -> tuple:
+    """(추출, 판정) 세션 프롬프트 쌍 — 관리 미리보기·run 오케스트레이션 공용."""
+    return (build_session_extract_prompt(schema, criteria),
+            build_session_judge_prompt(schema, criteria))
 
 
 # 기본 스키마의 렌더 결과 — 앱설정 override 미지정·세션 무관 경로의 코드 기본값

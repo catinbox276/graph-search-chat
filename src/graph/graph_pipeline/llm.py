@@ -59,7 +59,7 @@ fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상�
 grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
 모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함)."""
 
-_ENTITY_PLACEHOLDERS = ("domain", "question", "tools", "answer", "expect")
+_ENTITY_PLACEHOLDERS = ("domain", "hint", "question", "tools", "answer", "expect")
 
 
 def fill_prompt(tmpl: str, **kw) -> str:

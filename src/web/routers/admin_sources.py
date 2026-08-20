@@ -692,7 +692,9 @@ def admin_entity_preview(inp: EntityPreviewIn):
     값(도메인·지침·샘플 문서)으로 채운 완성본을 함께 준다 — '보자마자 아는' 미리보기."""
     schema = _judge.norm_schema(inp.etypes, inp.rtypes)
     d, p = _judge.build_prompts(schema, inp.criteria)
+    se, sj = _judge.build_session_prompts(schema, inp.criteria)  # 대화(세션)에도 같은 스키마
     out = {"doc_prompt": d, "pack_prompt": p,
+           "session_prompt": se, "session_judge_prompt": sj,
            "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
                     "attrs": [a["key"] for a in schema["attrs"]],
                     "relations": [r["key"] for r in schema["relations"]]}}
