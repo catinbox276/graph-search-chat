@@ -202,7 +202,12 @@
             background-image: radial-gradient(circle, rgba(120,130,160,.18) 1px, transparent 1px);
             background-size: 22px 22px; }
   .scEdges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .scEdges.scLabels { z-index: 35; }   /* 라벨은 노드 위 — 끌어 놓은 자리가 가려지지 않게 */
   .scEdges .lbl { pointer-events: auto; cursor: pointer; font-size: 11px; fill: #7c5cd6; font-weight: 700; }
+  /* 관계 라벨은 선의 손잡이 — 끌면 선이 그쪽으로 휜다 */
+  .scEdges .lbl.draggable { cursor: grab; touch-action: none; paint-order: stroke;
+                            stroke: var(--bg); stroke-width: 3px; }
+  .scEdges .lbl.draggable:active { cursor: grabbing; }
   .scNode { position: absolute; min-width: 130px; max-width: 190px; padding: 8px 12px 28px;
             border: 2px solid #c084fc; border-radius: 10px; background: #fff;
             cursor: pointer; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
@@ -440,19 +445,22 @@
       <ul>
         <li><b>계층 칸</b>(2~5개) — 그래프 2층부터 순서대로 쌓이는 뼈대. 첫 칸이 🔗 진입점(질문이 들어오면 여기서 검색 시작)</li>
         <li><b>⭐ 검증귀속</b> — 성공/실패 카운트와 추천이 붙는 칸. 계층 중 하나를 고릅니다(기본 마지막)</li>
-        <li><b>속성</b>(9층) — 진입점에 붙는 부가 정보. <b>관계</b>는 엔티티 사이 점선 연결(파란 점을 끌어 만듭니다)</li>
-        <li>노드를 <b>끌어서 자리를 옮길</b> 수 있습니다 — 선이 겹칠 때 보기 편하게. 위치는 이 브라우저에만 저장되고 <b>[↺ 자동 정렬]</b>로 되돌립니다</li>
+        <li><b>속성</b> — 진입점 <b>바로 아래</b> 붙는 부가 정보. <b>관계</b>는 엔티티 사이 점선 연결(파란 점을 끌어 만듭니다)</li>
+        <li>노드를 <b>끌어서 자리를 옮기고</b>, <b>관계 선은 라벨을 끌어</b> 위치를 조정할 수 있습니다 — 선이 겹칠 때 보기 편하게.
+            배치는 이 브라우저에만 저장되고 <b>[↺ 자동 정렬]</b>로 되돌립니다 (스키마와 무관)</li>
         <li>이 스키마 <b>한 벌</b>이 문서 구조화와 대화(세션) 추출 양쪽에 쓰입니다 — 버전은 없고 저장은 덮어쓰기입니다</li>
       </ul>
       키·표시명·설명은 전부 바꿔도 됩니다. <code>goal</code>·<code>approach</code>는 기본 이름일 뿐입니다.
-      (행동/도구 노드는 대화에서 자동 생성 — 8층)
+      <b>층 번호에 대해</b>: 계층 칸은 2층·3층…으로 깊이를 뜻하지만, <b>속성(9)·행동/도구(8)의 번호는 깊이가 아니라 종류를 가르는 칸 번호</b>입니다
+      — 계층 체인이 7층까지 늘어날 수 있어 그 뒤 번호를 비워뒀습니다. 속성은 실제로 진입점 바로 아래 한 칸에 붙습니다.
+      (행동/도구 노드는 대화에서 자동 생성)
     </div>
   </details>
   <div class="schedrow" style="margin:6px 0 0">
     <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5개) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
-    <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 칸에 붙는 부가 정보(그래프 9층)">＋ 속성</button>
+    <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 노드 바로 아래에 붙는 부가 정보">＋ 속성</button>
     <button type="button" class="ghost" id="veRelAdd" title="선택한 노드에서 시작하는 관계 추가 — 파란 점을 끌어서 만들 수도 있습니다">＋ 관계</button>
-    <button type="button" class="ghost" id="veAutoBtn" title="끌어서 옮긴 노드 위치를 버리고 자동 배치로 되돌립니다 (스키마는 안 바뀜)">↺ 자동 정렬</button>
+    <button type="button" class="ghost" id="veAutoBtn" title="끌어서 옮긴 노드 위치와 관계 선 휨을 버리고 자동 배치로 되돌립니다 (스키마는 안 바뀜)">↺ 자동 정렬</button>
     <span class="hint" id="veCount" style="margin:0"></span>
   </div>
   <div class="ve2 vecanvas">
@@ -2623,17 +2631,19 @@ function chainBadge(c, i) {
 // 엔티티는 **한 벌**이고 버전이 없다(저장=덮어쓰기). 노드를 클릭하면 오른쪽 패널에서
 // 내용을 채우고, 노드의 ＋로 다음 계층·속성을 뻗고, 파란 점을 끌어 놓으면 관계가 생긴다.
 // 배치는 자동 — 노드 좌표를 사람이 관리할 이유가 없다(저장도 안 한다).
-const VE = {chain: [], attrs: [], rels: [], sel: null, pos: {}, dirty: false, manual: {}};
+const VE = {chain: [], attrs: [], rels: [], sel: null, pos: {}, dirty: false, manual: {}, bend: {}};
 // 노드를 끌어 옮긴 좌표는 **스키마가 아니라 보기 설정**이라 서버가 아니라 브라우저에 남긴다
 // (저장 버튼과 무관 = 배치를 만졌다고 '저장 안 된 변경'이 되지 않는다). 키 이름 기준이라
 // 키를 바꾸면 그 노드만 자동 배치로 돌아간다 — 자리를 잘못 물려받는 것보다 낫다.
-const VE_POS_KEY = "gsc.entity.pos.v1";
+const VE_POS_KEY = "gsc.entity.pos.v2";   // {n: 노드좌표, b: 관계선 휨}
 function vePosLoad() {
-  try { VE.manual = JSON.parse(localStorage.getItem(VE_POS_KEY) || "{}") || {}; }
-  catch { VE.manual = {}; }
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(VE_POS_KEY) || "{}") || {}; } catch { raw = {}; }
+  VE.manual = raw.n || {}; VE.bend = raw.b || {};
 }
 function vePosSave() {
-  try { localStorage.setItem(VE_POS_KEY, JSON.stringify(VE.manual)); } catch { /* 저장 못해도 동작 */ }
+  try { localStorage.setItem(VE_POS_KEY, JSON.stringify({n: VE.manual, b: VE.bend})); }
+  catch { /* 저장 못해도 동작 */ }
 }
 const VE_MAXCHAIN = 5;
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -2700,7 +2710,7 @@ function veCanvas() {
   const wrap = document.createElement("div");
   wrap.className = "scWrap"; wrap.id = "veWrap";
   wrap.setAttribute("role", "group");
-  wrap.setAttribute("aria-label", "엔티티 스키마 — 노드를 클릭하면 오른쪽에서 편집, 끌면 자리를 옮깁니다");
+  wrap.setAttribute("aria-label", "엔티티 스키마 — 노드를 클릭하면 오른쪽에서 편집, 끌면 자리를 옮깁니다. 관계 라벨을 끌면 선 위치가 조정됩니다");
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("class", "scEdges"); svg.id = "veSvg";
   wrap.appendChild(svg); box.appendChild(wrap);
@@ -2717,13 +2727,16 @@ function veCanvas() {
   VE.els = {};
   VE.chain.forEach((c, i) => wrap.appendChild(veNodeEl("chain", i)));
   VE.attrs.forEach((a, i) => wrap.appendChild(veNodeEl("attr", i)));
+  const top = document.createElementNS(SVGNS, "svg");   // 라벨 전용 상위 레이어 (노드 위)
+  top.setAttribute("class", "scEdges scLabels"); top.id = "veSvgTop";
+  wrap.appendChild(top);
   const lowest = Object.values(VE.pos).reduce((m, p) => Math.max(m, p.y), 0);
   wrap.style.height = Math.max(300, lowest + 120) + "px";
   const rightmost = Object.values(VE.pos).reduce((m, p) => Math.max(m, p.x), 0);
   wrap.style.minWidth = (rightmost + 230) + "px";   // 오른쪽으로 끌어낸 노드까지 스크롤로 닿게
   veEdges();
   const rb = $("veAutoBtn");   // 옮긴 게 있을 때만 [자동 정렬]이 의미가 있다
-  if (rb) rb.disabled = !Object.keys(VE.manual).length;
+  if (rb) rb.disabled = !Object.keys(VE.manual).length && !Object.keys(VE.bend).length;
 }
 
 function veNodeEl(kind, i) {
@@ -2740,11 +2753,13 @@ function veNodeEl(kind, i) {
   pick.type = "button"; pick.className = "nsel";
   pick.setAttribute("aria-pressed", on ? "true" : "false");
   const r = document.createElement("span"); r.className = "r";
-  r.textContent = kind === "chain" ? `${chainBadge(item, i)} · ${2 + i}층` : "속성 ✏ · 9층";
+  r.textContent = kind === "chain" ? `${chainBadge(item, i)} · ${2 + i}층` : "속성 ✏ · 진입점 아래";
   const k = document.createElement("span"); k.className = "k"; k.textContent = item.key || "(키 없음)";
   const l = document.createElement("span"); l.className = "l"; l.textContent = item.label || "(표시명 없음)";
   pick.append(r, k, l);
-  pick.title = (item.desc || "(설명 없음)") + "\n선택하면 오른쪽에서 편집합니다";
+  pick.title = (item.desc || "(설명 없음)")
+    + (kind === "attr" ? "\n진입점 노드 바로 아래에 붙습니다 (그래프 칸 번호 9 — 깊이가 아니라 종류 표시)" : "")
+    + "\n선택하면 오른쪽에서 편집합니다";
   pick.onclick = ev => { ev.stopPropagation(); veSel(kind, i); };
   pick.onpointerdown = ev => veNodeDrag(ev, kind, i, el, pick);
   el.appendChild(pick);
@@ -2803,9 +2818,33 @@ function veNodeDrag(ev, kind, i, el, pick) {
   document.addEventListener("pointermove", move);
   document.addEventListener("pointerup", up);
 }
+// 관계 선 위치 조정 — 라벨을 끌면 그 자리로 선이 휜다 (겹친 선을 떼어놓기 위함)
+function veRelDrag(ev, rel, p1, p2) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const base = VE.bend[rel.key] || {dx: 0, dy: 0};
+  const x0 = ev.clientX, y0 = ev.clientY;
+  let moved = false;
+  const move = e => {
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;   // 클릭(=편집)과 가르는 문턱
+    moved = true;
+    VE.bend[rel.key] = {dx: base.dx + dx, dy: base.dy + dy};
+    veEdges();
+  };
+  const up = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    if (!moved) { veSel("rel", VE.rels.indexOf(rel)); return; }   // 안 움직였으면 = 편집 선택
+    vePosSave();
+    const rb = $("veAutoBtn"); if (rb) rb.disabled = false;
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
 function veAutoLayout() {
-  VE.manual = {}; vePosSave(); veCanvas();
-  $("veMsg").textContent = "배치를 자동 정렬로 되돌렸습니다 (스키마는 그대로)";
+  VE.manual = {}; VE.bend = {}; vePosSave(); veCanvas();
+  $("veMsg").textContent = "배치와 관계 선을 자동으로 되돌렸습니다 (스키마는 그대로)";
 }
 
 function veChainAdd(at) {
@@ -2873,7 +2912,8 @@ function vePortDrag(ev, srcKey) {
 }
 
 function veEdges() {
-  const svg = $("veSvg"); if (!svg) return;
+  const svg = $("veSvg"), top = $("veSvgTop"); if (!svg || !top) return;
+  top.innerHTML = "";
   svg.innerHTML = `<defs>
     <marker id="veArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0L10 5L0 10z" fill="#7c5cd6"/></marker>
@@ -2893,10 +2933,16 @@ function veEdges() {
     const vertical = Math.abs((a.x + a.w / 2) - (b.x + b.w / 2)) < 40;
     const p1 = vertical ? {x: a.x + a.w / 2, y: a.y + a.h} : {x: a.x + a.w, y: a.y + a.h / 2};
     const p2 = vertical ? {x: b.x + b.w / 2, y: b.y} : {x: b.x, y: b.y + b.h / 2};
+    const bend = rel ? (VE.bend[rel.key] || null) : null;
     const path = document.createElementNS(SVGNS, "path");
-    path.setAttribute("d", vertical
-      ? `M ${p1.x} ${p1.y} C ${p1.x} ${p1.y + 26}, ${p2.x} ${p2.y - 26}, ${p2.x} ${p2.y}`
-      : `M ${p1.x} ${p1.y} C ${p1.x + 40} ${p1.y}, ${p2.x - 40} ${p2.y}, ${p2.x} ${p2.y}`);
+    if (bend) {   // 2차 베지어의 중점 = (p1 + 2C + p2)/4 → 중점을 M+bend로 보내려면 C = M + 2*bend
+      const cx = (p1.x + p2.x) / 2 + bend.dx * 2, cy = (p1.y + p2.y) / 2 + bend.dy * 2;
+      path.setAttribute("d", `M ${p1.x} ${p1.y} Q ${cx} ${cy} ${p2.x} ${p2.y}`);
+    } else {
+      path.setAttribute("d", vertical
+        ? `M ${p1.x} ${p1.y} C ${p1.x} ${p1.y + 26}, ${p2.x} ${p2.y - 26}, ${p2.x} ${p2.y}`
+        : `M ${p1.x} ${p1.y} C ${p1.x + 40} ${p1.y}, ${p2.x - 40} ${p2.y}, ${p2.x} ${p2.y}`);
+    }
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", rel ? "#7c5cd6" : "#9aa3b2");
     path.setAttribute("stroke-width", "1.8");
@@ -2904,28 +2950,37 @@ function veEdges() {
     path.setAttribute("marker-end", rel ? "url(#veArr)" : "url(#veArrG)");
     svg.appendChild(path);
     const tx = document.createElementNS(SVGNS, "text");
-    if (vertical) {   // 세로 간선 — 라벨을 두 노드 사이 빈칸에 (노드에 가리지 않게)
+    if (rel) {        // 관계 라벨 = 선의 손잡이. 여기 있는 곳이 곧 선이 지나는 곳이다.
+      tx.setAttribute("x", (p1.x + p2.x) / 2 + (bend ? bend.dx : 0));
+      tx.setAttribute("y", (p1.y + p2.y) / 2 + (bend ? bend.dy : 0) - 5);
+      tx.setAttribute("text-anchor", "middle");
+    } else if (vertical) {   // 세로 구조선 — 라벨을 두 노드 사이 빈칸에 (노드에 가리지 않게)
       tx.setAttribute("x", (p1.x + p2.x) / 2 + 8);
       tx.setAttribute("y", (a.y + a.h + b.y) / 2 + 4);
       tx.setAttribute("text-anchor", "start");
-    } else {          // 가로 간선은 관계·속성 라벨이 겹치지 않게 위치를 어긋나게
-      const t = rel ? .62 : .34;
-      tx.setAttribute("x", p1.x + (p2.x - p1.x) * t);
-      tx.setAttribute("y", p1.y + (p2.y - p1.y) * t - 6);
+    } else {
+      tx.setAttribute("x", p1.x + (p2.x - p1.x) * .34);
+      tx.setAttribute("y", p1.y + (p2.y - p1.y) * .34 - 6);
       tx.setAttribute("text-anchor", "middle");
     }
     tx.setAttribute("class", "lbl");
     if (!rel) { tx.setAttribute("fill", "#9aa3b2"); tx.setAttribute("font-weight", "400"); }
     tx.textContent = label;
-    if (rel) {   // 관계 라벨 클릭 = 그 관계 편집
-      tx.style.cursor = "pointer";
-      tx.onclick = () => veSel("rel", VE.rels.indexOf(rel));
+    if (!rel) tx.style.pointerEvents = "none";   // 구조선 라벨은 클릭 대상이 아니다
+    if (rel) {   // 클릭 = 그 관계 편집 · 끌기 = 선 위치 조정 (노드와 같은 4px 문턱)
+      tx.classList.add("draggable");
+      tx.setAttribute("tabindex", "0");        // 키보드로도 관계를 고를 수 있게
+      tx.setAttribute("role", "button");
+      tx.setAttribute("aria-label", `관계 ${label} — 선택해 편집, 끌어서 선 위치 조정`);
+      tx.onpointerdown = ev => veRelDrag(ev, rel, p1, p2);
+      tx.onkeydown = ev => { if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault(); veSel("rel", VE.rels.indexOf(rel)); } };
     }
-    svg.appendChild(tx);
+    top.appendChild(tx);
   };
   for (let i = 0; i < VE.chain.length - 1; i++)
     draw("chain" + i, "chain" + (i + 1), `${2 + i}층 → ${3 + i}층`, null);
-  VE.attrs.forEach((a, i) => draw("chain0", "attr" + i, "속성", null));
+  VE.attrs.forEach((a, i) => draw("chain0", "attr" + i, "속성", null));   // 진입점 바로 아래
   VE.rels.forEach(r => {
     const f = idOf(r.source), t = idOf(r.target);
     if (f && t) draw(f, t, r.key, r);
@@ -2946,7 +3001,7 @@ function veDetail() {
   t.textContent = kind === "chain" ? `${pos + 1}단계 계층 칸` : kind === "attr" ? "속성" : "관계";
   const ts = document.createElement("small");
   ts.textContent = kind === "chain" ? `그래프 ${2 + pos}층에 저장`
-    : kind === "attr" ? `그래프 9층 · ${VE.chain[0] ? VE.chain[0].key : ""}에 연결`
+    : kind === "attr" ? `진입점 ${VE.chain[0] ? VE.chain[0].key : ""} 바로 아래에 붙음`
     : "문서에서 함께 추출되어 점선으로 연결";
   t.appendChild(ts); box.appendChild(t);
   const fld = (labelText, val, onInput, isArea, ph) => {
@@ -3030,7 +3085,8 @@ function veDetail() {
   n.textContent = kind === "chain"
     ? "계층 칸은 순서대로 그래프에 쌓입니다. 모든 계층 칸의 값이 문서에서 나와야 그 문서가 반영됩니다 (하나라도 없으면 제외)."
     : kind === "attr"
-    ? "속성은 값이 있을 때만 뽑힙니다. 같은 값(예: Keras)은 그래프 전체에서 노드 1개로 합쳐져 여러 문서가 공유합니다."
+    ? "속성은 값이 있을 때만 뽑힙니다. 같은 값(예: Keras)은 그래프 전체에서 노드 1개로 합쳐져 여러 문서가 공유합니다. "
+      + "그래프에서는 진입점 바로 아래 한 칸에 붙고, 저장 칸 번호는 9입니다 — 계층 체인이 7층까지 늘어날 수 있어 비워둔 번호라 깊이가 아닙니다."
     : "관계는 두 엔티티가 한 문서에서 같이 나왔을 때만 연결됩니다. 출발·도착은 위 엔티티 키 중에서 고릅니다.";
   box.appendChild(n);
 }
