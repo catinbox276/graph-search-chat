@@ -21,6 +21,11 @@
   th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
   th { color: var(--mut); font-weight: 600; }
   td.tools, td.mono { font-family: ui-monospace, monospace; font-size: .74rem; word-break: break-all; }
+  /* 긴 값(제목·사유·추출 엔티티)이 표를 밀어내지 않게 — 한 줄로 자르고 …, 전문은 행 클릭 */
+  table.fixed { table-layout: fixed; }
+  td.trunc, th.trunc { max-width: 0; overflow: hidden; text-overflow: ellipsis;
+                       white-space: nowrap; }
+  td.trunc.mono { word-break: normal; }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: #0001; }
   tbody tr.sel td { background: var(--path); color: #fff; }
@@ -1656,8 +1661,13 @@ async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
                              : "두 run이 공통으로 판정한 문서가 없습니다";
     mount.appendChild(e); return;
   }
-  const t = document.createElement("table"); t.className = "vertable";
+  const t = document.createElement("table"); t.className = "vertable fixed";
   t.style.cssText = "border:1px solid var(--line);border-radius:8px;border-collapse:separate;border-spacing:0";
+  const cg = document.createElement("colgroup");   // 문서 열 고정 + run 열 균등 (폭 넘침 방지)
+  const docW = 30, runW = (100 - docW) / Math.max(1, heads.length);
+  [docW, ...heads.map(() => runW)].forEach(w => {
+    const c = document.createElement("col"); c.style.width = w + "%"; cg.appendChild(c); });
+  t.appendChild(cg);
   const thead = document.createElement("thead"); const hr = document.createElement("tr");
   ["문서", ...heads].forEach(x => { const th = document.createElement("th"); th.textContent = x; hr.appendChild(th); });
   thead.appendChild(hr); t.appendChild(thead);
@@ -1668,8 +1678,8 @@ async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
     if (new Set(sts).size > 1) tr.className = "diffrow";
     const c0 = document.createElement("td");
     c0.textContent = `${d.src_id}${d.title ? " · " + d.title : ""}`;
-    c0.title = d.title; c0.style.maxWidth = "320px"; c0.style.overflow = "hidden";
-    c0.style.textOverflow = "ellipsis"; c0.style.whiteSpace = "nowrap";
+    c0.className = "trunc";
+    c0.title = `${d.src_id} ${d.title || ""}\n클릭 = 원본 보기`;
     c0.style.cursor = "pointer"; c0.onclick = () => openDocOriginal(src, d.src_id, d.title);
     tr.appendChild(c0);
     j.runs.forEach(rid => {
@@ -1677,9 +1687,14 @@ async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
       if (!cell) td.textContent = "—";
       else {
         const ents = fmtEnts(cell.entities);
+        td.className = "trunc";
         td.textContent = (_DOC_ST[cell.status] || cell.status) +
-          (cell.note ? ` · ${cell.note.slice(0, 60)}` : "") + (ents ? ` · ${ents}` : "");
-        td.title = [cell.note, ents].filter(Boolean).join("\n");
+          (cell.note ? ` · ${cell.note}` : "") + (ents ? ` · ${ents}` : "");
+        td.title = [cell.note, ents].filter(Boolean).join("\n") + "\n클릭 = 판정 상세";
+        td.style.cursor = "pointer";
+        td.onclick = (ev) => { ev.stopPropagation();
+          openDocDetail(src, {src_id: d.src_id, title: d.title, status: cell.status,
+                              note: cell.note, entities: cell.entities}); };
       }
       tr.appendChild(td);
     });
@@ -1796,9 +1811,13 @@ async function loadRunDocs(src, status, page) {
   if (!r.ok) { box.textContent = `문서 조회 실패 (${r.status})`; return; }
   const j = await r.json();
   box.innerHTML = "";
+  // 표 폭 고정 — 긴 제목·사유·엔티티가 화면을 밀어내지 않게. 전문은 행 클릭 상세에서.
   const t = document.createElement("table");
-  t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>문서 id</th><th>제목</th><th>상태</th><th>사유</th><th>추출 엔티티</th></tr></thead>";
+  t.className = "vertable fixed";
+  t.innerHTML = "<colgroup><col style='width:16%'><col style='width:27%'>"
+    + "<col style='width:9%'><col style='width:24%'><col style='width:24%'></colgroup>"
+    + "<thead><tr><th>문서 id</th><th>제목</th><th>상태</th><th>사유</th>"
+    + "<th>추출 엔티티</th></tr></thead>";
   const tb = document.createElement("tbody");
   const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
   j.docs.forEach(d => {
@@ -1806,11 +1825,11 @@ async function loadRunDocs(src, status, page) {
     const ents = fmtEnts(d.entities);
     [d.src_id, d.title, LB[d.status] || d.status, d.note, ents].forEach((v, i) => {
       const td = document.createElement("td"); td.textContent = v ?? "";
-      if (i === 1 || i === 3 || i === 4) td.title = v ?? "";  // 잘린 값은 툴팁으로 전체
+      if (i !== 2) { td.className = "trunc"; td.title = v ?? ""; }   // 상태만 그대로, 나머지 …
       tr.appendChild(td);
     });
-    tr.title = "클릭 = 원본 보기";
-    tr.onclick = () => openDocOriginal(src, d.src_id, d.title);
+    tr.title = "클릭 = 판정 상세 (사유·엔티티 전문·원본)";
+    tr.onclick = () => openDocDetail(src, d);
     tb.appendChild(tr);
   });
   t.appendChild(tb); box.appendChild(t);
@@ -2272,6 +2291,35 @@ async function showEvent(id) {
 // 문서별 결과 클릭 → 원본(원천 테이블 역할별 컬럼)을 모달로. 컬럼 2개 이상이면 구분 표시.
 const _ROLE_KO = {title: "제목", body: "본문", question: "질문", answer: "답변",
                   meta: "메타/태그", url: "링크"};
+// 문서 판정 상세 — 표에서는 …로 자르고, 전문(사유·엔티티·관계)은 여기서 본다
+function openDocDetail(src, d) {
+  const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
+  const e = d.entities || {};
+  const line = e._line ? [["판정 라인", e._line]] : [];
+  const attrs = Object.entries(e).filter(([k]) => k !== "_line" && k !== "_relations")
+    .map(([k, v]) => [k, String(v)]);
+  const rels = Array.isArray(e._relations)
+    ? e._relations.map(r => `${r.source} —${r.type}→ ${r.target}`) : [];
+  const secs = [
+    {label: "판정", table: {head: ["항목", "값"], badge0: true,
+      rows: [["상태", LB[d.status] || d.status || "—"],
+             ...line,
+             ["문서 id", d.src_id]]}},
+    {label: "제목", text: d.title, empty: "(제목 없음)"},
+    {label: "판정 사유", text: d.note, empty: "(사유 없음)"},
+  ];
+  if (attrs.length)
+    secs.push({label: `추출 엔티티 (${attrs.length}종)`,
+               table: {head: ["키", "값"], badge0: true, rows: attrs}});
+  if (rels.length)
+    secs.push({label: `관계 (${rels.length}건)`, text: rels.join("\n")});
+  if (!attrs.length && !rels.length)
+    secs.push({label: "추출 엔티티", text: "", empty: "이 문서에서 뽑힌 값이 없습니다"});
+  openVerModal(`📄 판정 상세 · ${d.src_id}`, secs,
+               [{label: "📄 원본 문서 보기", title: "원천 테이블의 이 문서 원본 열람",
+                 fn: () => openDocOriginal(src, d.src_id, d.title)}]);
+}
+
 async function openDocOriginal(src, srcId, title) {
   $("evmTitle").textContent = `📄 원본 · ${src} · ${srcId}` + (title ? ` · ${title}` : "");
   const box = $("evmBody"); box.innerHTML = `<div class="hint">불러오는 중…</div>`;
