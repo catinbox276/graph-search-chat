@@ -1226,10 +1226,34 @@ async function loadRuns(src) {
      x.cluster_version != null ? `${x.cluster_line || "?"}·v${x.cluster_version}` : "-",
      x.join_version != null ? `v${x.join_version}` : "-",
      x.data_version != null ? `v${x.data_version}` : "-",
-     x.chat_model, x.embed_model, x.settings, x.done, x.excluded, x.error,
-     x.active ? "★ 활성(사용자 노출)" : ""].forEach(v => {
+     x.chat_model, x.embed_model, x.settings, x.done, x.excluded, x.error].forEach(v => {
       const td = document.createElement("td"); td.textContent = v ?? ""; tr.appendChild(td);
     });
+    const st = document.createElement("td");   // 상태 = 라벨 배지들 + stale 경고
+    (x.labels || []).forEach(lb => {
+      const b = document.createElement("span");
+      b.style.cssText = "display:inline-block;padding:0 7px;margin:0 2px 2px 0;border:1px solid var(--line);border-radius:99px;font-size:.72rem;white-space:nowrap;cursor:pointer";
+      if (lb === "active") { b.textContent = "★ active"; b.style.fontWeight = "700"; b.title = "사용자 노출 중 (이동은 ★ 활성 전환)"; }
+      else {
+        b.textContent = "@" + lb; b.title = "클릭 = 라벨 제거";
+        b.onclick = async () => {
+          if (!confirm(`라벨 '${lb}'를 이 run에서 제거할까요?`)) return;
+          const r2 = await fetch(`/admin/runs/${x.run_id}/labels/${encodeURIComponent(lb)}`, {method: "DELETE"});
+          const j2 = await r2.json().catch(() => ({}));
+          smsg(r2.ok ? `✓ ${j2.note}` : (j2.detail || `실패 ${r2.status}`), r2.ok);
+          if (r2.ok) loadRuns(src);
+        };
+      }
+      st.appendChild(b);
+    });
+    if ((x.stale_dims || []).length) {   // Dagster 패턴 — 활성 run이 최신 기본 구성보다 뒤처짐
+      const w = document.createElement("span");
+      w.style.cssText = "display:inline-block;padding:0 7px;border-radius:99px;font-size:.72rem;background:rgba(255,160,0,.18);white-space:nowrap";
+      w.textContent = "⚠ 구성 뒤처짐";
+      w.title = "이후에 기본 버전이 바뀐 차원:\n" + x.stale_dims.join("\n") + "\n→ [⧉ 복제해 새 run]으로 최신 구성 run을 만들어 재구조화·전환하세요";
+      st.appendChild(w);
+    }
+    tr.appendChild(st);
     if (x.active) tr.classList.add("sel");
     tb.appendChild(tr);
   });
@@ -1253,11 +1277,24 @@ async function loadRuns(src) {
       const j = await r2.json().catch(() => ({}));
       smsg(r2.ok ? `▶ ${j.note}` : `실패 — ${j.detail || r2.status}`, r2.ok); }));
   bar.appendChild(mkb("✚ 새 조합 run 만들기", "도메인 버전·모델·설정을 골라 새 버전 생성 (비활성)", () => renderRunForm(src)));
+  bar.appendChild(mkb("⧉ 복제해 새 run", "선택(라디오)한 run의 조합을 폼에 채워서 시작 — 바꿀 차원만 고치고 생성 (ClearML 방식)",
+    () => { const rid = picked(); if (!rid) return;
+      const x = runs.find(r => r.run_id === rid);
+      $("runform").innerHTML = ""; renderRunForm(src, x); }));
+  bar.appendChild(mkb("🏷 라벨 지정", "선택(라디오)한 run에 라벨 부여 (예: staging) — 같은 라벨을 가진 다른 run에서 자동으로 옮겨옵니다. 제거는 배지 클릭",
+    async () => { const rid = picked(); if (!rid) return;
+      const lb = prompt("라벨 이름 (영소문자·숫자·-_. / 'active'는 시스템 전용):");
+      if (!lb) return;
+      const r2 = await fetch(`/admin/runs/${rid}/labels`, {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify({label: lb})});
+      const j2 = await r2.json().catch(() => ({}));
+      smsg(r2.ok ? `✓ ${j2.note}` : (Array.isArray(j2.detail) ? j2.detail[0]?.msg : j2.detail) || `실패 ${r2.status}`, r2.ok);
+      if (r2.ok) loadRuns(src); }));
   bar.appendChild(mkb("🔍 선택 run 비교", "🔍 열에서 2개 이상 체크한 run의 조합·설정·결과를 나란히 비교 — 차이 나는 행이 강조됩니다",
     () => {
       const ids = [...box.querySelectorAll("input[name=runcmp]:checked")].map(c => c.value);
       if (ids.length < 2) { smsg("비교할 run을 2개 이상 체크(🔍)하세요"); return; }
-      renderRunCompare(runs.filter(r => ids.includes(r.run_id)), cmpBox);
+      renderRunCompare(runs.filter(r => ids.includes(r.run_id)), cmpBox, src);
     }));
   box.appendChild(bar);
   const cmpBox = document.createElement("div"); cmpBox.style.marginTop = "8px";
@@ -1265,7 +1302,7 @@ async function loadRuns(src) {
 }
 
 // ── run 비교 — 행=설정 키(합집합), 열=run. 첫 run과 다른 행 강조 (MLflow 방식) ──
-function renderRunCompare(sel, mount) {
+function renderRunCompare(sel, mount, src) {
   mount.innerHTML = "";
   const head = sel.map(r => `${r.started || "?"}${r.active ? " ★" : ""}`);
   // 설정 행: 고정 차원 + params 합집합. 결과 행은 별도(항상 표시, 강조 없음 — 결과는 다른 게 당연)
@@ -1292,9 +1329,14 @@ function renderRunCompare(sel, mount) {
   const lb = document.createElement("label"); lb.className = "hint"; lb.style.margin = "0";
   const dONLY = document.createElement("input"); dONLY.type = "checkbox";
   lb.append(dONLY, " 차이만 보기");
+  const docBtn = document.createElement("button"); docBtn.type = "button"; docBtn.className = "ghost";
+  docBtn.textContent = "📄 문서별 결과 비교";
+  docBtn.title = "행=문서, 열=run — 같은 문서가 run마다 어떻게 판정됐는지 나란히";
+  docBtn.onclick = () => renderDocCompare(src, sel.map(r => r.run_id), head, docMount, 1, false);
   const close = document.createElement("button"); close.type = "button"; close.className = "ghost";
   close.textContent = "✕ 닫기"; close.onclick = () => { mount.innerHTML = ""; };
-  bar.append(ttl, lb, close); mount.appendChild(bar);
+  bar.append(ttl, lb, docBtn, close); mount.appendChild(bar);
+  const docMount = document.createElement("div");
   const t = document.createElement("table"); t.className = "vertable";
   t.style.cssText = "border:1px solid var(--line);border-radius:8px;border-collapse:separate;border-spacing:0";
   const thead = document.createElement("thead"); const hr = document.createElement("tr");
@@ -1313,11 +1355,78 @@ function renderRunCompare(sel, mount) {
   };
   dONLY.onchange = draw; draw();
   t.appendChild(tb); mount.appendChild(t);
+  mount.appendChild(docMount);
   mount.scrollIntoView({behavior: "smooth", block: "nearest"});
 }
-async function renderRunForm(src) {
+
+// ── 문서 단위 run 비교 — 행=문서, 열=run (Langfuse compare 패턴) ──────────────
+const _DOC_ST = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류"};
+async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
+  mount.innerHTML = "⏳ 문서별 결과 조회 중…";
+  const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/run-docs-compare` +
+    `?runs=${encodeURIComponent(runIds.join(","))}&only_diff=${onlyDiff ? 1 : 0}&page=${page}`);
+  if (!r.ok) { mount.textContent = `조회 실패 (${r.status})`; return; }
+  const j = await r.json();
+  mount.innerHTML = "";
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:10px;align-items:center;margin:8px 0 4px";
+  const ttl = document.createElement("b"); ttl.style.fontSize = ".8rem";
+  ttl.textContent = `📄 문서별 결과 (${j.total}건${onlyDiff ? " — 판정 다른 것만" : ""})`;
+  const lb = document.createElement("label"); lb.className = "hint"; lb.style.margin = "0";
+  const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = onlyDiff;
+  cb.onchange = () => renderDocCompare(src, runIds, heads, mount, 1, cb.checked);
+  lb.append(cb, " 판정 다른 것만");
+  bar.append(ttl, lb); mount.appendChild(bar);
+  if (!j.docs.length) {
+    const e = document.createElement("span"); e.className = "hint";
+    e.textContent = onlyDiff ? "run 간 판정이 다른 문서가 없습니다 — 결과가 동일합니다"
+                             : "두 run이 공통으로 판정한 문서가 없습니다";
+    mount.appendChild(e); return;
+  }
+  const t = document.createElement("table"); t.className = "vertable";
+  t.style.cssText = "border:1px solid var(--line);border-radius:8px;border-collapse:separate;border-spacing:0";
+  const thead = document.createElement("thead"); const hr = document.createElement("tr");
+  ["문서", ...heads].forEach(x => { const th = document.createElement("th"); th.textContent = x; hr.appendChild(th); });
+  thead.appendChild(hr); t.appendChild(thead);
+  const tb = document.createElement("tbody");
+  j.docs.forEach(d => {
+    const tr = document.createElement("tr");
+    const sts = j.runs.map(rid => (d.by_run[rid] || {}).status || "—");
+    if (new Set(sts).size > 1) tr.className = "diffrow";
+    const c0 = document.createElement("td");
+    c0.textContent = `${d.src_id}${d.title ? " · " + d.title : ""}`;
+    c0.title = d.title; c0.style.maxWidth = "320px"; c0.style.overflow = "hidden";
+    c0.style.textOverflow = "ellipsis"; c0.style.whiteSpace = "nowrap";
+    c0.style.cursor = "pointer"; c0.onclick = () => openDocOriginal(src, d.src_id, d.title);
+    tr.appendChild(c0);
+    j.runs.forEach(rid => {
+      const cell = d.by_run[rid]; const td = document.createElement("td");
+      if (!cell) td.textContent = "—";
+      else {
+        const ents = Object.entries(cell.entities || {}).map(([k, v]) => `${k}=${v}`).join(" · ");
+        td.textContent = (_DOC_ST[cell.status] || cell.status) +
+          (cell.note ? ` · ${cell.note.slice(0, 60)}` : "") + (ents ? ` · ${ents}` : "");
+        td.title = [cell.note, ents].filter(Boolean).join("\n");
+      }
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); mount.appendChild(t);
+  if (j.pages > 1) {
+    const pg = document.createElement("div");
+    pg.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:4px";
+    if (page > 1) pg.appendChild(_verBtn("◀", () => renderDocCompare(src, runIds, heads, mount, page - 1, onlyDiff)));
+    const info = document.createElement("span"); info.className = "hint"; info.style.margin = "0";
+    info.textContent = `${page} / ${j.pages}`; pg.appendChild(info);
+    if (page < j.pages) pg.appendChild(_verBtn("▶", () => renderDocCompare(src, runIds, heads, mount, page + 1, onlyDiff)));
+    mount.appendChild(pg);
+  }
+}
+async function renderRunForm(src, prefill) {
   const f = $("runform");
-  if (f.innerHTML) { f.innerHTML = ""; return; }
+  if (f.innerHTML && !prefill) { f.innerHTML = ""; return; }
+  f.innerHTML = "";
   const models = (await fetch("/models").then(r => r.json()).catch(() => ({llm: []}))).llm || [];
   const allm = (await fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))).models || [];
   const embeds = allm.filter(m => m.kind === "embedding");
@@ -1345,6 +1454,20 @@ async function renderRunForm(src) {
       <button type="button" id="rfGo">생성</button>
     </div>
     <span class="hint" style="margin:0">엔티티·클러스터는 각 버전 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 자주 쓰는 조합은 [조합 프리셋] 탭에 이름 붙여 저장해 두고 적용하세요.</span>`;
+  if (prefill) {   // ⧉ 복제 — 선택 run의 조합으로 폼을 채움 (바꿀 차원만 고치면 됨)
+    const setSel = (id, val) => { const el = $(id);
+      if (val && [...el.options].some(o => o.value === val)) el.value = val; };
+    if (prefill.domain_version) $("rfVer").value = prefill.domain_version;
+    if (prefill.entity_version != null) setSel("rfEntVer", `${prefill.entity_line}\t${prefill.entity_version}`);
+    if (prefill.cluster_version != null) setSel("rfClsVer", `${prefill.cluster_line}\t${prefill.cluster_version}`);
+    if (prefill.join_version != null) setSel("rfJoinVer", String(prefill.join_version));
+    if (prefill.data_version != null) setSel("rfDataVer", String(prefill.data_version));
+    setSel("rfModel", prefill.chat_model); setSel("rfEmbed", prefill.embed_model);
+    const p = prefill.params || {};
+    if (p["본문 길이"]) $("rfChars").value = p["본문 길이"];
+    if (p["묶음 토큰"]) $("rfPack").value = p["묶음 토큰"];
+    smsg(`⧉ ${prefill.started} run의 조합을 폼에 채웠습니다 — 바꿀 차원만 고치고 [생성]`, true);
+  }
   $("rfGo").onclick = async () => {
     const body = {};
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };

@@ -1431,6 +1431,42 @@ def admin_source_runs(sname: str):
                          "join_version": int(r[14]) if r[14] is not None else None,
                          "data_version": int(r[15]) if r[15] is not None else None,
                          "entity_line": r[16] or "", "cluster_line": r[17] or ""})
+        # 라벨 (run_labels — 'active'는 시스템, 나머지는 관리자 자유)
+        cur.execute("SELECT run_id, label FROM run_labels WHERE source_name = :1", [sname])
+        lbl = {}
+        for rid_, lb_ in cur.fetchall():
+            lbl.setdefault(rid_, []).append(lb_)
+        for row in rows:
+            row["labels"] = sorted(lbl.get(row["run_id"], []))
+        # stale 배지 (Dagster 패턴) — 활성 run의 조합이 현재 기본 버전들보다 뒤처졌는지
+        from graph.doc_pipeline.runs import _default_mapping_ver, _default_data_ver
+        en, ev = versioning.active(cur, "entity_versions")
+        cn, cv = versioning.active(cur, "cluster_versions")
+        mv = _default_mapping_ver(cur, sname)
+        dv = _default_data_ver(cur, sname)
+        for row in rows:
+            if not row["active"]:
+                continue
+            stale = []
+            try:
+                cur.execute("""SELECT NVL(v.version, 1) FROM domain_versions v
+                               WHERE v.name = :1 AND v.is_default = 'Y'""", [row["domain"]])
+                dmr = cur.fetchone()
+            except Exception:
+                dmr = None   # domain_versions 미생성 등 — stale은 부가정보라 조용히 생략
+            if dmr and row["domain_version"] and int(dmr[0]) != int(row["domain_version"]):
+                stale.append(f"도메인 v{row['domain_version']}→v{int(dmr[0])}")
+            def _lv(ln, v):   # 라인·버전 표기 (미지정 run은 '미지정')
+                return f"{ln}·v{v}" if v is not None else "미지정"
+            if en and ev is not None and (row["entity_line"], row["entity_version"]) != (en, ev):
+                stale.append(f"①추출 {_lv(row['entity_line'], row['entity_version'])}→{en}·v{ev}")
+            if cn and cv is not None and (row["cluster_line"], row["cluster_version"]) != (cn, cv):
+                stale.append(f"②병합 {_lv(row['cluster_line'], row['cluster_version'])}→{cn}·v{cv}")
+            if mv is not None and row["join_version"] not in (None, mv):
+                stale.append(f"매핑 v{row['join_version']}→v{mv}")
+            if dv is not None and row["data_version"] not in (None, dv):
+                stale.append(f"데이터 v{row['data_version']}→v{dv}")
+            row["stale_dims"] = stale
     return {"runs": rows}
 
 
@@ -1481,6 +1517,93 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
                                 "char_ratio": inp.char_ratio, "select_max": inp.select_max})
     return {"ok": True, "run_id": rid,
             "note": "run 생성됨(비활성) — [이 run으로 구조화] 후 결과를 보고 활성 전환하세요"}
+
+
+class RunLabelIn(BaseModel):
+    label: str
+
+    @field_validator("label")
+    @classmethod
+    def _label(cls, v: str) -> str:
+        import re as _re
+        v = v.strip().lower()
+        if not _re.fullmatch(r"[a-z0-9_\-.]{1,64}", v):
+            raise ValueError("라벨은 영소문자·숫자·-_. 만, 64자 이내")
+        if v == "active":
+            raise ValueError("'active'는 시스템 라벨입니다 — [★ 활성 전환]으로만 이동")
+        return v
+
+
+@router.post("/admin/runs/{run_id}/labels")
+def admin_run_label_set(run_id: str, inp: RunLabelIn):
+    """run에 라벨 부여 — 같은 소스의 다른 run이 갖고 있으면 자동으로 옮겨온다(MLflow alias)."""
+    from graph.doc_pipeline.runs import ensure_runs, set_run_label
+    with db_cursor() as cur:
+        ensure_runs(cur)
+        try:
+            prev = set_run_label(cur, run_id, inp.label)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+    return {"ok": True, "note": (f"라벨 '{inp.label}' 부여됨 — 이전 run에서 옮겨왔습니다"
+                                 if prev else f"라벨 '{inp.label}' 부여됨")}
+
+
+@router.delete("/admin/runs/{run_id}/labels/{label}")
+def admin_run_label_delete(run_id: str, label: str):
+    from graph.doc_pipeline.runs import ensure_runs, delete_run_label
+    if label == "active":
+        raise HTTPException(400, "'active'는 시스템 라벨 — [★ 활성 전환]으로만 이동합니다")
+    with db_cursor() as cur:
+        ensure_runs(cur)
+        if not delete_run_label(cur, run_id, label):
+            raise HTTPException(404, f"이 run에 라벨이 없습니다: {label}")
+    return {"ok": True, "note": f"라벨 '{label}' 제거됨"}
+
+
+@router.get("/admin/sources/{sname}/run-docs-compare")
+def admin_run_docs_compare(sname: str, runs: str, only_diff: int = 0, page: int = 1):
+    """문서 단위 run 비교 — 행=문서, 열=run (Langfuse compare 패턴).
+    only_diff=1이면 run 간 상태가 다른 문서만."""
+    import json
+    rids = [r.strip() for r in (runs or "").split(",") if r.strip()][:6]
+    if len(rids) < 2:
+        raise HTTPException(400, "비교할 run을 2개 이상 지정하세요")
+    page = max(1, page)
+    with db_cursor() as cur:
+        marks = ",".join(f":r{i}" for i in range(len(rids)))
+        binds = {f"r{i}": v for i, v in enumerate(rids)}
+        binds["s"] = sname
+        cur.execute(f"""SELECT src_id, run_id, status, note, entities
+                        FROM doc_results
+                        WHERE source_name = :s AND run_id IN ({marks})""", binds)
+        docs = {}
+        for src_id, rid, status, note, ents in cur.fetchall():
+            try:
+                ej = json.loads(_lob_str(ents) or "{}")
+            except (json.JSONDecodeError, TypeError):
+                ej = {}
+            docs.setdefault(src_id, {})[rid] = {"status": status, "note": note or "",
+                                                "entities": ej}
+        # only_diff: run 간 상태가 하나라도 다르면 (미판정 run은 '—' 취급)
+        items = sorted(docs.items())
+        if only_diff:
+            items = [(k, v) for k, v in items
+                     if len({(v.get(r) or {}).get("status", "—") for r in rids}) > 1]
+        total = len(items)
+        pg = items[(page - 1) * 20:(page - 1) * 20 + 20]
+        ids = [k for k, _ in pg]
+        titles = {}
+        if ids:
+            tmarks = ",".join(f":t{i}" for i in range(len(ids)))
+            tbinds = {f"t{i}": v for i, v in enumerate(ids)}
+            tbinds["s"] = sname
+            cur.execute(f"""SELECT src_id, NVL(title, ' ') FROM corpus_docs
+                            WHERE source_name = :s AND src_id IN ({tmarks})""", tbinds)
+            titles = {r[0]: (r[1] or "").strip()[:100] for r in cur.fetchall()}
+    return {"runs": rids,
+            "docs": [{"src_id": k, "title": titles.get(k, ""),
+                      "by_run": {r: v.get(r) for r in rids}} for k, v in pg],
+            "total": total, "page": page, "pages": max(1, (total + 19) // 20)}
 
 
 @router.post("/admin/runs/{run_id}/activate")

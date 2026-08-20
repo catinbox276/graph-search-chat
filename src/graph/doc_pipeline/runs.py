@@ -60,6 +60,22 @@ def ensure_runs(cur):
                        WHERE table_name = 'DOC_RESULTS' AND column_name = 'ENTITIES'""")
         if not cur.fetchone()[0]:
             cur.execute("ALTER TABLE doc_results ADD (entities CLOB)")
+    # run_labels — 라벨(이름) → run 매핑. PK(source, label)로 "라벨은 한 run만"을 DB가 강제
+    # (MLflow alias / Langfuse label 패턴). 'active' 라벨은 activate_run이 옮기는 시스템
+    # 포인터(doc_runs.active 컬럼은 하위호환 캐시), 그 외 라벨(staging 등)은 관리자 자유.
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'RUN_LABELS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE run_labels (
+            source_name VARCHAR2(100) NOT NULL,
+            label       VARCHAR2(64) NOT NULL,
+            run_id      VARCHAR2(32) NOT NULL,
+            created     TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT run_labels_pk PRIMARY KEY (source_name, label),
+            CONSTRAINT run_labels_run_fk FOREIGN KEY (run_id)
+              REFERENCES doc_runs(run_id) ON DELETE CASCADE)""")
+        # 시드: 기존 활성 run → 'active' 라벨
+        cur.execute("""INSERT INTO run_labels (source_name, label, run_id)
+                       SELECT source_name, 'active', run_id FROM doc_runs WHERE active = 'Y'""")
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if not cur.fetchone()[0]:
         cur.execute("""CREATE TABLE doc_results (
@@ -323,6 +339,12 @@ def activate_run(cur, run_id: str) -> dict:
     added = _run_edge_delta(cur, run_id, +1)
     cur.execute("UPDATE doc_runs SET active = 'N' WHERE source_name = :1", [source_name])
     cur.execute("UPDATE doc_runs SET active = 'Y' WHERE run_id = :1", [run_id])
+    # 'active' 라벨 동기 이동 — 같은 트랜잭션 (라벨이 이름의 진실, active 컬럼은 캐시)
+    cur.execute("""MERGE INTO run_labels l USING dual
+                   ON (l.source_name = :s AND l.label = 'active')
+                   WHEN MATCHED THEN UPDATE SET run_id = :r, created = SYSTIMESTAMP
+                   WHEN NOT MATCHED THEN INSERT (source_name, label, run_id)
+                   VALUES (:s, 'active', :r)""", {"s": source_name, "r": run_id})
     # 상태 캐시 교체 — 이 run이 판정한 문서는 그 상태로, 나머지는 미처리로
     cur.execute("""UPDATE corpus_docs d SET (graph_status, graph_note) =
                      (SELECT r.status, r.note FROM doc_results r
@@ -331,6 +353,31 @@ def activate_run(cur, run_id: str) -> dict:
                    WHERE d.source_name = :s""", {"rid": run_id, "s": source_name})
     return {"source": source_name, "changed": True,
             "subtracted_refs": subtracted, "added_refs": added}
+
+
+def set_run_label(cur, run_id: str, label: str) -> str:
+    """run에 라벨 부여 — 같은 소스의 다른 run이 갖고 있으면 자동 회수(MERGE, MLflow 방식).
+    반환: 라벨을 뺏긴 이전 run_id ("" = 없었음). 'active'는 activate_run 전용."""
+    cur.execute("SELECT source_name FROM doc_runs WHERE run_id = :1", [run_id])
+    r = cur.fetchone()
+    if not r:
+        raise ValueError(f"run이 없습니다: {run_id}")
+    source_name = r[0]
+    cur.execute("""SELECT run_id FROM run_labels
+                   WHERE source_name = :1 AND label = :2""", [source_name, label])
+    prev = cur.fetchone()
+    cur.execute("""MERGE INTO run_labels l USING dual
+                   ON (l.source_name = :s AND l.label = :lb)
+                   WHEN MATCHED THEN UPDATE SET run_id = :r, created = SYSTIMESTAMP
+                   WHEN NOT MATCHED THEN INSERT (source_name, label, run_id)
+                   VALUES (:s, :lb, :r)""", {"s": source_name, "lb": label, "r": run_id})
+    return prev[0] if prev and prev[0] != run_id else ""
+
+
+def delete_run_label(cur, run_id: str, label: str) -> bool:
+    cur.execute("""DELETE FROM run_labels
+                   WHERE run_id = :1 AND label = :2""", [run_id, label])
+    return cur.rowcount > 0
 
 
 def finish_run(cur, run_id: str):
