@@ -302,7 +302,7 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
         resp = llm.chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}],
-            **_gen_kwargs(no_think, 400))
+            **_gen_kwargs(no_think, 800))  # 속성·관계 붙은 스키마의 출력 절단 방지 (400은 잘림 실측)
         m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
         d = _loads_lenient(m.group()) if m else {}
         d["_usage"] = _usage_of(resp)   # (입력토큰, 출력토큰) — 처리량 가시화
