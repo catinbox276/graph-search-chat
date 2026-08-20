@@ -1298,7 +1298,8 @@ async function loadRuns(src) {
     cmp.type = "checkbox"; cmp.name = "runcmp"; cmp.value = x.run_id;
     const cC = document.createElement("td"); cC.appendChild(cmp); tr.appendChild(cC);
     [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`,
-     x.entity_version != null ? `${x.entity_line || "?"}·v${x.entity_version}` : "-",
+     (x.entity_lines || []).length ? `라우터·${x.entity_lines.length}`
+       : x.entity_version != null ? `${x.entity_line || "?"}·v${x.entity_version}` : "-",
      x.cluster_version != null ? `${x.cluster_line || "?"}·v${x.cluster_version}` : "-",
      x.join_version != null ? `v${x.join_version}` : "-",
      x.data_version != null ? `v${x.data_version}` : "-",
@@ -1384,7 +1385,8 @@ function renderRunCompare(sel, mount, src) {
   // 설정 행: 고정 차원 + params 합집합. 결과 행은 별도(항상 표시, 강조 없음 — 결과는 다른 게 당연)
   const dim = [
     ["도메인", r => `${r.domain || "-"} v${r.domain_version || "?"}`],
-    ["① 추출(엔티티)", r => r.entity_version != null ? `${r.entity_line || "?"}·v${r.entity_version}` : "-"],
+    ["① 추출(엔티티)", r => (r.entity_lines || []).length ? `라우터·${r.entity_lines.length}`
+       : r.entity_version != null ? `${r.entity_line || "?"}·v${r.entity_version}` : "-"],
     ["② 병합(클러스터)", r => r.cluster_version != null ? `${r.cluster_line || "?"}·v${r.cluster_version}` : "-"],
     ["매핑", r => r.join_version != null ? `v${r.join_version}` : "-"],
     ["데이터", r => r.data_version != null ? `v${r.data_version}` : "-"],
@@ -1437,8 +1439,9 @@ function renderRunCompare(sel, mount, src) {
 
 // ── 문서 단위 run 비교 — 행=문서, 열=run (Langfuse compare 패턴) ──────────────
 const _DOC_ST = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류"};
-function fmtEnts(o) {   // 추출 엔티티 + _relations(관계) 한 줄 요약
-  return Object.entries(o || {}).map(([k, v]) =>
+function fmtEnts(o) {   // 추출 엔티티 + _relations(관계) 한 줄 요약 — _line은 앞머리 배지
+  const line = (o || {})._line ? `〔${o._line}〕 ` : "";
+  return line + Object.entries(o || {}).filter(([k]) => k !== "_line").map(([k, v]) =>
     k === "_relations" && Array.isArray(v)
       ? v.map(r => `${r.source} —${r.type}→ ${r.target}`).join(" · ")
       : `${k}=${v}`).join(" · ");
@@ -1523,7 +1526,10 @@ async function renderRunForm(src, prefill) {
     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
       <b style="font-size:.78rem">버전 조합:</b>
       <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
-      <select id="rfEntVer" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option>${entV.map(vlopt).join("")}</select>
+      <span id="rfEntWrap" style="display:inline-flex;gap:4px;align-items:center">
+        <select class="rfEnt" id="rfEntVer" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option>${entV.map(vlopt).join("")}</select>
+        <button type="button" class="ghost" id="rfEntAdd" title="라인 후보 추가 — 2개 이상이면 문서마다 맞는 라인을 LLM이 골라 추출(장르 라우터)">＋라인</button>
+      </span>
       <select id="rfClsVer" title="② 병합(클러스터) 라인·버전"><option value="">②병합(활성)</option>${clsV.map(vlopt).join("")}</select>
       <select id="rfJoinVer" title="매핑 버전(id·시간·필드)"><option value="">매핑(기본)</option>${joinV.map(vopt).join("")}</select>
       <select id="rfDataVer" title="데이터 신선도 버전(적재 시점)"><option value="">데이터(기본)</option>${dataV.map(dopt).join("")}</select>
@@ -1536,11 +1542,26 @@ async function renderRunForm(src, prefill) {
       <button type="button" id="rfGo">생성</button>
     </div>
     <span class="hint" style="margin:0">엔티티·클러스터는 각 버전 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 자주 쓰는 조합은 [조합 프리셋] 탭에 이름 붙여 저장해 두고 적용하세요.</span>`;
+  // [＋라인] — 라우터 후보 select 복제 추가 (2개 이상 = 장르 라우터 run)
+  const addEntSel = () => {
+    const el = $("rfEntVer").cloneNode(true);
+    el.id = ""; el.value = ""; el.title = "라우터 라인 후보 (빈값=무시)";
+    $("rfEntWrap").insertBefore(el, $("rfEntAdd"));
+    return el;
+  };
+  $("rfEntAdd").onclick = addEntSel;
   if (prefill) {   // ⧉ 복제 — 선택 run의 조합으로 폼을 채움 (바꿀 차원만 고치면 됨)
     const setSel = (id, val) => { const el = $(id);
       if (val && [...el.options].some(o => o.value === val)) el.value = val; };
     if (prefill.domain_version) $("rfVer").value = prefill.domain_version;
-    if (prefill.entity_version != null) setSel("rfEntVer", `${prefill.entity_line}\t${prefill.entity_version}`);
+    if ((prefill.entity_lines || []).length) {   // 라우터 run 복제 — 후보 전부 채움
+      prefill.entity_lines.forEach((l, i) => {
+        const el = i === 0 ? $("rfEntVer") : addEntSel();
+        const v = `${l.line}\t${l.version}`;
+        if ([...el.options].some(o => o.value === v)) el.value = v;
+      });
+    }
+    else if (prefill.entity_version != null) setSel("rfEntVer", `${prefill.entity_line}\t${prefill.entity_version}`);
     if (prefill.cluster_version != null) setSel("rfClsVer", `${prefill.cluster_line}\t${prefill.cluster_version}`);
     if (prefill.join_version != null) setSel("rfJoinVer", String(prefill.join_version));
     if (prefill.data_version != null) setSel("rfDataVer", String(prefill.data_version));
@@ -1555,7 +1576,12 @@ async function renderRunForm(src, prefill) {
     const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
     iI("rfVer", "domain_version");
     const vl = (id, lk, vk) => { const s = $(id).value; if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
-    vl("rfEntVer", "entity_line", "entity_version"); vl("rfClsVer", "cluster_line", "cluster_version");
+    // 엔티티: #rfEntWrap의 select 전체 수집 — 1개=기존 단일, 2개 이상=라우터(entity_lines)
+    const ents = [...f.querySelectorAll("#rfEntWrap select")].map(el => el.value).filter(Boolean);
+    if (ents.length >= 2)
+      body.entity_lines = ents.map(s => { const [n, v] = s.split("\t"); return {line: n, version: parseInt(v)}; });
+    else if (ents.length === 1) { const [n, v] = ents[0].split("\t"); body.entity_line = n; body.entity_version = parseInt(v); }
+    vl("rfClsVer", "cluster_line", "cluster_version");
     iI("rfJoinVer", "join_version"); iI("rfDataVer", "data_version");
     if ($("rfModel").value) body.chat_model = $("rfModel").value;
     if ($("rfEmbed").value) body.embed_model = $("rfEmbed").value;
@@ -2668,19 +2694,40 @@ function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop, o
 function plArrow(canvas) {
   const a = document.createElement("div"); a.className = "plarrow"; a.textContent = "▶"; canvas.appendChild(a);
 }
-function plOpenPop(node, {title, items, current, onPick}) {
+function plOpenPop(node, {title, items, current, onPick, multi}) {
   document.querySelectorAll(".plpop").forEach(p => p.remove());
   const pop = document.createElement("div"); pop.className = "plpop";
   const h = document.createElement("div"); h.style.cssText = "font-weight:700;font-size:.75rem;padding:2px 8px 6px";
   h.textContent = title; pop.appendChild(h);
+  // multi: 체크박스 다중 선택 + [적용] — onPick(선택값 배열). current는 배열 허용.
+  const cur = Array.isArray(current) ? current.map(String) : [String(current)];
   items.forEach(it => {
     const d = document.createElement("div");
-    d.className = "it" + (String(it.value) === String(current) ? " on" : "");
-    d.textContent = it.label;
+    d.className = "it" + (cur.includes(String(it.value)) ? " on" : "");
+    if (multi) {
+      const cb = document.createElement("input"); cb.type = "checkbox";
+      cb.checked = cur.includes(String(it.value)); cb.value = it.value;
+      cb.className = "plmulti"; cb.style.marginRight = "5px";
+      d.appendChild(cb);
+      d.append(it.label);
+      d.onclick = ev => { ev.stopPropagation();
+        if (ev.target !== cb) cb.checked = !cb.checked; };
+    } else {
+      d.textContent = it.label;
+      d.onclick = ev => { ev.stopPropagation(); pop.remove(); onPick(it.value); };
+    }
     if (it.sub) { const sm = document.createElement("small"); sm.textContent = it.sub; d.appendChild(sm); }
-    d.onclick = ev => { ev.stopPropagation(); pop.remove(); onPick(it.value); };
     pop.appendChild(d);
   });
+  if (multi) {
+    const bar = document.createElement("div"); bar.style.cssText = "padding:4px 8px";
+    const ok = document.createElement("button"); ok.type = "button"; ok.textContent = "적용";
+    ok.title = "2개 이상 선택 = 라우터 (문서마다 맞는 라인을 LLM이 골라 추출)";
+    ok.onclick = ev => { ev.stopPropagation();
+      const sel = [...pop.querySelectorAll(".plmulti:checked")].map(c => c.value);
+      pop.remove(); onPick(sel); };
+    bar.appendChild(ok); pop.appendChild(bar);
+  }
   node.appendChild(pop);
   setTimeout(() => document.addEventListener("click", () => pop.remove(), {once: true}), 0);
 }
@@ -2744,20 +2791,29 @@ function plRender() {
         sub: (v.extract_hint || "").slice(0, 60), value: v.version})),
       onPick: v => { PL.sel.domain_version = v; plRender(); }}});
   plArrow(wrap);
-  // ⑤ ①추출(엔티티) — value "라인·v"
+  // ⑤ ①추출(엔티티) — value "라인·v" 또는 "라우터·N" (sel.entity: 문자열=단일, 배열=라우터)
   const eDef = D.ents.find(v => v.is_default) || D.ents[0] || null;
-  const eSelKey = viewing
+  const eMulti = !viewing && Array.isArray(sel.entity) ? sel.entity
+    : (viewing && (R.entity_lines || []).length
+       ? R.entity_lines.map(l => `${l.line}\t${l.version}`) : null);
+  const eSelKey = eMulti ? "" : viewing
     ? (R.entity_version != null ? `${R.entity_line}\t${R.entity_version}` : "")
     : defOr(sel.entity, eDef ? `${eDef.name}\t${eDef.version}` : "");
   const [eLn, eVr] = (eSelKey || "\t").split("\t");
-  plNode(wrap, {title: "① 추출 (엔티티)", value: eVr ? `${eLn}·v${eVr}` : "코드 기본",
-    sub: ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🎨더블클릭=설계",
-    custom: !viewing && !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : ""),
-    onDbl: () => scOpen(eVr ? eLn : "", eVr ? parseInt(eVr) : null),
-    pop: viewing ? null : {title: "추출 스키마 버전 선택", current: eSelKey,
+  plNode(wrap, {title: "① 추출 (엔티티)",
+    value: eMulti ? `라우터·${eMulti.length}` : eVr ? `${eLn}·v${eVr}` : "코드 기본",
+    sub: eMulti ? eMulti.map(s => s.replace("\t", "·v")).join(" + ") + " — 문서마다 분류"
+      : ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🎨더블클릭=설계",
+    custom: !viewing && (Array.isArray(sel.entity) ? sel.entity.length > 0
+      : !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : "")),
+    onDbl: () => { const k = eMulti ? eMulti[0] : eSelKey;
+      const [ln, vr] = (k || "\t").split("\t");
+      scOpen(vr ? ln : "", vr ? parseInt(vr) : null); },
+    pop: viewing ? null : {title: "추출 스키마 선택 — 2개 이상 체크=라우터", multi: true,
+      current: eMulti || eSelKey,
       items: D.ents.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
         sub: v.note || "", value: `${v.name}\t${v.version}`})),
-      onPick: v => { PL.sel.entity = v; plRender(); }}});
+      onPick: vs => { PL.sel.entity = vs.length > 1 ? vs : (vs[0] || undefined); plRender(); }}});
   plArrow(wrap);
   // ⑥ ②병합(클러스터)
   const cDef = D.clus.find(v => v.is_default) || D.clus[0] || null;
@@ -2794,7 +2850,8 @@ function plRunsStrip() {
     const tr = document.createElement("tr");
     if (PL.view && PL.view.run_id === x.run_id) tr.classList.add("sel");
     const combo = [`${x.domain || "-"} v${x.domain_version || "?"}`,
-      x.entity_version != null ? `${x.entity_line}·v${x.entity_version}` : null,
+      (x.entity_lines || []).length ? `라우터·${x.entity_lines.length}`
+        : x.entity_version != null ? `${x.entity_line}·v${x.entity_version}` : null,
       x.cluster_version != null ? `${x.cluster_line}·v${x.cluster_version}` : null]
       .filter(Boolean).join(" · ");
     [x.started, combo, `✅${x.done} ◽${x.excluded} ❌${x.error}`].forEach(v => {
@@ -2833,7 +2890,10 @@ async function plCreateRun() {
   const body = {};
   if (PL.sel.domain_version != null) body.domain_version = PL.sel.domain_version;
   const lv = (s, lk, vk) => { if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
-  lv(PL.sel.entity, "entity_line", "entity_version");
+  if (Array.isArray(PL.sel.entity))   // 라우터 — 라인 후보 2개 이상
+    body.entity_lines = PL.sel.entity.map(s => {
+      const [n, v] = s.split("\t"); return {line: n, version: parseInt(v)}; });
+  else lv(PL.sel.entity, "entity_line", "entity_version");
   lv(PL.sel.cluster, "cluster_line", "cluster_version");
   if (PL.sel.mapping != null) body.join_version = PL.sel.mapping;
   if (PL.sel.data != null) body.data_version = PL.sel.data;

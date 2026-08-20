@@ -1395,9 +1395,15 @@ def _run_compare_params(sj) -> dict:
     if d.get("pack_tokens") is not None:
         p["묶음 토큰"] = str(d["pack_tokens"])
     p["생각 끄기"] = "켬" if d.get("no_think") else "끔"
-    p["추출 프롬프트"] = "원문 커스텀" if (d.get("doc_prompt") or "").strip() and not d.get("schema") \
-        else ("스키마 조립" if d.get("schema") else "코드 기본")
-    sc = d.get("schema")
+    if d.get("lines"):   # 라우터 run — 라인별 스키마는 캔버스에서, 여기선 요약 한 줄
+        p["① 추출 라인"] = ", ".join(f"{l.get('line')}·v{l.get('version')}"
+                                     for l in d["lines"]) + " (라우터)"
+        p["추출 프롬프트"] = "라우터(라인별)"
+        sc = None
+    else:
+        p["추출 프롬프트"] = "원문 커스텀" if (d.get("doc_prompt") or "").strip() and not d.get("schema") \
+            else ("스키마 조립" if d.get("schema") else "코드 기본")
+        sc = d.get("schema")
     if isinstance(sc, dict):
         e, s = sc.get("entry") or {}, sc.get("solution") or {}
         p["스키마 진입점"] = f"{e.get('key', 'goal')} ({e.get('label') or ''})".strip()
@@ -1432,7 +1438,9 @@ def _run_settings_display(sj) -> str:
         parts.append(f"묶음{d['pack_tokens']}")
     if d.get("no_think"):
         parts.append("no-think")
-    if (d.get("doc_prompt") or "").strip() or (d.get("pack_prompt") or "").strip():
+    if d.get("lines"):
+        parts.append(f"라우터·{len(d['lines'])}라인")
+    elif (d.get("doc_prompt") or "").strip() or (d.get("pack_prompt") or "").strip():
         parts.append("엔티티:커스텀")
     dd = d.get("dedup")
     if isinstance(dd, dict) and dd.get("sim_high") is not None:
@@ -1462,6 +1470,13 @@ def admin_source_runs(sname: str):
             FROM doc_runs r
             WHERE r.source_name = :1
             ORDER BY r.started DESC""", [sname])
+        def _run_lines(sj):   # 라우터 run의 라인 후보 [{line, version}] — settings에서
+            import json as _json
+            try:
+                return [{"line": l.get("line"), "version": l.get("version")}
+                        for l in (_json.loads(sj or "{}").get("lines") or [])]
+            except (ValueError, TypeError, AttributeError):
+                return []
         rows = []
         for r in cur.fetchall():
             sj = _lob_str(r[5])   # CLOB 1회 읽기 — 요약·비교 파라미터 둘 다 여기서
@@ -1469,6 +1484,7 @@ def admin_source_runs(sname: str):
                          "chat_model": r[3], "embed_model": r[4],
                          "settings": _run_settings_display(sj),
                          "params": _run_compare_params(sj),
+                         "entity_lines": _run_lines(sj),
                          "active": r[6] == "Y", "started": r[7], "finished": r[8],
                          "done": int(r[9] or 0), "excluded": int(r[10] or 0),
                          "error": int(r[11] or 0),
@@ -1504,7 +1520,11 @@ def admin_source_runs(sname: str):
                 stale.append(f"도메인 v{row['domain_version']}→v{int(dmr[0])}")
             def _lv(ln, v):   # 라인·버전 표기 (미지정 run은 '미지정')
                 return f"{ln}·v{v}" if v is not None else "미지정"
-            if en and ev is not None and (row["entity_line"], row["entity_version"]) != (en, ev):
+            if row["entity_lines"]:   # 라우터 run — 활성 (라인, 버전)이 후보 집합 밖일 때만
+                if en and ev is not None and \
+                        (en, ev) not in {(l["line"], l["version"]) for l in row["entity_lines"]}:
+                    stale.append(f"①추출 라우터·{len(row['entity_lines'])}→{en}·v{ev}")
+            elif en and ev is not None and (row["entity_line"], row["entity_version"]) != (en, ev):
                 stale.append(f"①추출 {_lv(row['entity_line'], row['entity_version'])}→{en}·v{ev}")
             if cn and cv is not None and (row["cluster_line"], row["cluster_version"]) != (cn, cv):
                 stale.append(f"②병합 {_lv(row['cluster_line'], row['cluster_version'])}→{cn}·v{cv}")
@@ -1520,6 +1540,7 @@ class RunCreateIn(BaseModel):
     domain_version: int | None = None  # 미지정=현재 기본 버전
     entity_line: str = ""              # 엔티티 라인 이름 — 미지정=활성 라인
     entity_version: int | None = None  # 엔티티(추출 프롬프트) 버전 — 미지정=기본
+    entity_lines: list[dict] = []      # 라우터 후보 [{line, version}] — ≥2개면 라우터 run
     cluster_line: str = ""             # 클러스터 라인 이름 — 미지정=활성 라인
     cluster_version: int | None = None # 클러스터(dedup) 버전 — 미지정=기본
     join_version: int | None = None    # 테이블 조인 버전 — 미지정=기본
@@ -1551,16 +1572,30 @@ def admin_source_run_create(sname: str, inp: RunCreateIn):
         _ensure_mapping_versions(cur)
         _seed_mapping_v1(cur, sname)
         _ensure_data_versions(cur)
-        rid = create_run(cur, sname, domain_version=inp.domain_version,
-                         entity_line=inp.entity_line, entity_version=inp.entity_version,
-                         cluster_line=inp.cluster_line, cluster_version=inp.cluster_version,
-                         join_version=inp.join_version, data_version=inp.data_version,
-                         chat_model=inp.chat_model, embed_model=inp.embed_model,
-                         body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
-                         no_think=inp.no_think,
-                         dedup={"sim_high": inp.sim_high, "sim_threshold": inp.sim_threshold,
-                                "short_name_chars": inp.short_name_chars,
-                                "char_ratio": inp.char_ratio, "select_max": inp.select_max})
+        # 라우터 후보 정리 — 순서 보존 dedup, 1개면 스칼라로 접어 기존 단일 경로 보장
+        cands, seen = [], set()
+        for it in inp.entity_lines or []:
+            key = (str(it.get("line", "")).strip(), it.get("version"))
+            if key[0] and key[1] is not None and key not in seen:
+                seen.add(key)
+                cands.append({"line": key[0], "version": int(key[1])})
+        eline, ever = inp.entity_line, inp.entity_version
+        if len(cands) == 1:
+            eline, ever, cands = cands[0]["line"], cands[0]["version"], []
+        try:
+            rid = create_run(cur, sname, domain_version=inp.domain_version,
+                             entity_line=eline, entity_version=ever,
+                             entity_lines=cands or None,
+                             cluster_line=inp.cluster_line, cluster_version=inp.cluster_version,
+                             join_version=inp.join_version, data_version=inp.data_version,
+                             chat_model=inp.chat_model, embed_model=inp.embed_model,
+                             body_chars=inp.body_chars, pack_tokens=inp.pack_tokens,
+                             no_think=inp.no_think,
+                             dedup={"sim_high": inp.sim_high, "sim_threshold": inp.sim_threshold,
+                                    "short_name_chars": inp.short_name_chars,
+                                    "char_ratio": inp.char_ratio, "select_max": inp.select_max})
+        except ValueError as e:   # 없는 라인 후보 등 — 조용한 누락 대신 명시 에러
+            raise HTTPException(400, str(e))
     return {"ok": True, "run_id": rid,
             "note": "run 생성됨(비활성) — [이 run으로 구조화] 후 결과를 보고 활성 전환하세요"}
 

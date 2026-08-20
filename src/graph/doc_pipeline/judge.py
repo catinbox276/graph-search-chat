@@ -244,6 +244,57 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
         return {"_error": str(e)[:300]}
 
 
+ROUTER_BODY_CHARS = 1500  # 장르 분류는 문서 머리만 읽는다 — 추출 body_chars와 독립
+
+
+def build_router_prompt(cands: list) -> str:
+    """장르 라우터 프롬프트 — 라인 후보(descr + 진입점·추천단위 표시명)로 문서 분류.
+    cands: run 스냅샷 st["lines"] 항목들 ({line, descr, schema} 사용)."""
+    rows = []
+    for c in cands:
+        sc = c.get("schema") or {}
+        e, s = sc.get("entry") or {}, sc.get("solution") or {}
+        rows.append(f"- {c['line']}: {(c.get('descr') or '').strip() or '(설명 없음)'}"
+                    f" [진입점: {e.get('label') or e.get('key', '')}"
+                    f" · 추천단위: {s.get('label') or s.get('key', '')}]")
+    return f"""당신은 문서 분류기다. "{{domain}}" 도메인의 문서를 아래 추출 스키마 유형 중
+가장 잘 맞는 하나로 분류하라. 어느 유형에도 맞지 않으면 none (그 문서는 제외된다).
+
+[유형 후보]
+{chr(10).join(rows)}
+
+[문서]
+유형: {{kind}}
+제목: {{title}}
+본문(앞부분): {{body}}
+
+JSON 한 줄로만 답하라: {{"line": "<위 후보 이름 중 하나 또는 none>", "reason": "한 문장 근거"}}"""
+
+
+def classify_doc(domain: str, cands: list, kind: str, title: str, body: str,
+                 model: str = "", no_think: bool = True) -> dict:
+    """문서 1건 장르 분류 — {"line": 후보명 또는 ""(제외), "reason"} 반환.
+    후보명 검증을 여기서 끝낸다(환각·none → ""). DB를 만지지 않아 스레드 병렬 안전.
+    # ponytail: 문서당 1요청 — 라우터 토큰비용이 문제되면 judge_pack처럼 묶음 분류"""
+    prompt = _fill(build_router_prompt(cands),
+        domain=domain, kind=(kind or "").strip(), title=(title or "").strip()[:300],
+        body=_clip(body, ROUTER_BODY_CHARS))
+    try:
+        resp = llm.chat.completions.create(
+            model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
+            messages=[{"role": "user", "content": prompt}],
+            **_gen_kwargs(no_think, 150))
+        m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
+        d = _loads_lenient(m.group()) if m else {}
+        line = str(d.get("line", "")).strip()
+        if line not in {c["line"] for c in cands}:  # none·환각 라인명 → 제외로 정규화
+            line = ""
+        return {"line": line, "reason": str(d.get("reason", ""))[:300],
+                "_usage": _usage_of(resp)}
+    except Exception as e:  # 분류 1건 실패가 배치를 죽이지 않게
+        return {"_error": str(e)[:300]}
+
+
 def _usage_of(resp) -> tuple:
     """응답의 토큰 사용량 (prompt, completion) — 없으면 (0,0)."""
     u = getattr(resp, "usage", None)

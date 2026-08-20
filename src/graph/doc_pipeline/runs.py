@@ -210,10 +210,12 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
                entity_line="", entity_version=None,
                cluster_line="", cluster_version=None, join_version=None, data_version=None,
                chat_model="", embed_model="", body_chars=None,
-               pack_tokens=None, no_think=None, dedup=None) -> str:
+               pack_tokens=None, no_think=None, dedup=None, entity_lines=None) -> str:
     """새 조합 run 생성 (비활성) — 도메인 버전 + 엔티티·클러스터 (라인, 버전) + 매핑·데이터
     버전을 참조해 그 내용을 run에 스냅샷(재현성). 지정 안 한 항목은 현재/활성값.
     domain: 소스 등록 도메인 오버라이드 (프리셋 적용 — 빈값=소스 도메인).
+    entity_lines: 라우터 run — 라인 후보 ≥2개 [{line, version}]를 전부 스냅샷하고
+    문서마다 분류해 맞는 라인으로 추출 (스칼라 entity_line/entity_version은 NULL).
     구조화는 run 지정 실행으로, 반영은 activate_run으로 명시 전환."""
     ensure_runs(cur)
     versioning.ensure(cur, versioning.ENTITY_SPEC)    # name 컬럼·기본 라인 보장
@@ -226,33 +228,52 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
         st["pack_tokens"] = pack_tokens
     if no_think is not None:
         st["no_think"] = no_think
-    # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인).
-    # 원문(doc/pack) 없이 판정 지침(criteria)만 있으면 코드 스캐폴드에 주입해 조립 —
-    # 관리자는 지침만 만지고 출력 형식은 코드가 보장 (run은 조립 결과를 스냅샷).
-    en_name, ev = (entity_line or None), entity_version
-    if not (en_name and ev):
-        en_name, ev = versioning.active(cur, "entity_versions")
-    if en_name and ev is not None:
-        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, etypes, rtypes
+    from graph.doc_pipeline import judge as _j
+
+    def _jl(v):
+        try:
+            out = json.loads(_lob(v) or "[]")
+            return out if isinstance(out, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _line_snapshot(name, ver):
+        """(라인, 버전) → {schema, doc_prompt, pack_prompt, descr} — 조립 결과 스냅샷.
+        원문(doc/pack) override가 있으면 그것 우선, 없으면 지침(criteria)을 스캐폴드에 주입."""
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, descr, etypes, rtypes
                        FROM entity_versions
-                       WHERE name = :1 AND version = :2""", [en_name, ev])
+                       WHERE name = :1 AND version = :2""", [name, ver])
         r = cur.fetchone()
-        if r:
-            from graph.doc_pipeline import judge as _j
-            doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
-            def _jl(v):
-                try:
-                    out = json.loads(_lob(v) or "[]")
-                    return out if isinstance(out, list) else []
-                except (json.JSONDecodeError, TypeError):
-                    return []
-            etypes, rtypes = _jl(r[3]), _jl(r[4])
-            schema = _j.norm_schema(etypes, rtypes)
-            st["schema"] = schema   # 재현성 — 어떤 스키마(역할·키·설명)로 뽑았는지 스냅샷
-            built_doc, built_pack = _j.build_prompts(schema, crit)
-            # 고급 원문 override가 있으면 그것 우선 (스키마 지시는 원문에 직접 포함해야 함)
-            st["doc_prompt"] = (doc_p or "").strip() or built_doc
-            st["pack_prompt"] = (pack_p or "").strip() or built_pack
+        if not r:
+            return None
+        doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
+        schema = _j.norm_schema(_jl(r[4]), _jl(r[5]))
+        built_doc, built_pack = _j.build_prompts(schema, crit)
+        return {"schema": schema, "descr": r[3] or "",
+                "doc_prompt": (doc_p or "").strip() or built_doc,
+                "pack_prompt": (pack_p or "").strip() or built_pack}
+
+    if entity_lines and len(entity_lines) >= 2:
+        # 라우터 run — 후보 라인 전부 스냅샷. 없는 후보는 에러(조용한 누락 금지 —
+        # 분류 선택지가 소리 없이 줄면 결과 해석이 틀어진다). 스칼라 컬럼은 NULL.
+        en_name, ev = None, None
+        st["lines"] = []
+        for it in entity_lines:
+            snap = _line_snapshot(it["line"], int(it["version"]))
+            if not snap:
+                raise ValueError(f"엔티티 라인 없음: {it['line']}·v{it['version']}")
+            st["lines"].append({"line": it["line"], "version": int(it["version"]), **snap})
+    else:
+        # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인).
+        en_name, ev = (entity_line or None), entity_version
+        if not (en_name and ev):
+            en_name, ev = versioning.active(cur, "entity_versions")
+        if en_name and ev is not None:
+            snap = _line_snapshot(en_name, ev)
+            if snap:
+                st["schema"] = snap["schema"]   # 재현성 — 어떤 스키마로 뽑았는지 스냅샷
+                st["doc_prompt"] = snap["doc_prompt"]
+                st["pack_prompt"] = snap["pack_prompt"]
     # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
     cl_name, cv = (cluster_line or None), cluster_version
     if not (cl_name and cv):

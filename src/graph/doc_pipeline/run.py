@@ -15,7 +15,7 @@ from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
 from graph.graph_pipeline.merge import default_merge_cfg, upsert_entity, upsert_relation
 
 from . import runs
-from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, judge_pack
+from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, classify_doc, judge_pack
 
 
 def doc_ddl(cur):
@@ -44,7 +44,8 @@ def _load_settings(limit_override: int = 0) -> SimpleNamespace:
         pack_prompt=(st.get("struct_pack_prompt") or "").strip(),
         dedup=default_merge_cfg(),   # 클러스터(dedup) 기본 — run 지정 시 스냅샷으로 덮음
         schema=DEFAULT_SCHEMA,       # 추출 스키마 — run 지정 시 스냅샷으로 덮음
-        embed_model="")              # run별 임베딩 — 빈값=기본
+        embed_model="",              # run별 임베딩 — 빈값=기본
+        lines=None)                  # 라우터 run 라인 후보 — run 스냅샷만 채움
 
 
 def main():
@@ -121,6 +122,62 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
             for r in cur.fetchall()]
     if not docs:
         return 0
+    lines = getattr(s, "lines", None)
+    if lines:
+        # 라우터 run — 문서마다 저비용 분류(라인 후보 중 하나 또는 제외) 후
+        # 라인별 그룹으로 나눠 각 라인의 스키마·프롬프트로 판정·병합.
+        # 분류는 순수 계층(DB 없음)이라 스레드 병렬, 기록·병합은 직렬 유지.
+        with ThreadPoolExecutor(max_workers=s.conc) as rex:
+            verdicts = list(rex.map(
+                lambda d: classify_doc(domain, lines, d[2], d[1], d[3],
+                                       model=s.model, no_think=s.no_think), docs))
+        by_line, counts = {}, {}
+        for d, v in zip(docs, verdicts):
+            pt, ct = v.get("_usage", (0, 0))
+            stats["in_tok"] = stats.get("in_tok", 0) + pt
+            stats["out_tok"] = stats.get("out_tok", 0) + ct
+            if v.get("_error"):     # 분류 실패 = error (제외 아님 — 실패 재시도 대상)
+                status, note, key = "error", ("라우터: " + v["_error"])[:1000], "오류"
+            elif not v.get("line"):
+                status = "excluded"
+                note = ("라우터 제외: " + (v.get("reason") or "해당 유형 없음"))[:1000]
+                key = "제외"
+            else:
+                by_line.setdefault(v["line"], []).append(d)
+                counts[v["line"]] = counts.get(v["line"], 0) + 1
+                continue
+            counts[key] = counts.get(key, 0) + 1
+            if count:  # 활성 run만 corpus_docs 캐시 갱신
+                cur.execute("""UPDATE corpus_docs SET graph_status = :1, graph_note = :2
+                               WHERE source_name = :3 AND src_id = :4""",
+                            [status, note or None, source_name, d[0]])
+            if run_id != "-":
+                runs.record_result(cur, run_id, source_name, d[0], status, note)
+            stats[status] += 1
+        con.commit()
+        print(f"[라우터] {len(docs)}건 분류 → "
+              + " · ".join(f"{k} {n}" for k, n in counts.items()), flush=True)
+        for ln in lines:   # 스냅샷 순서대로 라인별 판정·병합
+            grp = by_line.get(ln["line"])
+            if not grp:
+                continue
+            if should_stop and should_stop():
+                break
+            _judge_merge(cur, con, source_name, domain, hint, grp, s, stats,
+                         run_id, count, should_stop,
+                         ln["schema"], ln["doc_prompt"], ln["pack_prompt"], ln["line"])
+        return len(docs)
+    return _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
+                        run_id, count, should_stop,
+                        s.schema, s.doc_prompt, s.pack_prompt)
+
+
+def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
+                 run_id, count, should_stop, schema, doc_prompt, pack_prompt,
+                 line_name=""):
+    """문서 목록을 주어진 스키마·프롬프트로 판정·병합 (기존 _structure_one 본문 추출).
+    단일 run은 1회 호출(동작 불변), 라우터 run은 라인 그룹마다 호출 —
+    mc/스키마 키를 지역 계산해 그룹 간 공유 상태가 없다. 처리 문서 수 반환."""
     # 묶음 구성: 입력 토큰 예산(문자 ≈ 토큰×2 근사)까지 문서를 묶는다.
     # 0이면 1건씩. 묶음당 상한 PACK_MAX_DOCS — 출력 길이·판정 품질 보호.
     if s.pack_tokens <= 0:
@@ -137,13 +194,14 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
             chars += dlen
         if pk:
             packs.append(pk)
-    print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작 "
+    tag = f" [라인 {line_name}]" if line_name else ""
+    print(f"[{source_name}] 도메인 '{domain}' 기준 {len(docs)}건 구조화 시작{tag} "
           f"(동시 {s.conc}, 묶음 {len(packs)}개)", flush=True)
     # 연속 파이프라인: 판정 요청(묶음)을 항상 conc건 서버에 걸어둔다 — 하나
     # 끝나면 즉시 다음 묶음 투입, 병합(직렬·메인 스레드)은 그 사이에 처리.
     # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
     mc = {**s.dedup, "embed_model": s.embed_model}  # run별 클러스터(dedup)·임베딩 설정
-    sc = s.schema if isinstance(getattr(s, "schema", None), dict) else DEFAULT_SCHEMA
+    sc = schema if isinstance(schema, dict) else DEFAULT_SCHEMA
     ek, sk = sc["entry"]["key"], sc["solution"]["key"]   # 스키마의 진입점·추천단위 키
     # 병합 LLM의 종류 라벨도 스키마 표시명을 따르게 (미지정 시 merge의 기본 LAYER_KIND)
     mc["layer_kind"] = {2: sc["entry"].get("label") or ek,
@@ -154,7 +212,7 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
     for p in packs[:s.conc]:
         next(it)
         pending.add(ex.submit(judge_pack, domain, hint, p, s.model, s.body_chars,
-                              s.no_think, s.doc_prompt, s.pack_prompt))
+                              s.no_think, doc_prompt, pack_prompt))
     while pending:
         finished, pending = wait(pending, return_when=FIRST_COMPLETED)
         for fut in finished:
@@ -162,10 +220,11 @@ def _structure_one(cur, con, source_name, domain, hint, budget, s, stats, run_id
             np_ = None if (should_stop and should_stop()) else next(it, None)
             if np_ is not None:
                 pending.add(ex.submit(judge_pack, domain, hint, np_, s.model,
-                                      s.body_chars, s.no_think, s.doc_prompt, s.pack_prompt))
+                                      s.body_chars, s.no_think, doc_prompt, pack_prompt))
             for (src_id, title, kind, body), j in fut.result():
                 ref = f"{source_name}:{src_id}"[:400]  # 문서 증거 (kind='doc')
-                attrs_out = {}   # 이 문서에서 뽑힌 속성들 — run별 결과 기록용
+                # 이 문서에서 뽑힌 속성들 — run별 결과 기록용 (라우터 run은 라인 귀속 포함)
+                attrs_out = {"_line": line_name} if line_name else {}
                 if not j or j.get("_error"):
                     status, note = "error", (j.get("_error") if j
                                              else "LLM 응답 파싱 실패")
@@ -260,6 +319,8 @@ def _run_overrides(cur, run_id: str, s):
     s.pack_prompt = st.get("pack_prompt", s.pack_prompt)
     if isinstance(st.get("schema"), dict):               # 추출 스키마 스냅샷 (역할·키·설명)
         s.schema = st["schema"]
+    if isinstance(st.get("lines"), list) and st["lines"]:  # 라우터 run — 라인별 스냅샷
+        s.lines = st["lines"]
     if isinstance(st.get("dedup"), dict):                # 클러스터(dedup) 스냅샷 적용
         s.dedup = {**s.dedup, **st["dedup"]}
     s.embed_model = (embed_model or "").strip() or s.embed_model   # run별 임베딩
