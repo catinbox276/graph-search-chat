@@ -19,11 +19,13 @@ DEFAULT_SCHEMA = {
 }
 
 
-def norm_schema(etypes) -> dict:
-    """etypes 행([{key,label,desc,role}]) → {entry, solution, attrs[]} 정규화.
-    role 없는 행=attr(하위호환), entry/solution 미정의=기본 goal/approach."""
+def norm_schema(etypes, rtypes=None) -> dict:
+    """etypes 행([{key,label,desc,role}]) + rtypes 행([{key,label,desc,source,target}])
+    → {entry, solution, attrs[], relations[]} 정규화.
+    role 없는 행=attr(하위호환), entry/solution 미정의=기본 goal/approach.
+    관계의 source/target은 스키마 타입 키에 실존해야 하며 아니면 그 행은 버린다."""
     out = {"entry": dict(DEFAULT_SCHEMA["entry"]),
-           "solution": dict(DEFAULT_SCHEMA["solution"]), "attrs": []}
+           "solution": dict(DEFAULT_SCHEMA["solution"]), "attrs": [], "relations": []}
     for t in (etypes or []):
         if not (isinstance(t, dict) and str(t.get("key", "")).strip()):
             continue
@@ -35,6 +37,17 @@ def norm_schema(etypes) -> dict:
             out[role] = row
         else:
             out["attrs"].append(row)
+    keys = {out["entry"]["key"], out["solution"]["key"], *(a["key"] for a in out["attrs"])}
+    for r in (rtypes or []):
+        if not (isinstance(r, dict) and str(r.get("key", "")).strip()):
+            continue
+        src, tgt = str(r.get("source", "")).strip(), str(r.get("target", "")).strip()
+        if src not in keys or tgt not in keys:
+            continue   # 시그니처가 스키마 밖 — 무효 행 폐기
+        out["relations"].append({"key": str(r["key"]).strip(),
+                                 "label": str(r.get("label", "")).strip() or str(r["key"]).strip(),
+                                 "desc": str(r.get("desc", "")).strip(),
+                                 "source": src, "target": tgt})
     return out
 
 
@@ -47,7 +60,31 @@ def _out_fields(schema: dict, brief: bool = False) -> str:
     for a in schema["attrs"]:
         lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
                      f' (문서에서 확인될 때만 — 없으면 이 키를 생략)"')
+    if schema.get("relations"):
+        lines.append(' "relations": [{"type": "<관계 타입 키>", '
+                     '"source": "<출발 엔티티 값>", "target": "<도착 엔티티 값>"}]')
     return ",\n".join(lines)
+
+
+def _rel_block(schema: dict) -> str:
+    """관계 타입 카탈로그 + 추출 규칙 — Graphiti extract_edges의 FACT_TYPES/RULES 포팅.
+    관계가 정의된 스키마에서만 프롬프트에 붙는다."""
+    rels = schema.get("relations") or []
+    if not rels:
+        return ""
+    tl = {t["key"]: (t.get("label") or t["key"])
+          for t in [schema["entry"], schema["solution"], *schema["attrs"]]}
+    lines = "\n".join(
+        f'- {r["key"]} ({r["label"]}): {r["desc"] or "(설명 없음)"}'
+        f' [시그니처: {tl.get(r["source"], r["source"])} → {tl.get(r["target"], r["target"])}]'
+        for r in rels)
+    return f"""
+
+관계 추출 규칙 — fits=true면 아래 관계 타입에 해당하는 사실만 "relations" 배열로 추출하라:
+{lines}
+- source/target에는 반드시 위 필드들로 이 문서에서 추출한 엔티티 값을 그대로 쓴다
+  (목록에 없는 이름을 쓰면 그 관계는 폐기된다). source와 target은 서로 달라야 한다.
+- 문서에 명시되었거나 명백히 함의된 관계만 — 추측 금지. 해당 없으면 빈 배열 []."""
 
 
 def _crit_block(criteria: str) -> str:
@@ -74,7 +111,7 @@ def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
 - {e["label"]}도 {s["label"]}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
-- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
+- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글{_rel_block(sc)}"""
 
 
 def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
@@ -94,7 +131,7 @@ def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
 {_out_fields(sc, brief=True)}}}, ...]
 
 fits=false로 판정할 것: 도메인과 무관 / {e["label"]}도 {s["label"]}도 없음 / 결말·결론 없음 / 내용이 빈약함.
-각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
+각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다.{_rel_block(sc)}"""
 
 
 def build_prompts(schema: dict | None = None, criteria: str = "") -> tuple:

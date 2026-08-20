@@ -53,8 +53,20 @@ def graph_data(request: Request):
              for r in cur.fetchall()]
     cur.execute("SELECT src, dst, raw_count FROM edges")
     edges = [{"src": r[0], "dst": r[1], "count": r[2]} for r in cur.fetchall()]
+    # 타입드 관계 (존재 기반) — 활성 run 스코핑으로만 노출
+    relations = []
+    try:
+        cur.execute("""SELECT er.src, er.dst, er.rtype, COUNT(DISTINCT er.ref)
+                       FROM entity_relations er
+                       WHERE er.run_id = '-'
+                          OR er.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')
+                       GROUP BY er.src, er.dst, er.rtype""")
+        relations = [{"src": r[0], "dst": r[1], "rtype": r[2], "count": r[3]}
+                     for r in cur.fetchall()]
+    except Exception:
+        pass   # 테이블 미생성(구버전 DB) — 관계는 부가 정보
     con.close()
-    return {"nodes": nodes, "edges": edges}
+    return {"nodes": nodes, "edges": edges, "relations": relations}
 
 
 @router.get("/graph/node/{nid}/evidence")

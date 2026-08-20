@@ -68,6 +68,23 @@ def ddl(cur):
                    WHERE table_name = 'NODES' AND column_name = 'ENTITY_TYPE'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE nodes ADD (entity_type VARCHAR2(100))")
+    # entity_relations — 타입드 관계 (Graphiti edge_type_map 포팅). 카운트 없는 존재 기반:
+    # 활성 여부는 조회 시 run 스코핑(doc_runs.active), 회수는 ref 단위 DELETE — ±1 기계 불필요.
+    cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'ENTITY_RELATIONS'")
+    if not cur.fetchone()[0]:
+        cur.execute("""CREATE TABLE entity_relations (
+            src     VARCHAR2(36) NOT NULL,
+            dst     VARCHAR2(36) NOT NULL,
+            rtype   VARCHAR2(64) NOT NULL,
+            ref     VARCHAR2(400) NOT NULL,
+            run_id  VARCHAR2(32) DEFAULT '-' NOT NULL,
+            created TIMESTAMP DEFAULT SYSTIMESTAMP,
+            CONSTRAINT entity_relations_pk PRIMARY KEY (src, dst, rtype, ref, run_id),
+            CONSTRAINT entity_relations_src_fk FOREIGN KEY (src)
+              REFERENCES nodes(id) ON DELETE CASCADE,
+            CONSTRAINT entity_relations_dst_fk FOREIGN KEY (dst)
+              REFERENCES nodes(id) ON DELETE CASCADE)""")
+        cur.execute("CREATE INDEX entity_relations_dst_ix ON entity_relations (dst)")
     ensure_domain_registry(cur)
     from graph.doc_pipeline.runs import ensure_runs  # 지연 import — 순환 방지
     ensure_runs(cur)

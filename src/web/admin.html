@@ -262,6 +262,17 @@
         <button type="button" class="ghost" id="veTypeAdd">＋ 속성 추가</button>
         <span class="hint" style="margin:0">속성(예: time·company)은 그래프 5층 노드로 진입점에 연결되고, run별 문서 결과에도 저장됩니다</span>
       </div>
+      <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
+        <div class="fgroup-t" style="margin-bottom:4px">관계 <small>— 위 엔티티들 사이의 타입드 관계. 문서에서 함께 추출되어 그래프에 점선으로 연결됩니다 (선택)</small></div>
+        <table class="vertable">
+          <thead><tr><th style="width:120px">키 (영문 권장)</th><th style="width:100px">표시명</th><th>설명 (추출 기준)</th><th style="width:130px">출발 타입</th><th style="width:130px">도착 타입</th><th style="width:36px"></th></tr></thead>
+          <tbody id="veRels"></tbody>
+        </table>
+        <div class="schedrow" style="margin:6px 0 0">
+          <button type="button" class="ghost" id="veRelAdd">＋ 관계 추가</button>
+          <span class="hint" style="margin:0">예: located(위치) — company → place. 출발·도착은 위 표의 엔티티 키 중에서 고릅니다</span>
+        </div>
+      </div>
     </div>
     <div class="fgroup">
       <div class="fgroup-t">2️⃣ 문서 포함/제외 기준 <small>— 어떤 문서를 지식으로 인정할지 + 뽑는 방식 지침 (선택, 빈값=코드 기본)</small></div>
@@ -1400,6 +1411,12 @@ function renderRunCompare(sel, mount, src) {
 
 // ── 문서 단위 run 비교 — 행=문서, 열=run (Langfuse compare 패턴) ──────────────
 const _DOC_ST = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류"};
+function fmtEnts(o) {   // 추출 엔티티 + _relations(관계) 한 줄 요약
+  return Object.entries(o || {}).map(([k, v]) =>
+    k === "_relations" && Array.isArray(v)
+      ? v.map(r => `${r.source} —${r.type}→ ${r.target}`).join(" · ")
+      : `${k}=${v}`).join(" · ");
+}
 async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
   mount.innerHTML = "⏳ 문서별 결과 조회 중…";
   const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/run-docs-compare` +
@@ -1442,7 +1459,7 @@ async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
       const cell = d.by_run[rid]; const td = document.createElement("td");
       if (!cell) td.textContent = "—";
       else {
-        const ents = Object.entries(cell.entities || {}).map(([k, v]) => `${k}=${v}`).join(" · ");
+        const ents = fmtEnts(cell.entities);
         td.textContent = (_DOC_ST[cell.status] || cell.status) +
           (cell.note ? ` · ${cell.note.slice(0, 60)}` : "") + (ents ? ` · ${ents}` : "");
         td.title = [cell.note, ents].filter(Boolean).join("\n");
@@ -1546,7 +1563,7 @@ async function loadRunDocs(src, status, page) {
   const LB = {done: "✅ 반영", excluded: "◽ 제외", error: "❌ 오류", pending: "⏳ 미처리"};
   j.docs.forEach(d => {
     const tr = document.createElement("tr");
-    const ents = Object.entries(d.entities || {}).map(([k, v]) => `${k}=${v}`).join(" · ");
+    const ents = fmtEnts(d.entities);
     [d.src_id, d.title, LB[d.status] || d.status, d.note, ents].forEach((v, i) => {
       const td = document.createElement("td"); td.textContent = v ?? "";
       if (i === 1 || i === 3 || i === 4) td.title = v ?? "";  // 잘린 값은 툴팁으로 전체
@@ -2215,9 +2232,58 @@ function veTypesSet(arr) {   // etypes → 폼 (entry/solution 없으면 기본�
       .forEach(t => veTypeRow(t.key, t.label, t.desc));
 }
 $("veTypeAdd").onclick = () => veTypeRow("", "", "");
+// ── 관계 행 편집기 — 출발/도착 select는 현재 폼의 엔티티 키로 (focus 시 재구성) ──
+function veSchemaKeys() {
+  const out = [];
+  if ($("veEkey").value.trim()) out.push([$("veEkey").value.trim(), $("veElabel").value.trim()]);
+  if ($("veSkey").value.trim()) out.push([$("veSkey").value.trim(), $("veSlabel").value.trim()]);
+  [...$("veTypes").querySelectorAll(".etyperow")].forEach(r => {
+    const [k, l] = r.querySelectorAll("input");
+    if (k.value.trim()) out.push([k.value.trim(), l.value.trim()]);
+  });
+  return out;
+}
+function _veRelSel(cur) {
+  const s = document.createElement("select");
+  s.style.cssText = "width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid var(--line);border-radius:6px";
+  const fill = () => {
+    const v = s.value || cur || "";
+    s.innerHTML = veSchemaKeys()
+      .map(([k, l]) => `<option value="${esc(k)}">${esc(k)}${l ? ` (${esc(l)})` : ""}</option>`).join("");
+    if (v && [...s.options].some(o => o.value === v)) s.value = v;
+  };
+  fill(); s.onfocus = fill;   // 엔티티 키가 바뀌어도 열 때 최신 반영
+  return s;
+}
+function veRelRow(key, label, desc, source, target) {
+  const tr = document.createElement("tr"); tr.className = "relrow";
+  const mk = (ph, val) => { const td = document.createElement("td");
+    const i = document.createElement("input"); i.placeholder = ph; i.value = val || "";
+    i.style.cssText = _VE_IN; td.appendChild(i); tr.appendChild(td); return i; };
+  mk("키 (예: located)", key); mk("표시명 (예: 위치)", label);
+  mk("무엇이 이 관계인지 (예: 회사가 위치한 장소)", desc);
+  const ts = document.createElement("td"); const ss = _veRelSel(source); ts.appendChild(ss); tr.appendChild(ts);
+  const td2 = document.createElement("td"); const tt = _veRelSel(target); td2.appendChild(tt); tr.appendChild(td2);
+  const cx = document.createElement("td");
+  const x = document.createElement("button"); x.type = "button"; x.className = "ghost"; x.textContent = "✕";
+  x.onclick = () => tr.remove(); cx.appendChild(x); tr.appendChild(cx);
+  $("veRels").appendChild(tr);
+}
+function veRelsRead() {
+  return [...$("veRels").querySelectorAll(".relrow")].map(r => {
+    const ins = r.querySelectorAll("input"), sels = r.querySelectorAll("select");
+    return {key: ins[0].value.trim(), label: ins[1].value.trim(), desc: ins[2].value.trim(),
+            source: sels[0].value, target: sels[1].value};
+  }).filter(t => t.key);
+}
+function veRelsSet(arr) {
+  $("veRels").innerHTML = "";
+  (arr || []).forEach(t => veRelRow(t.key, t.label, t.desc, t.source, t.target));
+}
+$("veRelAdd").onclick = () => veRelRow("", "", "", "", "");
 $("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 서버 조립 미리보기 (한글 주석)
   $("entScaffold").textContent = "조립 중…";
-  const pv = await entPreview($("veCrit").value, veTypesRead());
+  const pv = await entPreview($("veCrit").value, veTypesRead(), false, veRelsRead());
   $("entScaffold").textContent = pv
     ? "── 문서 판정 프롬프트 ──\n" + annotatePh(pv.doc_prompt) +
       "\n\n── 묶음 판정 프롬프트 ──\n" + annotatePh(pv.pack_prompt)
@@ -2225,7 +2291,7 @@ $("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 �
 };
 $("entPvFillBtn").onclick = async () => {   // 실제 문서 1건으로 채운 완성본 — 보자마자 아는 미리보기
   $("entScaffold").textContent = "실제 문서로 채우는 중…";
-  const pv = await entPreview($("veCrit").value, veTypesRead(), true);
+  const pv = await entPreview($("veCrit").value, veTypesRead(), true, veRelsRead());
   if (pv && pv.doc_prompt_filled) {
     $("entScaffold").textContent =
       `📄 샘플: [${pv.sample.source}:${pv.sample.src_id}] ${pv.sample.title}\n` +
@@ -2238,11 +2304,11 @@ function parseEtypes(v) {   // 백엔드는 etypes를 JSON 문자열로 반환
   try { const a = JSON.parse(v || "[]"); return Array.isArray(a) ? a : []; }
   catch { return []; }
 }
-async function entPreview(criteria, etypes, fillSample) {   // 서버 조립 — 프론트에 조립 로직 복제 금지
+async function entPreview(criteria, etypes, fillSample, rtypes) {   // 서버 조립 — 프론트에 조립 로직 복제 금지
   const r = await fetch("/admin/entity-preview", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({criteria: criteria || "", etypes: etypes || [],
-                          fill_sample: !!fillSample})});
+                          rtypes: rtypes || [], fill_sample: !!fillSample})});
   return r.ok ? r.json() : null;
 }
 // 자리표시자를 한글 주석으로 표시 (표시만 — 실제 템플릿은 불변)
@@ -2259,21 +2325,23 @@ const ENTITY_VM = {
   versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
   setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
   readForm: () => ({criteria: $("veCrit").value, descr: $("veDescr").value,
-    etypes: veTypesRead(),
+    etypes: veTypesRead(), rtypes: veRelsRead(),
     doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
   setForm: v => { $("veCrit").value = v.criteria || ""; $("veDescr").value = v.descr || "";
-    veTypesSet(parseEtypes(v.etypes));
+    veTypesSet(parseEtypes(v.etypes)); veRelsSet(parseEtypes(v.rtypes));
     $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
   summary: v => {
     const et = parseEtypes(v.etypes);
     const e = et.find(t => t.role === "entry"), s = et.find(t => t.role === "solution");
     const nAttr = et.filter(t => t.role !== "entry" && t.role !== "solution").length;
+    const nRel = parseEtypes(v.rtypes).length;
     return (v.doc_prompt ? "원문:커스텀(고급)"
             : `${(e && (e.label || e.key)) || "목표"}→${(s && (s.label || s.key)) || "접근법"}`) +
-           (nAttr ? `·속성${nAttr}종` : "") + (v.criteria ? "·지침" : "");
+           (nAttr ? `·속성${nAttr}종` : "") + (nRel ? `·관계${nRel}종` : "") +
+           (v.criteria ? "·지침" : "");
   },
   viewSections: async v => {   // 서버 조립 결과 = 실제 LLM에 가는 프롬프트
-    const et = parseEtypes(v.etypes);
+    const et = parseEtypes(v.etypes), rt = parseEtypes(v.rtypes);
     const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
     const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
     const attrs = et.filter(t => t.role !== "entry" && t.role !== "solution");
@@ -2282,13 +2350,18 @@ const ENTITY_VM = {
                    table: {head: ["역할", "키", "표시명", "설명 (추출 기준)", "저장"], badge0: true,
                            rows: [["진입점 🔗", e.key, e.label || "", e.desc || "", "그래프 2층"],
                                   ["추천단위 ⭐", s.key, s.label || "", s.desc || "", "그래프 3층"],
-                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 5층"])]}},
-                  {label: "판정 지침 (문서 포함/제외 기준)", text: v.criteria, empty: "(없음 — 코드 기본 기준)"}];
+                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 5층"])]}}];
+    if (rt.length)
+      secs.push({label: `관계 (${rt.length}종)`,
+                 table: {head: ["키", "표시명", "설명", "시그니처"], badge0: true,
+                         rows: rt.map(r => [r.key, r.label || "", r.desc || "",
+                                            `${r.source} → ${r.target}`])}});
+    secs.push({label: "판정 지침 (문서 포함/제외 기준)", text: v.criteria, empty: "(없음 — 코드 기본 기준)"});
     if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
       secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.doc_prompt), collapsed: true},
                 {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.pack_prompt), collapsed: true});
     } else {
-      const pv = await entPreview(v.criteria, et);
+      const pv = await entPreview(v.criteria, et, false, rt);
       secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과 — 〔자동 입력〕은 실행 때 채워짐)",
                  text: annotatePh(pv && pv.doc_prompt), collapsed: true},
                 {label: "적용될 묶음 프롬프트 (서버 조립 결과)",

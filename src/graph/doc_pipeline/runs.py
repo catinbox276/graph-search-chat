@@ -228,17 +228,21 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
     if not (en_name and ev):
         en_name, ev = versioning.active(cur, "entity_versions")
     if en_name and ev is not None:
-        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, etypes FROM entity_versions
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, etypes, rtypes
+                       FROM entity_versions
                        WHERE name = :1 AND version = :2""", [en_name, ev])
         r = cur.fetchone()
         if r:
             from graph.doc_pipeline import judge as _j
             doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
-            try:
-                etypes = json.loads(_lob(r[3]) or "[]")
-            except (json.JSONDecodeError, TypeError):
-                etypes = []
-            schema = _j.norm_schema(etypes)
+            def _jl(v):
+                try:
+                    out = json.loads(_lob(v) or "[]")
+                    return out if isinstance(out, list) else []
+                except (json.JSONDecodeError, TypeError):
+                    return []
+            etypes, rtypes = _jl(r[3]), _jl(r[4])
+            schema = _j.norm_schema(etypes, rtypes)
             st["schema"] = schema   # 재현성 — 어떤 스키마(역할·키·설명)로 뽑았는지 스냅샷
             built_doc, built_pack = _j.build_prompts(schema, crit)
             # 고급 원문 override가 있으면 그것 우선 (스키마 지시는 원문에 직접 포함해야 함)

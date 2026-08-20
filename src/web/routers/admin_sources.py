@@ -508,6 +508,7 @@ class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
     criteria: str = ""     # 판정 지침 — 코드 스캐폴드 슬롯에 주입 (기본 편집 통로)
     descr: str = ""        # 이 엔티티가 뭔지 사람용 설명 (프롬프트 미포함)
     etypes: list[dict] = []  # 추가 추출 타입 [{key, desc}] — 설명이 분류 기준
+    rtypes: list[dict] = []  # 관계 타입 [{key,label,desc,source,target}] — edge_type_map
     doc_prompt: str = ""   # 고급: 원문 전체 override (지정 시 criteria보다 우선)
     pack_prompt: str = ""
     note: str = ""
@@ -536,6 +537,31 @@ class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
             out.append({"key": key, "label": str(t.get("label", "")).strip(),
                         "desc": str(t.get("desc", "")).strip(), "role": role})
         return out
+
+    @model_validator(mode="after")
+    def _rtypes(self):
+        # 관계 타입 검증 — source/target이 스키마 타입 키에 실존해야 함
+        keys = {t["key"] for t in self.etypes}
+        if not any(t.get("role") == "entry" for t in self.etypes):
+            keys.add("goal")       # entry 미정의 = 기본 goal
+        if not any(t.get("role") == "solution" for t in self.etypes):
+            keys.add("approach")   # solution 미정의 = 기본 approach
+        out, seen = [], set()
+        for r in (self.rtypes or [])[:20]:   # 상한 20종 — 프롬프트 길이 보호
+            key = str(r.get("key", "")).strip()
+            if not key:
+                continue
+            if key in seen:
+                raise ValueError(f"관계 키 중복: {key}")
+            seen.add(key)
+            src = str(r.get("source", "")).strip()
+            tgt = str(r.get("target", "")).strip()
+            if src not in keys or tgt not in keys:
+                raise ValueError(f"관계 '{key}'의 출발/도착 타입이 스키마에 없습니다: {src}→{tgt}")
+            out.append({"key": key, "label": str(r.get("label", "")).strip(),
+                        "desc": str(r.get("desc", "")).strip(), "source": src, "target": tgt})
+        self.rtypes = out
+        return self
 
 
 class EntityLineIn(EntityVersionIn):     # 새 라인 (이름 포함)
@@ -591,6 +617,7 @@ def _entity_vals(inp) -> dict:
             "pack_prompt": inp.pack_prompt.strip() or None,
             "criteria": inp.criteria.strip() or None, "descr": inp.descr.strip() or None,
             "etypes": (json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None),
+            "rtypes": (json.dumps(inp.rtypes, ensure_ascii=False) if inp.rtypes else None),
             "note": inp.note.strip() or None}
 
 
@@ -638,6 +665,7 @@ def admin_entity_line_versions(name: str, page: int = 1):
 class EntityPreviewIn(BaseModel):
     criteria: str = ""
     etypes: list[dict] = []
+    rtypes: list[dict] = []
     fill_sample: bool = False   # true면 실제 문서 1건 + 도메인 지침으로 채운 완성본도 반환
 
 
@@ -646,11 +674,12 @@ def admin_entity_preview(inp: EntityPreviewIn):
     """스키마·지침으로 조립된 프롬프트 미리보기 — UI가 서버와 동일한 조립 결과를 표시
     (프론트에 조립 로직을 복제하지 않는다). fill_sample=true면 자리표시자를 실제
     값(도메인·지침·샘플 문서)으로 채운 완성본을 함께 준다 — '보자마자 아는' 미리보기."""
-    schema = _judge.norm_schema(inp.etypes)
+    schema = _judge.norm_schema(inp.etypes, inp.rtypes)
     d, p = _judge.build_prompts(schema, inp.criteria)
     out = {"doc_prompt": d, "pack_prompt": p,
            "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
-                    "attrs": [a["key"] for a in schema["attrs"]]}}
+                    "attrs": [a["key"] for a in schema["attrs"]],
+                    "relations": [r["key"] for r in schema["relations"]]}}
     if inp.fill_sample:
         with db_cursor() as cur:
             cur.execute("""SELECT s.source_name, s.domain, NVL(s.content_kind, ' '),
@@ -1118,6 +1147,7 @@ def _reset_source(cur, sname: str):
                                      weight = GREATEST(weight - 1, 0)
                     WHERE src IN ({src_marks}) AND dst IN ({dst_marks})""", binds)
         cur.execute("DELETE FROM node_evidence WHERE kind = 'doc' AND ref = :1", [ref])
+        cur.execute("DELETE FROM entity_relations WHERE ref = :1", [ref])   # 관계 회수 (존재 기반)
     cur.execute("""UPDATE corpus_docs SET graph_status = NULL, graph_note = NULL
                    WHERE source_name = :1 AND graph_status IS NOT NULL""", [sname])
     n = cur.rowcount
@@ -1756,14 +1786,15 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
         _ensure_entity_versions(cur)
         en, ev = versioning.active(cur, "entity_versions")
         if en and ev is not None:
-            cur.execute("""SELECT doc_prompt, criteria, etypes FROM entity_versions
+            cur.execute("""SELECT doc_prompt, criteria, etypes, rtypes FROM entity_versions
                            WHERE name = :1 AND version = :2""", [en, ev])
             r2 = cur.fetchone()
             if r2:
                 import json as _json
                 raw, crit = _lob_str(r2[0]), _lob_str(r2[1])
                 try:
-                    schema = _judge.norm_schema(_json.loads(_lob_str(r2[2]) or "[]"))
+                    schema = _judge.norm_schema(_json.loads(_lob_str(r2[2]) or "[]"),
+                                                _json.loads(_lob_str(r2[3]) or "[]"))
                 except (_json.JSONDecodeError, TypeError):
                     schema = _judge.DEFAULT_SCHEMA
                 doc_prompt = raw.strip() or _judge.build_doc_prompt(schema, crit)
@@ -1782,6 +1813,11 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
         j = doc_pipeline.judge_doc(domain, hint, kind, title, body,
                                    model=model, body_chars=body_chars, doc_prompt=doc_prompt)
         extracted = {label: str(j.get(k) or "") for k, label in keys if j.get(k)}
+        rj = j.get("relations")
+        if isinstance(rj, list) and rj:   # 관계는 한 줄 요약으로
+            extracted["관계"] = " · ".join(
+                f'{r.get("source")} —{r.get("type")}→ {r.get("target")}'
+                for r in rj[:10] if isinstance(r, dict))
         out.append({"src_id": src_id, "title": title.strip()[:120],
                     "fits": bool(j.get("fits")), "reason": j.get("reason") or
                     j.get("_error") or "파싱 실패",

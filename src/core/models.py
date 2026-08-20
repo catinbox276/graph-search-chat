@@ -130,6 +130,23 @@ class Edge(Base):
     __table_args__ = (Index("edges_dst_ix", "dst"),)  # FK 캐스케이드 삭제 성능
 
 
+class EntityRelation(Base):
+    """타입드 관계 (Graphiti edge_type_map 포팅) — 카운트 없는 존재 기반.
+    활성 여부는 run 스코핑으로 조회, 회수는 ref 단위 DELETE (±1 델타 기계 불필요)."""
+    __tablename__ = "entity_relations"
+    src = Column(String(36),
+                 ForeignKey("nodes.id", name="entity_relations_src_fk", ondelete="CASCADE"),
+                 primary_key=True)
+    dst = Column(String(36),
+                 ForeignKey("nodes.id", name="entity_relations_dst_fk", ondelete="CASCADE"),
+                 primary_key=True)
+    rtype = Column(String(64), primary_key=True)    # 관계 타입 키 (스키마 rtypes)
+    ref = Column(String(400), primary_key=True)     # 출처 문서 '소스명:원천id'
+    run_id = Column(String(32), primary_key=True, server_default=text("'-'"))
+    created = Column(TIMESTAMP, server_default=_NOW)
+    __table_args__ = (Index("entity_relations_dst_ix", "dst"),)
+
+
 class NodeEvidence(Base):
     __tablename__ = "node_evidence"
     node_id = Column(String(36),

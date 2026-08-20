@@ -65,6 +65,20 @@ def upsert_entity(cur, etype: str, value: str, parent_id: str,
     return node_id
 
 
+def upsert_relation(cur, rtype: str, src_id: str, dst_id: str,
+                    ref: str, run_id: str = "-"):
+    """타입드 관계 존재 기록 — (src,dst,rtype,ref,run_id) 멱등 MERGE.
+    카운트 없음: 활성 여부는 조회 시 run 스코핑, 회수는 ref 단위 DELETE."""
+    if src_id == dst_id:
+        return   # self-edge 폐기 (Graphiti 규칙)
+    cur.execute("""MERGE INTO entity_relations r USING dual
+                   ON (r.src = :s AND r.dst = :d AND r.rtype = :t
+                       AND r.ref = :f AND r.run_id = :rid)
+                   WHEN NOT MATCHED THEN INSERT (src, dst, rtype, ref, run_id)
+                   VALUES (:s, :d, :t, :f, :rid)""",
+                {"s": src_id, "d": dst_id, "t": rtype, "f": ref, "rid": run_id})
+
+
 def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:
     """임베딩 ≥HIGH 자동 병합 가드 — 짧은 이름 제외 + 문자 유사도 AND 조건.
     임베딩 코사인 단독 즉시 병합은 업계 관행에 없음 (Graphiti 3-gram Jaccard,
