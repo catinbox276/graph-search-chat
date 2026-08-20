@@ -667,9 +667,13 @@ async function loadDomains(selName) {
     vb.textContent = "👁";
     vb.onclick = ev => { ev.stopPropagation();   // 행 클릭(폼 로드·버전 펼침)과 분리
       openVerModal(`🏷 도메인 · ${d.name} (현재 기본)`, [
-        {label: "용도 · 우선순위", text: `${SCOPE_LABEL[d.scope] || d.scope} · 우선순위 ${d.priority}`},
-        {label: "도구 (쉼표구분)", text: d.tools},
-        {label: "추출 지침 (시스템 프롬프트에 주입)", text: d.extract_hint}]); };
+        {label: "정의",
+         table: {head: ["항목", "값"], badge0: true, rows: [
+           ["용도", SCOPE_LABEL[d.scope] || d.scope],
+           ["우선순위", `${d.priority} (낮을수록 먼저 대조)`],
+           ["도구", d.tools || "(없음)"]]}},
+        {label: "추출 지침 (시스템 프롬프트에 주입)", text: d.extract_hint,
+         empty: "(없음 — 도메인명 기준으로 판정)"}]); };
     cv.appendChild(vb); tr.appendChild(cv);
     tr.children[2].className = "tools";
     if (d.name === selName) tr.classList.add("sel");
@@ -730,9 +734,13 @@ async function renderDomainVersions(dname, page, td) {
     const vwb = document.createElement("button"); vwb.type = "button"; vwb.className = "ghost";
     vwb.textContent = "👁";
     vwb.onclick = () => openVerModal(`🏷 도메인 · ${dname} v${v.version}`, [
-      {label: "용도 · 우선순위", text: `${SCOPE_LABEL[v.scope] || v.scope} · 우선순위 ${v.priority}`},
-      {label: "도구 (쉼표구분)", text: v.tools},
-      {label: "추출 지침 (시스템 프롬프트에 주입)", text: v.extract_hint}]);
+      {label: "정의",
+       table: {head: ["항목", "값"], badge0: true, rows: [
+         ["용도", SCOPE_LABEL[v.scope] || v.scope],
+         ["우선순위", `${v.priority} (낮을수록 먼저 대조)`],
+         ["도구", v.tools || "(없음)"]]}},
+      {label: "추출 지침 (시스템 프롬프트에 주입)", text: v.extract_hint,
+       empty: "(없음 — 도메인명 기준으로 판정)"}]);
     cvw.appendChild(vwb); vr.appendChild(cvw);
     if (v.is_default) vr.classList.add("sel");
     tb.appendChild(vr);
@@ -1729,15 +1737,58 @@ $("evModal").addEventListener("click", ev => {   // 배경 클릭 = 닫기
 // 버전 상세 뷰어 — 도메인·엔티티·클러스터 공용 (evModal 재사용).
 // sections: [{label, text}] — text는 <pre>에 textContent(전문 그대로, XSS 안전).
 function openVerModal(title, sections) {
+  // 섹션 타입: {label, text} 텍스트 · {label, table:{head,rows,badge0}} 표(badge0=첫 컬럼 배지)
+  //           · {label, text, collapsed:true} 긴 내용 접힘 — 전부 textContent(XSS 안전)
   $("evmTitle").textContent = title;
   const box = $("evmBody"); box.innerHTML = "";
   (sections || []).forEach(s => {
     const sec = document.createElement("div"); sec.className = "evsec";
-    const h = document.createElement("div"); h.className = "evseclabel req";
-    h.textContent = s.label;
-    const pre = document.createElement("pre");
-    pre.textContent = (s.text || "").trim() || "(빈 값 — 코드 기본)";
-    sec.append(h, pre); box.appendChild(sec);
+    if (s.table) {
+      const h = document.createElement("div"); h.className = "evseclabel req";
+      h.textContent = s.label; sec.appendChild(h);
+      const t = document.createElement("table"); t.className = "vertable";
+      t.style.cssText = "border:1px solid var(--line);border-radius:8px;border-collapse:separate;border-spacing:0";
+      const thead = document.createElement("thead"); const hr = document.createElement("tr");
+      (s.table.head || []).forEach(x => { const th = document.createElement("th"); th.textContent = x; hr.appendChild(th); });
+      thead.appendChild(hr); t.appendChild(thead);
+      const tb = document.createElement("tbody");
+      (s.table.rows || []).forEach(row => {
+        const tr = document.createElement("tr");
+        row.forEach((c, i) => {
+          const td = document.createElement("td");
+          if (i === 0 && s.table.badge0) {   // 첫 컬럼 = 배지 스타일
+            const b = document.createElement("span");
+            b.style.cssText = "display:inline-block;padding:1px 8px;border:1px solid var(--line);border-radius:99px;font-size:.72rem;white-space:nowrap";
+            b.textContent = c; td.appendChild(b);
+          } else td.textContent = c ?? "";
+          tr.appendChild(td);
+        });
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb); sec.appendChild(t);
+    } else if (s.collapsed) {
+      const dt = document.createElement("details");
+      const sm = document.createElement("summary");
+      sm.className = "evseclabel req"; sm.style.cursor = "pointer";
+      sm.textContent = s.label + " — 펼쳐보기";
+      const pre = document.createElement("pre");
+      pre.textContent = (s.text || "").trim() || "(빈 값 — 코드 기본)";
+      dt.append(sm, pre); sec.appendChild(dt);
+    } else {
+      const h = document.createElement("div"); h.className = "evseclabel req";
+      h.textContent = s.label; sec.appendChild(h);
+      const v = (s.text || "").trim();
+      if (v.includes("\n")) {   // 여러 줄 = pre, 한 줄 = 컴팩트 행
+        const pre = document.createElement("pre"); pre.textContent = v; sec.appendChild(pre);
+      } else {
+        const p = document.createElement("div");
+        p.style.cssText = "font-size:.8rem;padding:6px 10px;border:1px solid var(--line);border-radius:8px";
+        if (!v) { p.style.color = "var(--mut)"; }
+        p.textContent = v || (s.empty || "(빈 값 — 코드 기본)");
+        sec.appendChild(p);
+      }
+    }
+    box.appendChild(sec);
   });
   $("evModal").showModal();
 }
@@ -1975,22 +2026,22 @@ const ENTITY_VM = {
     const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
     const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
     const attrs = et.filter(t => t.role !== "entry" && t.role !== "solution");
-    const fmt = t => `${t.key} (${t.label || t.key}): ${t.desc || "(설명 없음)"}`;
-    const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr},
-                  {label: `스키마 (진입점·추천단위 + 속성 ${attrs.length}종)`,
-                   text: [`진입점 🔗 ${fmt(e)} → 그래프 2층`,
-                          `추천단위 ⭐ ${fmt(s)} → 그래프 3층`,
-                          ...attrs.map(t => `속성 ✏ ${fmt(t)} → 그래프 5층`)].join("\n")},
-                  {label: "판정 지침 (관리자 편집분)", text: v.criteria}];
+    const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr, empty: "(설명 없음)"},
+                  {label: `스키마 — 뽑아낼 엔티티 (${2 + attrs.length}종)`,
+                   table: {head: ["역할", "키", "표시명", "설명 (추출 기준)", "저장"], badge0: true,
+                           rows: [["진입점 🔗", e.key, e.label || "", e.desc || "", "그래프 2층"],
+                                  ["추천단위 ⭐", s.key, s.label || "", s.desc || "", "그래프 3층"],
+                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 5층"])]}},
+                  {label: "판정 지침 (문서 포함/제외 기준)", text: v.criteria, empty: "(없음 — 코드 기본 기준)"}];
     if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
-      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt},
-                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt});
+      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: v.doc_prompt, collapsed: true},
+                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: v.pack_prompt, collapsed: true});
     } else {
       const pv = await entPreview(v.criteria, et);
-      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과)", text: pv && pv.doc_prompt},
-                {label: "적용될 묶음 프롬프트 (서버 조립 결과)", text: pv && pv.pack_prompt});
+      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과)", text: pv && pv.doc_prompt, collapsed: true},
+                {label: "적용될 묶음 프롬프트 (서버 조립 결과)", text: pv && pv.pack_prompt, collapsed: true});
     }
-    secs.push({label: "메모", text: v.note});
+    secs.push({label: "메모", text: v.note, empty: "(없음)"});
     return secs;
   },
   validate: () => {
@@ -2013,9 +2064,14 @@ const CLUSTER_VM = {
   summary: v => `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}` +
     (v.select_prompt ? "·프롬프트:커스텀" : ""),
   viewSections: v => [
-    {label: "병합 규칙", text: `자동병합 임계 ≥ ${v.sim_high} (문자 가드: 이름 ${v.short_name_chars}자 이상 + 문자 유사도 ≥ ${v.char_ratio})\n후보 하한 ≥ ${v.sim_threshold} · LLM 후보 수 최대 ${v.select_max}`},
-    {label: "LLM 후보선택 프롬프트 (select_prompt)", text: v.select_prompt},
-    {label: "메모", text: v.note}],
+    {label: "병합 규칙 (dedup 임계값)",
+     table: {head: ["규칙", "값", "뜻"], badge0: true, rows: [
+       ["자동병합 ≥", String(v.sim_high), "이 유사도 이상 + 문자 가드 통과 = LLM 없이 즉시 병합"],
+       ["문자 가드", `${v.short_name_chars}자 · ${v.char_ratio}`, "이름이 이보다 짧거나 문자 유사도 미달이면 LLM 판정으로"],
+       ["후보 하한 ≥", String(v.sim_threshold), "이 유사도 이상만 병합 후보로 수집"],
+       ["LLM 후보 수", String(v.select_max), "후보선택 LLM에 보여줄 최대 후보 개수"]]}},
+    {label: "LLM 후보선택 프롬프트 (select_prompt)", text: v.select_prompt, collapsed: true},
+    {label: "메모", text: v.note, empty: "(없음)"}],
   validate: () => {
     const sp = $("vcSelPrompt").value.trim();
     if (sp && (!sp.includes("{name}") || !sp.includes("{cands}"))) {
