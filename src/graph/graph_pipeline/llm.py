@@ -12,9 +12,19 @@ from openai import OpenAI
 from core import config
 
 llm = OpenAI(base_url=config.CHAT_URL, api_key=config.MODEL_API_KEY,
-             timeout=config.LLM_TIMEOUT)   # 멈춘 요청이 파이프라인을 무한 대기시키지 않게
+             timeout=config.LLM_TIMEOUT)   # .env 폴백 클라이언트 (DB 미기동·레지스트리 밖)
 # 임베딩 클라이언트는 model_registry.embedding_client()가 해석 (레지스트리 우선)
 CHAT_MODEL = config.CHAT_MODEL
+
+
+def client_for(name: str = ""):
+    """이 모델의 서빙 주소·개발 키로 해석된 채팅 클라이언트 (모델별 호스트·키 지원).
+    레지스트리에 없거나 DB 미기동이면 .env 폴백 클라이언트(llm)."""
+    try:
+        from core import model_registry
+        return model_registry.chat_client(name)[0]
+    except Exception:
+        return llm
 
 JUDGE_PROMPT = """세션을 판정하고 지식을 추출하라. JSON만 출력.
 
@@ -74,7 +84,7 @@ def fill_prompt(tmpl: str, **kw) -> str:
 
 def _llm_json(prompt: str) -> dict:
     """LLM 호출 후 응답에서 JSON 오브젝트 1개를 파싱 (실패 시 빈 dict)."""
-    resp = llm.chat.completions.create(
+    resp = client_for(CHAT_MODEL).chat.completions.create(
         model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
         messages=[{"role": "user", "content": prompt}])
     m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)
@@ -89,7 +99,7 @@ def llm_same(kind: str, a: str, b: str) -> bool:
     kw = ({"extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
            "max_tokens": 80}
           if config.LLM_AUX_NO_THINK else {})  # 이지선다 — 생각 출력 불필요 (config 참조)
-    resp = llm.chat.completions.create(
+    resp = client_for(CHAT_MODEL).chat.completions.create(
         model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
         messages=[{"role": "user", "content":
                    f'두 문구가 같은 {kind}를 가리키면 true. '
@@ -125,7 +135,7 @@ def llm_select(kind: str, name: str, cands: list, max_n: int = 0,
             msg = prompt.format(kind=kind, name=name, cands=lines)
         except (KeyError, IndexError, ValueError):
             msg = default_msg
-    resp = llm.chat.completions.create(
+    resp = client_for(CHAT_MODEL).chat.completions.create(
         model=CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
         messages=[{"role": "user", "content": msg}], **kw)
     m = re.search(r"\{.*\}", resp.choices[0].message.content, re.S)

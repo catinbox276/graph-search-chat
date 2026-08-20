@@ -29,26 +29,30 @@ class ModelAddIn(BaseModel):
     name: str            # served-model-name (호스트 /v1/models 값 그대로)
     base_url: str = ""   # 이 모델의 서빙 주소 — 빈값이면 역할별 .env(CHAT/EMBED/RERANK_URL)
     enabled: bool = True
+    # 이 모델의 개발 키 — None(미전송)=기존 키 유지, ""=삭제(.env 전역 키 폴백), 그 외=설정
+    api_key: str | None = None
 
 
 @router.post("/admin/models/add")
 def admin_model_add(inp: ModelAddIn, request: Request):
-    """관리자: 모델 수동 등록/수정 (사내 vLLM처럼 sync가 못 닿는 호스트용)."""
+    """관리자: 모델 수동 등록/수정 (사내 vLLM처럼 sync가 못 닿는 호스트용).
+    모델별 서빙 주소·개발 키를 여기서 설정 — 지정하면 그 모델 호출에 그 키를 쓴다."""
     check_admin(request)
     if inp.base_url and not inp.base_url.lower().startswith(("http://", "https://")):
         raise HTTPException(400, "base_url은 http(s):// 주소여야 합니다")
     try:
         model_registry.add_model(inp.kind, inp.name.strip(), inp.base_url.strip(),
-                                 inp.enabled)
+                                 inp.enabled, inp.api_key)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    clear_agents()  # LLM 목록이 바뀌었을 수 있음
+    clear_agents()  # LLM 목록·주소·키가 바뀌었을 수 있음 → 다음 질문부터 재조립
     return {"ok": True}
 
 
 class SyncIn(BaseModel):
     base_url: str = ""   # 지정 시 그 호스트만 조회, 빈값이면 설정된 채팅·임베딩·리랭커 호스트 전부
     test: bool = True    # 기본: 모델마다 실제 호출로 종류 판정(동작 기준). False면 이름만(빠름)
+    api_key: str = ""    # 이 호스트의 개발 키 — 조회·판정에 쓰고 등록 모델에도 저장(빈값=.env)
 
 
 @router.post("/admin/models/sync")
@@ -59,7 +63,8 @@ def admin_sync(inp: SyncIn, request: Request):
     check_admin(request)
     if inp.base_url and not inp.base_url.lower().startswith(("http://", "https://")):
         raise HTTPException(400, "base_url은 http(s):// 주소여야 합니다")
-    return model_registry.sync_from_serving(inp.base_url.strip(), inp.test)
+    return model_registry.sync_from_serving(inp.base_url.strip(), inp.test,
+                                            (inp.api_key or "").strip())
 
 
 class SelectIn(BaseModel):

@@ -187,6 +187,7 @@ class ModelRegistry(Base):
     enabled = Column(CHAR(1), server_default=text("'Y'"))
     is_default = Column(CHAR(1), server_default=text("'N'"))
     base_url = Column(String(500))                 # 빈값=역할별 .env 폴백
+    api_key = Column(String(400))                  # 모델별 개발 키 — 빈값=.env MODEL_API_KEY
     registered = Column(TIMESTAMP, server_default=_NOW)
 
 

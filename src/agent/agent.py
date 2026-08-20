@@ -226,10 +226,14 @@ async def build_agent(checkpointer=None, model_name=None):
         eb["chat_template_kwargs"] = {"enable_thinking": False}
     if ag["block_hanzi"]:
         eb["guided_regex"] = HANZI_BLOCK_RE
+    # 모델별 서빙 주소·개발 키 해석 (레지스트리 우선, 없으면 .env 폴백) —
+    # 모델마다 호스트·키가 다른 사내 게이트웨이 환경 지원
+    from core import model_registry
+    url, resolved, key = model_registry.chat_endpoint(model_name or MODEL_NAME)
     model = ChatOpenAI(
-        base_url=MODEL_URL,
-        api_key=config.MODEL_API_KEY,
-        model=model_name or MODEL_NAME,
+        base_url=url,
+        api_key=key,
+        model=resolved,
         temperature=config.LLM_TEMPERATURE,
         **({"extra_body": eb} if eb else {}),
     )

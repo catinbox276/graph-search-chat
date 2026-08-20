@@ -553,16 +553,22 @@
 
 <section class="card" id="sec-models">
   <h3>모델 레지스트리 <small>LLM·임베딩·리랭커 등록과 역할별 선택</small></h3>
-  <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th>기본</th><th>활성</th><th></th></tr></thead>
+  <table id="mlist"><thead><tr><th>종류</th><th>모델명</th><th>서빙 주소 (빈값=역할별 .env)</th><th title="이 모델 전용 개발 키가 설정되어 있는지 — 값은 보관만 하고 노출하지 않습니다">키</th><th>기본</th><th>활성</th><th></th></tr></thead>
     <tbody></tbody></table>
   <form id="mform">
     <select id="mkind"><option value="llm">llm</option><option value="embedding">embedding</option><option value="reranker">reranker</option></select>
     <input id="mname" placeholder="served-model-name (호스트 /v1/models 값 그대로)" required style="flex:1;min-width:220px">
     <input id="murl" placeholder="base_url (예: http://vllm-embed:8000/v1 — 빈값=역할별 .env)" style="flex:1;min-width:260px">
+    <input id="mkey" type="password" autocomplete="off" placeholder="개발 키 (빈값=변경 없음 / '-'=삭제해 전역 키 사용)" style="flex:1;min-width:220px"
+           title="이 모델 호출에 쓸 API 키. 비워 두면 기존 값 유지(신규는 전역 .env 키), '-' 한 글자만 넣으면 저장된 키를 지웁니다">
     <button id="madd">등록/수정</button>
     <button type="button" class="ghost" id="msync" title="설정된 서빙 호스트들(또는 위 base_url 칸에 주소를 넣으면 그 호스트)의 /v1/models를 읽어, 각 모델을 실제 호출(임베딩/채팅)로 종류 판정해 base_url과 함께 등록. 이름이 아니라 동작으로 구분 — 모델 많으면 수십 초. 접근 불가 모델은 이름 폴백">서빙 동기화</button>
     <span class="hint" id="mmsg" style="margin:0;white-space:pre-line;flex-basis:100%"></span>
   </form>
+  <p class="hint"><b>모델별 환경 설정</b> — 서빙 주소·모델명·개발 키를 모델마다 따로 둘 수 있습니다
+     (호스트마다 키가 다른 사내 게이트웨이 지원). 빈값이면 .env 전역값(<code>CHAT_URL</code>/
+     <code>EMBED_URL</code>/<code>MODEL_API_KEY</code>) 폴백. 채팅·전처리 판정·라우터·임베딩이
+     전부 이 값으로 호출합니다. 키는 저장 후 조회되지 않습니다(설정 여부만 🔑로 표시).</p>
   <p class="hint">역할별 사용처 — <b>채팅 LLM</b>: llm 기본값(사용자가 채팅에서 바꿀 수 있음) ·
      <b>전처리 LLM</b>: 아래 전처리 설정의 '전처리 모델' · <b>임베딩</b>: embedding 기본값
      (검색·청크 백필·dedup·경로 진입점 전역 — 바꾸면 백필 배치가 자동 재임베딩, 재백필 중 lexical이 받침) ·
@@ -1734,6 +1740,10 @@ async function loadModels() {
       if (i >= 1) td.className = "mono";
       tr.appendChild(td);
     });
+    const tdK = document.createElement("td");   // 키 설정 여부만 (값은 서버가 안 줌)
+    tdK.textContent = m.has_key ? "🔑" : "—";
+    tdK.title = m.has_key ? "이 모델 전용 개발 키 설정됨" : "전역 .env 키 사용";
+    tr.appendChild(tdK);
     const tdD = document.createElement("td");
     tdD.textContent = m.default ? "★ 기본" : "";
     const tdE = document.createElement("td");
@@ -1756,26 +1766,35 @@ async function loadModels() {
     tr.onclick = (e) => {  // 행 클릭 = 폼에 채워 수정 (버튼 클릭은 제외)
       if (e.target.tagName === "BUTTON") return;
       $("mkind").value = m.kind; $("mname").value = m.name; $("murl").value = m.base_url;
+      $("mkey").value = "";   // 키는 조회 불가 — 비우면 기존 값 유지
+      $("mkey").placeholder = m.has_key ? "키 설정됨 — 비우면 유지 / '-'=삭제"
+                                       : "개발 키 (빈값=전역 .env 키 사용)";
     };
     tb.appendChild(tr);
   });
 }
 $("mform").onsubmit = async (e) => {
   e.preventDefault();
+  const kv = $("mkey").value;   // "" = 변경 없음(미전송), "-" = 삭제(전역 키로), 그 외 = 설정
+  const body = {kind: $("mkind").value, name: $("mname").value.trim(),
+                base_url: $("murl").value.trim()};
+  if (kv.trim()) body.api_key = kv.trim() === "-" ? "" : kv.trim();
   const r = await fetch("/admin/models/add", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({kind: $("mkind").value, name: $("mname").value.trim(),
-                          base_url: $("murl").value.trim()})});
+    body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
-  mmsg(r.ok ? "✓ 등록됨" : `실패 — ${j.detail || r.status}`);
+  mmsg(r.ok ? "✓ 등록됨" + (kv.trim() ? (kv.trim() === "-" ? " (키 삭제 — 전역 키 사용)" : " (모델 전용 키 저장)") : "")
+            : `실패 — ${j.detail || r.status}`);
+  $("mkey").value = "";
   loadModels(); loadAgentSettings();
 };
 $("msync").onclick = async () => {
-  const url = $("murl").value.trim();
-  mmsg((url || "설정된 호스트 전부") + " 동기화·종류 판정 중…(실제 호출, 모델 많으면 수십 초)");
+  const url = $("murl").value.trim(), kv = $("mkey").value.trim();
+  mmsg((url || "설정된 호스트 전부") + " 동기화·종류 판정 중…(실제 호출, 모델 많으면 수십 초)"
+       + (kv && kv !== "-" ? " · 입력한 개발 키로 조회·저장" : ""));
   const r = await fetch("/admin/models/sync", {
     method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({base_url: url})});
+    body: JSON.stringify({base_url: url, api_key: kv === "-" ? "" : kv})});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { mmsg(`실패 (${r.status}) — ${j.detail || ""}`); return; }
   const det = (j.models || []).map(m => `${m.kind}:${m.name}(${m.status}·${m.why})`).join(" / ");

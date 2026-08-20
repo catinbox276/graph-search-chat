@@ -65,10 +65,15 @@ _client = None
 
 
 def _chat():
+    """라우터용 클라이언트 — ROUTER_URL 지정 시 그 엔드포인트(전역 키),
+    비면 라우터 모델의 레지스트리 주소·개발 키로 해석 (모델별 호스트·키 지원)."""
     global _client
-    if _client is None:  # ROUTER_URL 지정 시 그 엔드포인트, 비면 CHAT_URL 재사용
-        _client = OpenAI(base_url=config.ROUTER_URL or config.CHAT_URL,
-                         api_key=config.MODEL_API_KEY, timeout=config.LLM_TIMEOUT)
+    if _client is None:
+        if config.ROUTER_URL:
+            _client = OpenAI(base_url=config.ROUTER_URL,
+                             api_key=config.MODEL_API_KEY, timeout=config.LLM_TIMEOUT)
+        else:
+            _client = model_registry.chat_client(_model())[0]
     return _client
 
 

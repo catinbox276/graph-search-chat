@@ -25,7 +25,8 @@ EMBED_URL_RESOLVED, EMB_MODEL = model_registry.embedding_endpoint()  # 레지스
 BATCH = config.EMBED_BATCH
 CONCURRENCY = config.EMBED_CONCURRENCY  # 임베딩 서빙 동시 요청 수
 
-llm = AsyncOpenAI(base_url=EMBED_URL_RESOLVED, api_key=config.MODEL_API_KEY)
+llm = AsyncOpenAI(base_url=EMBED_URL_RESOLVED,   # 모델별 개발 키 (빈값=.env 전역)
+                  api_key=model_registry.api_key_for("embedding", EMB_MODEL))
 
 
 async def main():

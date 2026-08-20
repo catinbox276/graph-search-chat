@@ -7,7 +7,7 @@ import json
 import re
 
 from core import config
-from graph.graph_pipeline import CHAT_MODEL, llm
+from graph.graph_pipeline import CHAT_MODEL, client_for
 
 # ── 추출 스키마 — 관리자가 계층 체인·태그·속성·관계를 정의, 프롬프트는 여기서 생성 ──
 # v2 계층 체인: chain 행(배열 순서=체인 순서)이 그래프 2층부터 순서대로 저장층이 된다.
@@ -303,7 +303,7 @@ def judge_pack(domain: str, hint: str, pack: list, model: str = "",
         docs="\n\n".join(blocks))
     by_id, pack_usage = {}, (0, 0)
     try:
-        resp = llm.chat.completions.create(
+        resp = client_for(model or CHAT_MODEL).chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 1600))
@@ -337,7 +337,7 @@ def judge_doc(domain: str, hint: str, kind: str, title: str, body: str,
         kind=(kind or "").strip(), title=(title or "").strip()[:300],
         body=_clip(body, body_chars))
     try:
-        resp = llm.chat.completions.create(
+        resp = client_for(model or CHAT_MODEL).chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 800))  # 속성·관계 붙은 스키마의 출력 절단 방지 (400은 잘림 실측)
@@ -387,7 +387,7 @@ def classify_doc(domain: str, cands: list, kind: str, title: str, body: str,
         domain=domain, kind=(kind or "").strip(), title=(title or "").strip()[:300],
         body=_clip(body, ROUTER_BODY_CHARS))
     try:
-        resp = llm.chat.completions.create(
+        resp = client_for(model or CHAT_MODEL).chat.completions.create(
             model=model or CHAT_MODEL, temperature=config.LLM_TEMPERATURE,
             messages=[{"role": "user", "content": prompt}],
             **_gen_kwargs(no_think, 150))

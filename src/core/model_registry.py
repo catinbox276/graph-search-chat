@@ -17,6 +17,17 @@ from core.models import ModelRegistry
 _EMBED_HINTS = ("embed", "bge", "gte", "e5", "nomic", "jina", "mxbai", "minilm", "stella")
 
 
+def _lookup(kind: str, name: str) -> tuple:
+    """레지스트리 행의 (base_url, api_key) — 없거나 DB 미기동이면 (None, None).
+    모델별 서빙 주소·개발 키 해석의 단일 지점 (환경변수는 폴백)."""
+    try:
+        with db.session() as s:
+            r = s.query(ModelRegistry).filter_by(kind=kind, name=name).first()
+            return (r.base_url, r.api_key) if r else (None, None)
+    except Exception:
+        return (None, None)   # DB 미기동 시에도 .env 폴백으로 동작
+
+
 def _classify(name: str) -> str:
     n = name.lower()
     if "rerank" in n:                       # bge-reranker처럼 embed 힌트와 겹치므로 먼저
@@ -74,13 +85,14 @@ def _payload_ok(r, key: str) -> bool:
     return not j.get("error") and bool(j.get(key))
 
 
-def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
+def _probe_kind(base_url: str, name: str, timeout: float = 6.0,
+                api_key: str = "") -> tuple:
     """모델 능력을 실제 호출로 판정 — (kind, 근거). 상태코드가 아니라 응답 본문으로.
     순서 중요: 임베딩 모델은 /rerank에도 답하므로(스코어) embeddings를 먼저 본다 —
     embeddings 진짜 응답=embedding, 아니면서 rerank 진짜 응답=reranker, chat=llm.
     셋 다 아니면(접근 불가·미지원) 이름 휴리스틱 폴백."""
     base = base_url.rstrip("/")
-    hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
+    hdr = {"Authorization": f"Bearer {api_key.strip() or config.MODEL_API_KEY}"}
     # 1) 임베딩 (임베딩 모델은 여기 진짜 벡터로 응답 — 리랭커는 error 본문)
     try:
         r = httpx.post(f"{base}/embeddings", headers=hdr, timeout=timeout,
@@ -110,9 +122,12 @@ def _probe_kind(base_url: str, name: str, timeout: float = 6.0) -> tuple:
     return _classify(name), "동작 판정 불가(미지원·접근 불가) — 이름 휴리스틱 폴백"
 
 
-def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
+def sync_from_serving(base_url: str = "", test: bool = True,
+                      api_key: str = "") -> dict:
     """모델 서빙 목록 동기화(업서트). base_url 지정 시 그 호스트만, 없으면 설정된
     채팅·임베딩·리랭커 호스트 전부 조회(중복 제거). 각 모델을 base_url과 함께 등록.
+    api_key 지정 시 조회·판정에 그 키를 쓰고, 등록되는 모델에도 그 키를 저장
+    (호스트+키를 한 번에 등록 — 사내 게이트웨이처럼 호스트마다 키가 다른 환경).
 
     종류 판정: 기본은 능력 테스트(실제 호출) — 이름은 태생적으로 불안정(bge-m3 등
     'embed' 없는 임베딩)하므로 동작으로 판정. 접근 불가 모델은 이름 휴리스틱 폴백.
@@ -122,7 +137,8 @@ def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
              else list(dict.fromkeys(
                  u.rstrip("/") for u in
                  (config.CHAT_URL, config.EMBED_URL, config.RERANK_URL) if u)))
-    hdr = {"Authorization": f"Bearer {config.MODEL_API_KEY}"}
+    key = api_key.strip()
+    hdr = {"Authorization": f"Bearer {key or config.MODEL_API_KEY}"}
     errors, total = [], 0
 
     # 1) 목록 조회 + 종류 판정을 DB 세션 밖에서 먼저 (능력 테스트가 느려도 트랜잭션을
@@ -140,7 +156,7 @@ def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
             name = m.get("id")
             if not name:
                 continue
-            kind, why = (_probe_kind(host, name) if test
+            kind, why = (_probe_kind(host, name, api_key=key) if test
                          else (_classify(name), "이름 휴리스틱"))
             classified.append((host, name, kind, why))
 
@@ -157,9 +173,12 @@ def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
             row = s.get(ModelRegistry, (kind, name))
             if row:
                 row.base_url = host          # 주소 갱신(다른 호스트로 옮겼을 수도)
+                if key:
+                    row.api_key = key        # 지정 키로 갱신 (미지정이면 기존 키 유지)
                 status = "갱신"
             else:
-                s.add(ModelRegistry(kind=kind, name=name, base_url=host))
+                s.add(ModelRegistry(kind=kind, name=name, base_url=host,
+                                    api_key=key or None))
                 status = "신규"
             results.append({"kind": kind, "name": name, "base_url": host,
                             "why": why, "status": status})
@@ -175,17 +194,21 @@ def sync_from_serving(base_url: str = "", test: bool = True) -> dict:
 
 
 def list_models(kind: str | None = None) -> list:
+    """목록 — api_key는 값이 아니라 설정 여부(has_key)만 노출 (키 유출 방지)."""
     with db.session() as s:
         q = s.query(ModelRegistry)
         q = q.filter_by(kind=kind).order_by(ModelRegistry.name) if kind \
             else q.order_by(ModelRegistry.kind, ModelRegistry.name)
         return [{"kind": r.kind, "name": r.name, "enabled": r.enabled == "Y",
-                 "default": r.is_default == "Y", "base_url": r.base_url or ""}
+                 "default": r.is_default == "Y", "base_url": r.base_url or "",
+                 "has_key": bool((r.api_key or "").strip())}
                 for r in q.all()]
 
 
-def add_model(kind: str, name: str, base_url: str = "", enabled: bool = True):
-    """수동 등록/수정 (사내 vLLM처럼 sync 못 하는 호스트의 모델)."""
+def add_model(kind: str, name: str, base_url: str = "", enabled: bool = True,
+              api_key: str | None = None):
+    """수동 등록/수정 (사내 vLLM처럼 sync 못 하는 호스트의 모델).
+    api_key: None=변경 없음(기존 키 유지), ""=삭제(.env 전역 키로 폴백), 그 외=설정."""
     if kind not in ("llm", "embedding", "reranker"):
         raise ValueError(f"kind는 llm/embedding/reranker 중 하나: {kind}")
     with db.session() as s:
@@ -193,9 +216,12 @@ def add_model(kind: str, name: str, base_url: str = "", enabled: bool = True):
         if row:
             row.base_url = base_url or None
             row.enabled = "Y" if enabled else "N"
+            if api_key is not None:
+                row.api_key = api_key.strip() or None
         else:
             s.add(ModelRegistry(kind=kind, name=name, base_url=base_url or None,
-                                enabled="Y" if enabled else "N"))
+                                enabled="Y" if enabled else "N",
+                                api_key=(api_key or "").strip() or None))
             s.flush()
         _ensure_default(s, kind)
 
@@ -214,40 +240,63 @@ def embedding_endpoint() -> tuple:
     return config.EMBED_URL, config.EMBED_MODEL
 
 
-_emb_clients = {}
+def api_key_for(kind: str, name: str) -> str:
+    """이 모델의 개발 키 — 레지스트리 값 우선, 없으면 .env 전역 MODEL_API_KEY."""
+    return (_lookup(kind, name)[1] or "").strip() or config.MODEL_API_KEY
+
+
+def chat_endpoint(name: str = "") -> tuple:
+    """채팅 LLM (base_url, 모델명, api_key) — 모델별 레지스트리 값 우선, .env 폴백.
+    에이전트·전처리 판정·라우터가 전부 이걸로 해석한다 (모델마다 다른 호스트·키 지원)."""
+    resolved = (name or "").strip() or get_default("llm", config.CHAT_MODEL)
+    url, key = _lookup("llm", resolved)
+    return ((url or "").strip() or config.CHAT_URL, resolved,
+            (key or "").strip() or config.MODEL_API_KEY)
+
+
+_emb_clients, _chat_clients = {}, {}
+
+
+def chat_client(name: str = "") -> tuple:
+    """(OpenAI 클라이언트, 모델명) — (주소, 키) 조합별 클라이언트 재사용."""
+    from openai import OpenAI
+    url, resolved, key = chat_endpoint(name)
+    ck = (url, key)
+    if ck not in _chat_clients:
+        # 타임아웃 필수 — 멈춘 요청이 배치·요청 스레드를 무한 대기시키지 않게
+        _chat_clients[ck] = OpenAI(base_url=url, api_key=key, timeout=config.LLM_TIMEOUT)
+    return _chat_clients[ck], resolved
 
 
 def embedding_client(name: str = "") -> tuple:
-    """(OpenAI 클라이언트, 모델명) — base_url별 클라이언트 재사용.
-    name 지정 시 그 임베딩 모델의 base_url을 레지스트리에서 조회(run별 임베딩). 없으면 기본."""
+    """(OpenAI 클라이언트, 모델명) — (주소, 키) 조합별 클라이언트 재사용.
+    name 지정 시 그 임베딩 모델의 주소·키를 레지스트리에서 조회(run별 임베딩). 없으면 기본."""
     from openai import OpenAI
     url, resolved = embedding_endpoint()          # 기본(기본 임베딩)
     if name:
-        try:
-            with db.session() as s:
-                r = s.query(ModelRegistry).filter_by(kind="embedding", name=name).first()
-            if r:
-                url, resolved = (r.base_url or config.EMBED_URL), name
-        except Exception:
-            pass  # 조회 실패 시 기본 임베딩으로 진행
-    if url not in _emb_clients:
+        u, _k = _lookup("embedding", name)
+        if u is not None or _k is not None:        # 등록된 모델이면 그 주소로
+            url, resolved = ((u or "").strip() or config.EMBED_URL), name
+    key = api_key_for("embedding", resolved)
+    ck = (url, key)
+    if ck not in _emb_clients:
         # 타임아웃 필수 — 임베딩 엔드포인트가 멈추면 그래프 병합(메인 스레드)이 무한 대기.
-        _emb_clients[url] = OpenAI(base_url=url, api_key=config.MODEL_API_KEY,
-                                   timeout=config.LLM_TIMEOUT)
-    return _emb_clients[url], resolved
+        _emb_clients[ck] = OpenAI(base_url=url, api_key=key, timeout=config.LLM_TIMEOUT)
+    return _emb_clients[ck], resolved
 
 
 def probe_serving(timeout: float = 5.0) -> list:
     """기동 시 설정된 모델 서빙 연결 점검 — 채팅·임베딩 엔드포인트에 GET /models.
     [{role,url,model,ok,found,detail}] 반환, 예외 안 냄(서버 기동을 못 막게)."""
-    checks = [("chat", config.CHAT_URL, get_default("llm", None) or config.CHAT_MODEL)]
+    curl, cname, ckey = chat_endpoint()      # 모델별 주소·키 해석 (레지스트리 우선)
+    checks = [("chat", curl, cname, ckey)]
     try:
         eurl, emodel = embedding_endpoint()
-        checks.append(("embedding", eurl, emodel))
+        checks.append(("embedding", eurl, emodel, api_key_for("embedding", emodel)))
     except Exception:
         pass
     out, seen = [], set()
-    for role, url, name in checks:
+    for role, url, name, key in checks:
         if not url or (url, name) in seen:
             continue
         seen.add((url, name))
@@ -255,7 +304,7 @@ def probe_serving(timeout: float = 5.0) -> list:
                "ok": False, "found": False, "detail": ""}
         try:
             r = httpx.get(url.rstrip("/") + "/models",
-                          headers={"Authorization": f"Bearer {config.MODEL_API_KEY}"},
+                          headers={"Authorization": f"Bearer {key}"},
                           timeout=timeout)
             rec["ok"] = r.status_code == 200
             ids = [m.get("id") for m in (r.json().get("data") or [])] if rec["ok"] else []

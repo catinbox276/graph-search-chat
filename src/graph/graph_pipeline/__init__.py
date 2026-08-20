@@ -23,6 +23,7 @@ from .llm import (  # noqa: F401
     CHAT_MODEL,
     EXTRACT_PROMPT,
     JUDGE_PROMPT,
+    client_for,
     cosine,
     embed,
     llm,

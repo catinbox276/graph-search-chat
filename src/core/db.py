@@ -65,7 +65,8 @@ def _ensure_model_registry_columns(con):
         return  # 테이블 자체가 없으면 create_all이 이미 최신 스키마로 만들었음
     for col, ddl in (("BASE_URL", "base_url VARCHAR2(500)"),
                      ("IS_DEFAULT", "is_default CHAR(1) DEFAULT 'N'"),
-                     ("ENABLED", "enabled CHAR(1) DEFAULT 'Y'")):
+                     ("ENABLED", "enabled CHAR(1) DEFAULT 'Y'"),
+                     ("API_KEY", "api_key VARCHAR2(400)")):
         if col not in have:
             con.execute(text(f"ALTER TABLE model_registry ADD ({ddl})"))
 
