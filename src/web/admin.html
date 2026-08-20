@@ -352,8 +352,36 @@
   </div>
 </section>
 <section class="card" id="sec-mapping">
-  <h3>매핑 버전 <small>원천 테이블 등록의 id·시간·필드 매핑 스냅샷 (소스별) — 등록/수정 저장 시 자동으로 새 버전, 수동 📸도 가능</small></h3>
-  <div id="verMapping"><span class="hint">불러오는 중…</span></div>
+  <h3>매핑 버전 <small>원천 테이블·id·시간·역할 매핑을 여기서 정의 — 저장하면 새 버전. [원천 테이블] 탭은 등록된 버전을 골라 씁니다</small></h3>
+  <div class="fgroup">
+    <div class="fgroup-t">매핑 편집 <small>— 기존 소스를 고르면 현재 매핑이 채워집니다. 새 소스는 [＋ 새 소스]로 이름을 직접 입력</small></div>
+    <div class="schedrow">
+      <select id="mvSrc" title="편집할 소스 — 새로 만들려면 [＋ 새 소스]"><option value="">＋ 새 소스…</option></select>
+      <input id="mvName" placeholder="소스 이름 (새 소스일 때)" style="width:150px">
+      <select id="mvTable"><option value="">테이블…</option></select>
+      <select id="mvId"><option value="">id 컬럼…</option></select>
+      <select id="mvTs"><option value="">시간 컬럼 (없음=전량 1회)</option></select>
+      <input id="mvKind" placeholder="유형 (문제해결/가이드…)" style="width:150px">
+    </div>
+    <div class="schedrow">
+      <span class="hint" style="margin:0;flex-basis:100%">역할 매핑 — 본문(body) 또는 지문(question)+답(answer) 중 최소 하나:</span>
+      <select id="mv_title"><option value="">title 컬럼…</option></select>
+      <select id="mv_body"><option value="">body 컬럼…</option></select>
+      <select id="mv_question"><option value="">question 컬럼…</option></select>
+      <select id="mv_answer"><option value="">answer 컬럼…</option></select>
+      <select id="mv_meta"><option value="">meta 컬럼…</option></select>
+      <select id="mv_url"><option value="">url 컬럼…</option></select>
+    </div>
+    <div class="schedrow">
+      <input id="mvNote" placeholder="버전 메모 (예: url 컬럼 추가)" style="flex:1;min-width:180px">
+      <button type="button" id="mvSave" title="이 매핑으로 소스를 등록/수정하고 새 매핑 버전을 만듭니다 (매핑이 이전과 같으면 버전은 그대로)">💾 저장 (새 매핑 버전)</button>
+      <span class="hint" id="mvMsg" style="margin:0;white-space:pre-line"></span>
+    </div>
+    <p class="hint" style="margin:2px 0 0">신규 소스는 여기서 만들면 <b>도메인 미지정(검색 전용)</b>으로 등록됩니다 —
+       그래프 구조화를 하려면 [원천 테이블] 탭에서 도메인을 지정하세요. 매핑을 바꾼 뒤에는
+       <b>[⚠ 전량 재적재]</b>로 코퍼스를 다시 만들어야 반영됩니다.</p>
+  </div>
+  <div id="verMapping" style="margin-top:10px"><span class="hint">불러오는 중…</span></div>
 </section>
 <section class="card" id="sec-presets">
   <h3>조합 프리셋 <small>차원별 버전 선택을 이름 있는 세트로 저장 — 헬름차트처럼 조합해 소스에 적용(run 생성)</small></h3>
@@ -422,23 +450,17 @@
     <th>역할 매핑</th><th>유형</th><th>그래프 도메인</th><th>사용</th></tr></thead><tbody></tbody></table>
   <div id="spager" class="hint" style="display:flex;gap:8px;align-items:center"></div>
   <form id="sform">
-    <input id="sname" placeholder="소스 이름" required style="width:120px">
-    <select id="stable" required><option value="">테이블…</option></select>
-    <select id="sidc" required><option value="">id 컬럼…</option></select>
-    <select id="stsc"><option value="">시간 컬럼 (없음=전량 1회)</option></select>
-    <input id="skind" placeholder="유형 (문제해결/가이드…)" style="width:150px">
+    <input id="sname" placeholder="목록에서 소스를 클릭해 선택" required readonly style="width:150px;background:var(--bg2, #f6f7f9)"
+           title="소스 선택 — 표의 행을 클릭하면 채워집니다. 새 소스·테이블·매핑 정의는 [매핑 버전] 탭에서">
+    <select id="smv" title="이 소스가 쓸 매핑 버전 — [적용]하면 원천 등록 매핑이 그 버전 값으로 교체됩니다(롤백 통로)">
+      <option value="">매핑 버전…</option></select>
+    <button type="button" class="ghost" id="smvApply" title="선택한 매핑 버전을 이 소스에 적용 + 기본 지정 — 조립이 달라지므로 이후 [⚠ 전량 재적재] 필요">매핑 적용</button>
     <select id="sdomain" title="지정하면 야간 배치가 이 도메인 기준으로 문서를 LLM 판정·그래프화 (기준 미달은 제외). 빈값=검색 전용">
       <option value="">그래프 도메인 (없음=검색만)</option></select>
     <label><input type="checkbox" id="senabled" checked>사용</label>
     <label title="끄면 이 소스 문서의 원본 링크가 검색 결과·출처·문서 뷰에서 숨겨집니다 (본문 열람은 그대로) — 저장 즉시 반영"><input type="checkbox" id="surl" checked>원본 링크</label>
-    <span style="flex-basis:100%;font-size:.75rem;color:var(--mut)">역할 매핑 — 본문(body) 또는 지문(question)+답(answer) 중 최소 하나:</span>
-    <select id="r_title"><option value="">title 컬럼…</option></select>
-    <select id="r_body"><option value="">body 컬럼…</option></select>
-    <select id="r_question"><option value="">question 컬럼…</option></select>
-    <select id="r_answer"><option value="">answer 컬럼…</option></select>
-    <select id="r_meta"><option value="">meta 컬럼…</option></select>
-    <select id="r_url"><option value="">url 컬럼…</option></select>
-    <button id="ssave" title="이 폼 내용으로 소스를 등록/수정 (같은 이름=수정). 원천 테이블엔 안 씀">① 등록/수정</button>
+    <button id="ssave" title="선택한 소스의 운영 설정(도메인·사용·원본 링크)을 저장 — 테이블·매핑은 [매핑 버전] 탭에서 편집">① 운영 설정 저장</button>
+    <button type="button" class="ghost" id="snewsrc" title="새 소스는 테이블·매핑부터 정의합니다 — [매핑 버전] 탭으로 이동">＋ 새 소스(매핑 탭)</button>
 
     <span class="stagerow"><b>② 적재</b> <small>원천 테이블 → 검색 코퍼스 (corpus_docs·청크)</small>
       <span class="badge now">즉시</span></span>
@@ -460,7 +482,9 @@
   <div id="dryout"></div>
   <p class="hint"><b class="badge now" style="font-weight:700">즉시</b> = 누르면 지금 실행 ·
      <b class="badge later" style="font-weight:700">예약</b> = 지금은 표시만, 야간 배치가 처리 (또는 [지금 구조화]로 당겨 실행).<br>
-     같은 소스 이름으로 저장하면 수정(upsert) — <b>수정·재적재·드라이런·초기화는 1개만 체크</b>, <b>적재·구조화·삭제는 여러 개 체크해 일괄 실행</b>. <b>그래프 도메인</b> 미지정 = 검색 전용(구조화 안 함, 아래 처리 현황에 안 뜸).
+     <b>테이블·id·시간·역할 매핑은 [매핑 버전] 탭</b>에서 정의합니다 — 이 탭은 <b>운영</b>(도메인·사용·링크)과
+     <b>실행</b>(적재·구조화)만. 매핑을 되돌리려면 위 [매핑 적용]으로 원하는 버전을 반영한 뒤 [⚠ 전량 재적재].<br>
+     행을 클릭해 소스를 고르고 — <b>재적재·드라이런·초기화는 1개만 체크</b>, <b>적재·구조화·삭제는 여러 개 체크해 일괄 실행</b>. <b>그래프 도메인</b> 미지정 = 검색 전용(구조화 안 함, 아래 처리 현황에 안 뜸).
      원천 테이블에는 절대 쓰지 않습니다(SELECT만) — 끄려면 '사용' 해제.</p>
   <p class="hint err" id="serr"></p>
 </section>
@@ -675,7 +699,9 @@ const $ = (id) => document.getElementById(id);
 const derr = $("derr"), serr = $("serr");
 const dmsg = (t, ok) => { derr.textContent = t; derr.classList.toggle("ok", !!ok); };
 const smsg = (t, ok) => { serr.textContent = t; serr.classList.toggle("ok", !!ok); };
-const ROLE_IDS = ["r_title", "r_body", "r_question", "r_answer", "r_meta", "r_url"];
+// 역할 매핑 select id — 매핑 편집기([매핑 버전] 탭)에 있음. 접두사 mv_ 뒤가 역할명
+const ROLE_IDS = ["mv_title", "mv_body", "mv_question", "mv_answer", "mv_meta", "mv_url"];
+const _roleOf = id => id.slice(3);   // "mv_body" → "body"
 const _colCache = {};  // 테이블→컬럼 캐시 (행 클릭 때 재조회·깜빡임 방지)
 
 // 로그인 사용자 표시
@@ -955,16 +981,11 @@ function renderSources(selName) {
       tb.querySelectorAll("input[type=checkbox]").forEach(x => { x.checked = false; });
       tr.classList.add("sel"); cb.checked = true;
       smsg("");
-      $("sname").value = s.source_name; $("skind").value = s.content_kind;
+      $("sname").value = s.source_name;
       $("sdomain").value = s.domain || "";
       $("senabled").checked = s.enabled;
       $("surl").checked = s.url_enabled !== false;
-      if ($("stable").value !== s.table_name || $("sidc").options.length <= 1) {
-        $("stable").value = s.table_name;
-        await loadCols(s.table_name);  // 같은 테이블이면 건드리지 않음 — 깜빡임 방지
-      }
-      $("sidc").value = s.id_column; $("stsc").value = s.ts_column || "";
-      ROLE_IDS.forEach(id => { $(id).value = s.field_map[id.slice(2)] || ""; });
+      loadSrcMappingVers(s.source_name);   // 이 소스의 매핑 버전 목록 (적용·롤백용)
     };
     tb.appendChild(tr);
   });
@@ -985,14 +1006,27 @@ $("sall").onclick = () => {
   document.querySelectorAll("#slist tbody input[type=checkbox]")
     .forEach(c => { c.checked = $("sall").checked; });
 };
-async function loadTables() {
-  if ($("stable").options.length > 1) return;
+async function loadTables() {   // 매핑 편집기의 테이블 목록 ([매핑 버전] 탭)
+  if ($("mvTable").options.length > 1) return;
   const r = await fetch("/admin/sources/tables");
   if (!r.ok) return;
-  const sel = $("stable"), cur = sel.value;
+  const sel = $("mvTable"), cur = sel.value;
   sel.length = 1;
   (await r.json()).tables.forEach(t => sel.add(new Option(t, t)));
   sel.value = cur;
+}
+// 원천 탭: 선택 소스의 매핑 버전 목록 (적용·롤백)
+async function loadSrcMappingVers(sname) {
+  const sel = $("smv");
+  sel.length = 1;
+  if (!sname) return;
+  const j = await fetch(`/admin/sources/${encodeURIComponent(sname)}/mapping-versions`)
+    .then(r => r.ok ? r.json() : {versions: []}).catch(() => ({versions: []}));
+  (j.versions || []).forEach(v => sel.add(new Option(
+    `v${v.version}${v.is_default ? " ★현재" : ""} — id=${v.id_column || "-"}${v.note ? " · " + v.note : ""}`,
+    v.version)));
+  const def = (j.versions || []).find(v => v.is_default);
+  if (def) sel.value = def.version;
 }
 async function loadDomainOptions(force) {
   if (!force && $("sdomain").options.length > 1) return;
@@ -1004,8 +1038,8 @@ async function loadDomainOptions(force) {
     .forEach(d => sel.add(new Option(d.name, d.name)));
   sel.value = cur;
 }
-async function loadCols(t) {
-  const selects = ["sidc", "stsc", ...ROLE_IDS];
+async function loadCols(t) {   // 매핑 편집기의 컬럼 select 채우기
+  const selects = ["mvId", "mvTs", ...ROLE_IDS];
   if (!t) { selects.forEach(id => { $(id).length = 1; }); return; }
   if (!_colCache[t]) {
     const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t));
@@ -1017,20 +1051,23 @@ async function loadCols(t) {
     _colCache[t].forEach(c => $(id).add(new Option(`${c.name} (${c.type})`, c.name)));
   });
 }
-$("stable").onchange = () => loadCols($("stable").value);
+$("mvTable").onchange = () => loadCols($("mvTable").value);
+// 원천 탭 폼 = 운영 설정만 저장 (테이블·매핑은 매핑 편집기 소관 — 기존 값 그대로 재전송)
 $("sform").onsubmit = async (e) => {
   e.preventDefault();
   smsg("");
-  if (checkedSources().length > 1) { smsg("수정(등록)은 소스를 1개만 체크한 상태에서 하세요"); return; }
-  const fmap = {};
-  ROLE_IDS.forEach(id => { if ($(id).value) fmap[id.slice(2)] = $(id).value; });
   const name = $("sname").value.trim();
+  const cur = (_srcAll || []).find(s => s.source_name === name);
+  if (!cur) {
+    smsg("소스를 목록에서 클릭해 선택하세요 — 새 소스는 [매핑 버전] 탭에서 테이블·매핑부터 정의합니다");
+    return;
+  }
   const r = await fetch("/admin/sources", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({source_name: name, table_name: $("stable").value,
-                          id_column: $("sidc").value, ts_column: $("stsc").value,
-                          field_map: fmap, content_kind: $("skind").value.trim(),
+    body: JSON.stringify({source_name: name, table_name: cur.table_name,
+                          id_column: cur.id_column, ts_column: cur.ts_column || "",
+                          field_map: cur.field_map, content_kind: cur.content_kind || "",
                           domain: $("sdomain").value,
                           enabled: $("senabled").checked, url_enabled: $("surl").checked}),
   });
@@ -1041,7 +1078,18 @@ $("sform").onsubmit = async (e) => {
     return;
   }
   await loadSources(name);  // 폼은 유지 — 이어서 수정 가능
-  smsg(`✓ 저장 완료 — "${name}" (다음 적재 배치부터 반영)`, true);
+  smsg(`✓ 운영 설정 저장 — "${name}" (도메인·사용·링크. 매핑은 [매핑 버전] 탭)`, true);
+};
+$("snewsrc").onclick = () => { showTab("mapping"); $("mvSrc").value = ""; mvFill(null); };
+$("smvApply").onclick = async () => {
+  const name = $("sname").value.trim(), v = $("smv").value;
+  if (!name || !v) { smsg("소스를 선택하고 적용할 매핑 버전을 고르세요"); return; }
+  if (!confirm(`${name}에 매핑 v${v}를 적용할까요?\n조립 결과가 달라지므로 이후 [⚠ 전량 재적재]가 필요합니다.`)) return;
+  const r = await fetch(`/admin/sources/${encodeURIComponent(name)}/mapping-versions/${v}/apply`,
+                        {method: "POST"});
+  const j = await r.json().catch(() => ({}));
+  smsg(r.ok ? `✓ ${j.note}` : `적용 실패 — ${j.detail || r.status}`, r.ok);
+  if (r.ok) { await loadSources(name); loadSrcMappingVers(name); }
 };
 $("singest").onclick = async () => {
   const names = checkedSources();
@@ -2574,10 +2622,77 @@ const CLUSTER_VM = {
     return true;
   },
 };
+// ── 매핑 편집기 — 테이블·id·시간·역할 매핑을 여기서 정의 (원천 탭은 등록된 버전만 선택) ──
+const mvmsg = (t, ok) => { const e = $("mvMsg"); e.textContent = t;
+  e.style.color = ok ? "var(--ok)" : "var(--mut)"; };
+let _mvSrcs = [];   // 매핑 편집기용 소스 캐시
+
+// 등록된 값이 select 옵션에 없으면(테이블 삭제됨·화이트리스트 밖) 옵션을 만들어 표시 —
+// 편집기가 현재 등록 매핑을 언제나 사실대로 보여주게 (조용히 빈칸이 되면 저장 시 값이 날아간다)
+function _ensureOpt(sel, val, note) {
+  if (!val) return;
+  if (![...sel.options].some(o => o.value === val))
+    sel.add(new Option(val + (note ? ` ${note}` : ""), val));
+  sel.value = val;
+}
+async function mvFill(s) {   // 소스 행 → 편집기 채우기 (null=새 소스)
+  $("mvName").value = s ? s.source_name : "";
+  $("mvName").readOnly = !!s;
+  $("mvKind").value = s ? (s.content_kind || "") : "";
+  $("mvNote").value = "";
+  await loadTables();
+  $("mvTable").value = "";
+  if (s) _ensureOpt($("mvTable"), s.table_name, "(등록값 — 목록에 없음)");
+  await loadCols($("mvTable").value);
+  if (!s) { ["mvId", "mvTs", ...ROLE_IDS].forEach(id => { $(id).value = ""; }); return; }
+  _ensureOpt($("mvId"), s.id_column, "(등록값)");
+  _ensureOpt($("mvTs"), s.ts_column || "", "(등록값)");
+  ROLE_IDS.forEach(id => {
+    $(id).value = "";
+    _ensureOpt($(id), s.field_map[_roleOf(id)] || "", "(등록값)");
+  });
+}
+async function loadMvEditor() {
+  _mvSrcs = (await fetch("/admin/sources").then(r => r.json())
+    .catch(() => ({sources: []}))).sources || [];
+  const sel = $("mvSrc"), cur = sel.value;
+  sel.length = 1;
+  _mvSrcs.forEach(s => sel.add(new Option(s.source_name, s.source_name)));
+  sel.value = cur;
+  await mvFill(_mvSrcs.find(s => s.source_name === sel.value) || null);
+}
+$("mvSrc").onchange = () => mvFill(_mvSrcs.find(s => s.source_name === $("mvSrc").value) || null);
+$("mvSave").onclick = async () => {
+  const name = $("mvName").value.trim();
+  if (!name) { mvmsg("소스 이름을 입력하세요"); return; }
+  if (!$("mvTable").value || !$("mvId").value) { mvmsg("테이블과 id 컬럼은 필수입니다"); return; }
+  const fmap = {};
+  ROLE_IDS.forEach(id => { if ($(id).value) fmap[_roleOf(id)] = $(id).value; });
+  const old = _mvSrcs.find(s => s.source_name === name);   // 기존 소스면 운영값 유지
+  const r = await fetch("/admin/sources", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({source_name: name, table_name: $("mvTable").value,
+      id_column: $("mvId").value, ts_column: $("mvTs").value, field_map: fmap,
+      content_kind: $("mvKind").value.trim(), domain: old ? (old.domain || "") : "",
+      enabled: old ? old.enabled : true,
+      url_enabled: old ? (old.url_enabled !== false) : true})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { mvmsg(`저장 실패 (${r.status}) — ${j.detail || ""}`); return; }
+  const note = $("mvNote").value.trim();
+  if (note)   // 메모가 있으면 이번 매핑을 그 메모로 한 번 더 스냅샷 (자동 버전엔 메모가 없음)
+    await fetch(`/admin/sources/${encodeURIComponent(name)}/mapping-versions`,
+      {method: "POST", headers: {"Content-Type": "application/json"},
+       body: JSON.stringify({note})});
+  mvmsg(`✓ "${name}" 저장 — 매핑이 바뀌었으면 새 버전이 생겼습니다`
+        + (old ? " (반영은 [원천 테이블] 탭 ⚠ 전량 재적재)" : " · 도메인 지정은 [원천 테이블] 탭에서"), true);
+  await loadMvEditor();
+  loadMappingVer();
+};
+
 async function loadMappingVer() {
   const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
   const box = $("verMapping"); box.innerHTML = "";
-  if (!srcs.length) { box.innerHTML = `<span class="hint">등록된 소스가 없습니다</span>`; return; }
+  if (!srcs.length) { box.innerHTML = `<span class="hint">등록된 소스가 없습니다 — 위 편집기에서 첫 소스를 만드세요</span>`; return; }
   for (const s of srcs) {
     const wrap = document.createElement("div");
     wrap.style.cssText = "border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0";
@@ -2607,12 +2722,28 @@ async function loadMappingVer() {
     });
     t.appendChild(tb); wrap.appendChild(t);
     const bar = document.createElement("div"); bar.style.cssText = "margin-top:4px";
+    const picked = () => wrap.querySelector(`input[name="mappick_${s.source_name}"]:checked`);
     bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
-      const p = wrap.querySelector(`input[name="mappick_${s.source_name}"]:checked`);
+      const p = picked();
       if (!p) return;
       await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions/${p.value}/default`,
         {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
       loadMappingVer();
+    }));
+    bar.appendChild(_verBtn("▶ 선택 버전 적용(원천 등록에 반영)", async () => {
+      const p = picked();
+      if (!p) return;
+      if (!confirm(`${s.source_name}에 매핑 v${p.value}를 적용할까요?\n적재 조립이 달라지므로 이후 [⚠ 전량 재적재]가 필요합니다.`)) return;
+      const r = await fetch(`/admin/sources/${encodeURIComponent(s.source_name)}/mapping-versions/${p.value}/apply`,
+        {method: "POST"});
+      const j = await r.json().catch(() => ({}));
+      mvmsg(r.ok ? `✓ ${s.source_name}: ${j.note}` : `적용 실패 — ${j.detail || r.status}`, r.ok);
+      if (r.ok) { loadMappingVer(); loadMvEditor(); }
+    }));
+    bar.appendChild(_verBtn("✏ 편집기로", () => {
+      $("mvSrc").value = s.source_name;
+      mvFill(_mvSrcs.find(x => x.source_name === s.source_name) || s);
+      $("mvSrc").scrollIntoView({behavior: "smooth", block: "nearest"});
     }));
     wrap.appendChild(bar); box.appendChild(wrap);
   }
@@ -3384,11 +3515,11 @@ const TABS = {
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
   cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
-  mapping: {secs: ["sec-mapping"], load: () => loadMappingVer()},
+  mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
   presets: {secs: ["sec-presets"], load: () => loadPresets()},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
-            load: () => { loadDomainOptions(true); loadSources(); loadTables();
+            load: () => { loadDomainOptions(true); loadSources();
                           loadPipelineSettings(); loadDocStatus(); loadSchedule(); }},
   models:  {secs: ["sec-models"], load: () => loadModels()},
   mcp:     {secs: ["sec-mcp"], load: () => loadMcp()},

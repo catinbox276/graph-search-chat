@@ -1063,6 +1063,32 @@ def admin_mapping_version_default(sname: str, v: int):
     return {"ok": True}
 
 
+@router.post("/admin/sources/{sname}/mapping-versions/{v}/apply")
+def admin_mapping_version_apply(sname: str, v: int):
+    """이 매핑 버전을 원천 등록에 적용 — source_registry의 id·시간·필드 매핑을 그 버전 값으로
+    되돌리고 기본 버전으로 지정. 적재 배치가 실제로 읽는 값이 source_registry라, 버전 되돌리기
+    (롤백)의 통로. 매핑이 바뀌면 코퍼스 조립이 달라지므로 [⚠ 전량 재적재]가 필요하다."""
+    with db_cursor() as cur:
+        _ensure_mapping_versions(cur)
+        cur.execute("""SELECT id_column, ts_column, field_map FROM mapping_versions
+                       WHERE source_name = :1 AND version = :2""", [sname, v])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"없는 매핑 버전: {sname} v{v}")
+        cur.execute("""UPDATE source_registry
+                       SET id_column = :i, ts_column = :t, field_map = :f
+                       WHERE source_name = :s""",
+                    {"i": r[0], "t": r[1], "f": _lob_str(r[2]), "s": sname})
+        if not cur.rowcount:
+            raise HTTPException(404, f"소스가 없습니다: {sname}")
+        cur.execute("UPDATE mapping_versions SET is_default = 'N' WHERE source_name = :1",
+                    [sname])
+        cur.execute("""UPDATE mapping_versions SET is_default = 'Y'
+                       WHERE source_name = :1 AND version = :2""", [sname, v])
+    return {"ok": True, "note": f"v{v} 매핑을 적용했습니다 — 조립 결과가 달라지므로 "
+                                "[⚠ 전량 재적재]로 코퍼스를 다시 만드세요"}
+
+
 # ── 데이터 신선도 버전 (소스별 적재 시점·문서수 스냅샷) ────────────────────────
 def _ensure_data_versions(cur):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DATA_VERSIONS'")
