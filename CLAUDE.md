@@ -57,6 +57,12 @@ PYTHONPATH=src python3 -m ingestion.chunk_corpus
 # 문서 그래프 구조화: 도메인 지정 소스의 corpus_docs를 LLM 판정·그래프 병합 (야간 03:40과 동일)
 PYTHONPATH=src .venv/bin/python -m graph.doc_pipeline [--limit N]
 
+# DB 백업·복원 (로컬 PV 소실 대비 — 원천 테이블이 사라진 소스의 코퍼스는 재적재 불가)
+PYTHONPATH=src python -m core.db_dump /tmp/dbdump          # SELECT만, 청크·임베딩 제외
+PYTHONPATH=src python -m core.db_restore /tmp/dbdump --dry-run   # 빈 테이블만 복원(기본)
+PYTHONPATH=src python -m core.db_restore /tmp/dbdump --replace   # 기존 행 삭제 후 복원(확인 입력)
+PYTHONPATH=src python -m core.db_restore --selfcheck        # DB 없이 순수 로직 점검
+
 # 배포 (전제: k8s + LM Studio :1234 — 상세 절차는 docs/implementation.md "실행 방법")
 docker build -f deploy/Dockerfile -t graph-search-chat:latest .
 kubectl apply -f deploy/k8s/oracle.yaml          # Oracle StatefulSet
