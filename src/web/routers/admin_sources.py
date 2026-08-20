@@ -356,6 +356,7 @@ def admin_pipeline_settings_set(inp: PipelineSettingsIn):
 # ── 적재 / 재적재 / 구조화 운영 ────────────────────────────────
 
 _structuring = set()  # 지금 실행 중인 구조화 소스 (중복 실행 가드)
+_stop_req = set()     # 구조화 중지 요청 — 스레드가 묶음/배치 경계에서 협조적으로 멈춘다
 
 
 def _guard_not_structuring(sname: str | None = None):
@@ -474,7 +475,8 @@ def admin_source_structure(sname: str, run_id: str = ""):
     def _run():
         t0 = time.time()
         try:
-            r = doc_pipeline.run_for_source(sname, drain=True, run_id=run_id)  # 끝까지 처리
+            r = doc_pipeline.run_for_source(sname, drain=True, run_id=run_id,
+                                            should_stop=lambda: sname in _stop_req)
             events.log("batch", source="doc-structure-now", level="info", status="ok",
                        actor=sname, duration_ms=int((time.time() - t0) * 1000),
                        summary=f"지금 구조화 [{sname}]: {r}")
@@ -485,12 +487,26 @@ def admin_source_structure(sname: str, run_id: str = ""):
                        detail=traceback.format_exc())
         finally:
             _structuring.discard(sname)
+            _stop_req.discard(sname)
 
+    _stop_req.discard(sname)   # 이전 중지 요청 잔재 제거
     _structuring.add(sname)
     threading.Thread(target=_run, daemon=True).start()
     return {"ok": True,
             "note": "구조화를 시작했습니다 — 미처리가 0이 될 때까지 끝까지 처리합니다(다시 클릭 불필요). "
                     "진행은 아래 처리 현황(5초 갱신)에서 실시간으로 올라갑니다."}
+
+
+@router.post("/admin/sources/{sname}/structure/stop")
+def admin_source_structure_stop(sname: str):
+    """관리자: 진행 중 구조화 중지 요청 — 진행 중 묶음까지 처리하고 배치 경계에서 멈춘다.
+    중지해야 [초기화 재처리]가 가능해진다 (구조화 중에는 409로 막힘)."""
+    if sname not in _structuring:
+        return {"ok": True, "note": "이 소스는 지금 구조화 중이 아닙니다"}
+    _stop_req.add(sname)
+    return {"ok": True,
+            "note": "중지 요청됨 — 진행 중인 묶음까지 처리하고 멈춥니다 (수십 초 내). "
+                    "처리 현황에서 멈춤을 확인한 뒤 초기화·재실행하세요."}
 
 
 # ── 엔티티·클러스터 버전 (이름별 라인 — core/versioning 공통 스토어) ─────────────
@@ -1172,7 +1188,19 @@ def _reset_source(cur, sname: str):
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'DOC_RESULTS'")
     if cur.fetchone()[0]:  # run별 결과도 리셋 (run 행은 이력으로 보존)
         cur.execute("DELETE FROM doc_results WHERE source_name = :1", [sname])
+    _prune_orphans(cur)
     return n, len(refs)
+
+
+def _prune_orphans(cur):
+    """잔재 정리 — 증거가 하나도 안 남은 노드는 행까지 삭제 (엣지·관계·제안은 FK CASCADE).
+    세션 증거가 남은 노드는 유지(대화 유래 지식 보존). 기여 0으로 내려간 빈 엣지 행도 제거 —
+    초기화 후 그래프 뷰에 유령 노드·선이 남는 문제의 근본 처리."""
+    cur.execute("""DELETE FROM nodes n
+                   WHERE NOT EXISTS (SELECT 1 FROM node_evidence ev WHERE ev.node_id = n.id)""")
+    pruned = cur.rowcount
+    cur.execute("DELETE FROM edges WHERE raw_count <= 0 AND weight <= 0")
+    return pruned
 
 
 def _ensure_domain_versions(cur):
@@ -1704,6 +1732,33 @@ def admin_run_activate(run_id: str):
     return {"ok": True, **out,
             "note": ("이 run이 활성 버전 — 사용자 노출(경로 제안·그래프)이 전환됨"
                      if out.get("changed") else out.get("note", ""))}
+
+
+@router.delete("/admin/runs/{run_id}")
+def admin_run_delete(run_id: str):
+    """관리자: run 삭제 — 그 run의 결과·증거·관계를 통째로 제거 (다중 run 시대의 초기화 단위).
+    비활성 run만 가능 (활성 run 기여는 활성 전환 시점에 감산/가산되므로, 먼저 다른 run을
+    활성으로 전환). 비활성 run은 엣지 가중치 기여가 없어(count=False 또는 전환 시 감산됨)
+    단순 삭제로 충분하다. 삭제 후 증거가 없어진 고아 노드·빈 엣지도 정리."""
+    with db_cursor() as cur:
+        cur.execute("SELECT source_name, active FROM doc_runs WHERE run_id = :1", [run_id])
+        r = cur.fetchone()
+        if not r:
+            raise HTTPException(404, f"run이 없습니다: {run_id}")
+        sname, active = r
+        if active == "Y":
+            raise HTTPException(409, "활성 run은 삭제할 수 없습니다 — 다른 run을 활성으로 "
+                                     "전환하거나 [초기화 재처리]로 기여를 회수한 뒤 삭제하세요")
+        _guard_not_structuring(sname)
+        cur.execute("DELETE FROM node_evidence WHERE run_id = :1", [run_id])
+        ev = cur.rowcount
+        cur.execute("DELETE FROM entity_relations WHERE run_id = :1", [run_id])
+        rel = cur.rowcount
+        cur.execute("DELETE FROM run_labels WHERE run_id = :1", [run_id])
+        cur.execute("DELETE FROM doc_runs WHERE run_id = :1", [run_id])  # doc_results는 FK CASCADE
+        pruned = _prune_orphans(cur)
+    return {"ok": True, "evidence": ev, "relations": rel, "orphans_pruned": pruned,
+            "note": f"run 삭제됨 — 증거 {ev}·관계 {rel} 회수, 고아 노드 {pruned}개 정리"}
 
 
 @router.get("/admin/sources/{sname}/docs")
