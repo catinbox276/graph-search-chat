@@ -215,7 +215,10 @@
                   color: var(--ink); font-size: .72rem; cursor: pointer; }
   .scNode .nbtn:disabled { opacity: .3; cursor: default; }
   .scNode .nsel { display: block; width: 100%; text-align: left; background: none;
-                  border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+                  border: 0; padding: 0; cursor: grab; font: inherit; color: inherit;
+                  touch-action: none; }
+  .scNode.dragging { z-index: 40; box-shadow: 0 8px 22px rgba(0,0,0,.18); }
+  .scNode.dragging .nsel { cursor: grabbing; }
   .scNode .nsel .r, .scNode .nsel .k, .scNode .nsel .l { display: block; }
   .scNode .nbtn.plus { right: 6px; bottom: 6px; }
   .scNode .nbtn.del { right: 30px; bottom: 6px; }
@@ -438,6 +441,7 @@
         <li><b>계층 칸</b>(2~5개) — 그래프 2층부터 순서대로 쌓이는 뼈대. 첫 칸이 🔗 진입점(질문이 들어오면 여기서 검색 시작)</li>
         <li><b>⭐ 검증귀속</b> — 성공/실패 카운트와 추천이 붙는 칸. 계층 중 하나를 고릅니다(기본 마지막)</li>
         <li><b>속성</b>(9층) — 진입점에 붙는 부가 정보. <b>관계</b>는 엔티티 사이 점선 연결(파란 점을 끌어 만듭니다)</li>
+        <li>노드를 <b>끌어서 자리를 옮길</b> 수 있습니다 — 선이 겹칠 때 보기 편하게. 위치는 이 브라우저에만 저장되고 <b>[↺ 자동 정렬]</b>로 되돌립니다</li>
         <li>이 스키마 <b>한 벌</b>이 문서 구조화와 대화(세션) 추출 양쪽에 쓰입니다 — 버전은 없고 저장은 덮어쓰기입니다</li>
       </ul>
       키·표시명·설명은 전부 바꿔도 됩니다. <code>goal</code>·<code>approach</code>는 기본 이름일 뿐입니다.
@@ -448,6 +452,7 @@
     <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5개) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
     <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 칸에 붙는 부가 정보(그래프 9층)">＋ 속성</button>
     <button type="button" class="ghost" id="veRelAdd" title="선택한 노드에서 시작하는 관계 추가 — 파란 점을 끌어서 만들 수도 있습니다">＋ 관계</button>
+    <button type="button" class="ghost" id="veAutoBtn" title="끌어서 옮긴 노드 위치를 버리고 자동 배치로 되돌립니다 (스키마는 안 바뀜)">↺ 자동 정렬</button>
     <span class="hint" id="veCount" style="margin:0"></span>
   </div>
   <div class="ve2 vecanvas">
@@ -2618,7 +2623,18 @@ function chainBadge(c, i) {
 // 엔티티는 **한 벌**이고 버전이 없다(저장=덮어쓰기). 노드를 클릭하면 오른쪽 패널에서
 // 내용을 채우고, 노드의 ＋로 다음 계층·속성을 뻗고, 파란 점을 끌어 놓으면 관계가 생긴다.
 // 배치는 자동 — 노드 좌표를 사람이 관리할 이유가 없다(저장도 안 한다).
-const VE = {chain: [], attrs: [], rels: [], sel: null, pos: {}, dirty: false};
+const VE = {chain: [], attrs: [], rels: [], sel: null, pos: {}, dirty: false, manual: {}};
+// 노드를 끌어 옮긴 좌표는 **스키마가 아니라 보기 설정**이라 서버가 아니라 브라우저에 남긴다
+// (저장 버튼과 무관 = 배치를 만졌다고 '저장 안 된 변경'이 되지 않는다). 키 이름 기준이라
+// 키를 바꾸면 그 노드만 자동 배치로 돌아간다 — 자리를 잘못 물려받는 것보다 낫다.
+const VE_POS_KEY = "gsc.entity.pos.v1";
+function vePosLoad() {
+  try { VE.manual = JSON.parse(localStorage.getItem(VE_POS_KEY) || "{}") || {}; }
+  catch { VE.manual = {}; }
+}
+function vePosSave() {
+  try { localStorage.setItem(VE_POS_KEY, JSON.stringify(VE.manual)); } catch { /* 저장 못해도 동작 */ }
+}
 const VE_MAXCHAIN = 5;
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -2640,6 +2656,7 @@ function veSel(kind, i) { VE.sel = {kind, i}; veRender(); }
 function veRender() { _veNorm(); veCanvas(); veDetail(); veGate(); veRail(); }
 
 async function veLoad() {
+  vePosLoad();
   const j = await fetch("/admin/entity-schema").then(r => r.ok ? r.json() : null).catch(() => null);
   const {chain, attrs} = normEtypes(parseEtypes(j && j.etypes));
   VE.chain = chain; VE.attrs = attrs; VE.rels = parseEtypes(j && j.rtypes);
@@ -2683,21 +2700,30 @@ function veCanvas() {
   const wrap = document.createElement("div");
   wrap.className = "scWrap"; wrap.id = "veWrap";
   wrap.setAttribute("role", "group");
-  wrap.setAttribute("aria-label", "엔티티 스키마 — 노드를 클릭하면 오른쪽에서 편집합니다");
+  wrap.setAttribute("aria-label", "엔티티 스키마 — 노드를 클릭하면 오른쪽에서 편집, 끌면 자리를 옮깁니다");
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("class", "scEdges"); svg.id = "veSvg";
   wrap.appendChild(svg); box.appendChild(wrap);
-  // 자동 배치: 계층은 왼쪽 세로열(위→아래 = 2층→n층), 속성은 진입점 오른쪽 열
+  // 자동 배치: 계층은 왼쪽 세로열(위→아래 = 2층→n층), 속성은 진입점 오른쪽 열.
+  // 사용자가 끌어 옮긴 노드는 그 자리를 유지한다(VE.manual).
   const gapY = Math.max(76, Math.min(104, 420 / Math.max(1, VE.chain.length)));
   VE.pos = {};
-  VE.chain.forEach((c, i) => { VE.pos["chain" + i] = {x: 24, y: 16 + i * gapY}; });
-  VE.attrs.forEach((a, i) => { VE.pos["attr" + i] = {x: 268, y: 16 + i * 92}; });
+  const put = (id, key, x, y) => {
+    const m = VE.manual[key];
+    VE.pos[id] = m ? {x: m.x, y: m.y} : {x, y};
+  };
+  VE.chain.forEach((c, i) => put("chain" + i, c.key, 24, 16 + i * gapY));
+  VE.attrs.forEach((a, i) => put("attr" + i, a.key, 268, 16 + i * 92));
   VE.els = {};
   VE.chain.forEach((c, i) => wrap.appendChild(veNodeEl("chain", i)));
   VE.attrs.forEach((a, i) => wrap.appendChild(veNodeEl("attr", i)));
-  const needH = 30 + Math.max(VE.chain.length * gapY, VE.attrs.length * 92);
-  wrap.style.height = Math.max(300, needH) + "px";
+  const lowest = Object.values(VE.pos).reduce((m, p) => Math.max(m, p.y), 0);
+  wrap.style.height = Math.max(300, lowest + 120) + "px";
+  const rightmost = Object.values(VE.pos).reduce((m, p) => Math.max(m, p.x), 0);
+  wrap.style.minWidth = (rightmost + 230) + "px";   // 오른쪽으로 끌어낸 노드까지 스크롤로 닿게
   veEdges();
+  const rb = $("veAutoBtn");   // 옮긴 게 있을 때만 [자동 정렬]이 의미가 있다
+  if (rb) rb.disabled = !Object.keys(VE.manual).length;
 }
 
 function veNodeEl(kind, i) {
@@ -2720,6 +2746,7 @@ function veNodeEl(kind, i) {
   pick.append(r, k, l);
   pick.title = (item.desc || "(설명 없음)") + "\n선택하면 오른쪽에서 편집합니다";
   pick.onclick = ev => { ev.stopPropagation(); veSel(kind, i); };
+  pick.onpointerdown = ev => veNodeDrag(ev, kind, i, el, pick);
   el.appendChild(pick);
   // ＋ = 여기서 뻗기 (계층 노드는 다음 계층 칸, 속성 노드는 속성 하나 더)
   const plus = document.createElement("button");
@@ -2744,6 +2771,41 @@ function veNodeEl(kind, i) {
   el.appendChild(port);
   VE.els[kind + i] = el;
   return el;
+}
+
+// 노드 이동 — 선을 덜 겹치게 사용자가 직접 배치할 수 있게. 4px 문턱 아래면 클릭(=선택)으로 남긴다.
+function veNodeDrag(ev, kind, i, el, pick) {
+  if (ev.button !== 0) return;
+  const wrap = $("veWrap"), start = VE.pos[kind + i];
+  const x0 = ev.clientX, y0 = ev.clientY, ox = start.x, oy = start.y;
+  let moved = false;
+  const move = e => {
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return;   // 클릭과 드래그를 가르는 문턱
+    if (!moved) { moved = true; el.classList.add("dragging"); }
+    start.x = Math.max(0, ox + dx); start.y = Math.max(0, oy + dy);
+    el.style.left = start.x + "px"; el.style.top = start.y + "px";
+    veEdges();                                                // 선만 다시 그린다 (재렌더 없음)
+  };
+  const up = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    if (!moved) return;                                       // 안 움직였으면 클릭 처리에 맡긴다
+    el.classList.remove("dragging");
+    const key = (kind === "chain" ? VE.chain[i] : VE.attrs[i]).key;
+    VE.manual[key] = {x: start.x, y: start.y};
+    vePosSave();
+    const need = start.y + 120, w = $("veWrap");
+    if (w && w.offsetHeight < need) w.style.height = need + "px";
+    const rb = $("veAutoBtn"); if (rb) rb.disabled = false;
+    pick.blur();                    // 옮긴 뒤 남는 포커스 링이 '선택'처럼 보이지 않게
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+function veAutoLayout() {
+  VE.manual = {}; vePosSave(); veCanvas();
+  $("veMsg").textContent = "배치를 자동 정렬로 되돌렸습니다 (스키마는 그대로)";
 }
 
 function veChainAdd(at) {
@@ -2995,6 +3057,7 @@ function veGate() {
 $("veChainAdd").onclick = () => veChainAdd(null);
 $("veTypeAdd").onclick = () => veAttrAdd();
 $("veRelAdd").onclick = () => veRelAdd();
+$("veAutoBtn").onclick = () => veAutoLayout();
 $("entSave").onclick = () => veSave();
 $("veCrit").oninput = () => { VE.dirty = true; veRail(); };
 $("veDescr").oninput = () => { VE.dirty = true; veRail(); };
