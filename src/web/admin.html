@@ -95,6 +95,9 @@
   .ve2 { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1fr);
          gap: 14px; align-items: start; }
   @media (max-width: 900px) { .ve2 { grid-template-columns: 1fr; } }
+  /* 캔버스 쪽에 폭을 더 준다 — 계층 열 + 속성 열이 한눈에 들어와야 한다 */
+  .ve2.vecanvas { grid-template-columns: minmax(420px, 1.25fr) minmax(300px, 1fr); }
+  @media (max-width: 900px) { .ve2.vecanvas { grid-template-columns: 1fr; } }
   .velist ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line);
                border-radius: 10px; overflow: hidden; background: var(--bg); }
   .velist li { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
@@ -194,16 +197,28 @@
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
   /* 스키마 캔버스 — 엔티티 노드 드래그 배치 + 포트 드래그로 관계 선 긋기 (n8n식) */
-  .scWrap { position: relative; height: 520px; border: 1.5px solid var(--line); border-radius: 12px;
-            overflow: hidden; margin: 8px 0;
+  .scWrap { position: relative; height: 460px; border: 1.5px solid var(--line); border-radius: 12px;
+            overflow: auto; margin: 8px 0;
             background-image: radial-gradient(circle, rgba(120,130,160,.18) 1px, transparent 1px);
             background-size: 22px 22px; }
   .scEdges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .scEdges .lbl { pointer-events: auto; cursor: pointer; font-size: 11px; fill: #7c5cd6; font-weight: 700; }
-  .scNode { position: absolute; min-width: 118px; max-width: 180px; padding: 8px 12px;
+  .scNode { position: absolute; min-width: 130px; max-width: 190px; padding: 8px 12px 28px;
             border: 2px solid #c084fc; border-radius: 10px; background: #fff;
-            cursor: grab; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
-  .scNode:active { cursor: grabbing; }
+            cursor: pointer; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  /* 선택된 노드 = 오른쪽 패널이 지금 편집하는 대상 */
+  .scNode.on { box-shadow: 0 0 0 3px rgba(74,125,255,.35), 0 2px 8px rgba(0,0,0,.07); }
+  .scNode:focus-visible { outline: 2px solid var(--path); outline-offset: 2px; }
+  /* 노드 안의 ＋/✕ — 드래그를 못 쓰는 상황에서도 계층·속성을 늘리고 지울 수 있게 (SC 2.5.7) */
+  .scNode .nbtn { position: absolute; width: 20px; height: 20px; line-height: 1; padding: 0;
+                  border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+                  color: var(--ink); font-size: .72rem; cursor: pointer; }
+  .scNode .nbtn:disabled { opacity: .3; cursor: default; }
+  .scNode .nsel { display: block; width: 100%; text-align: left; background: none;
+                  border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+  .scNode .nsel .r, .scNode .nsel .k, .scNode .nsel .l { display: block; }
+  .scNode .nbtn.plus { right: 6px; bottom: 6px; }
+  .scNode .nbtn.del { right: 30px; bottom: 6px; }
   .scNode.chain { border-color: #7ba7d9; }
   .scNode.entry { border-color: #0891b2; } .scNode.solution { border-color: #12b886; }
   .scNode .r { font-size: .66rem; color: var(--mut); }
@@ -401,7 +416,6 @@
   </details>
   <div id="plBanner"></div>
   <div id="plCanvas" class="plscroll"><span class="hint">불러오는 중…</span></div>
-  <div id="plSchema" style="display:none"></div>
   <div id="plRuns"></div>
   <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드 ·
      <b>① 추출 노드 더블클릭</b> = 그 스키마의 구조 그림 (편집은 [① 추출] 탭)</p>
@@ -412,7 +426,7 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 run 생성</b>은 [🔀 파이프라인] 탭에서 — 노드에서 이 버전을 고르고 [▶ run 생성].</p>
 </section>
 <section class="card" id="sec-entity">
-  <h2>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h2>
+  <h2>① 추출 (엔티티) <small>문서·대화에서 뽑아낼 엔티티 한 벌 — 노드를 클릭해 오른쪽에서 채웁니다</small></h2>
   <div class="rail" id="entRail"><span class="step">불러오는 중</span></div>
   <details class="explain">
     <summary>엔티티가 무엇인지 — 이 화면 읽는 법</summary>
@@ -421,81 +435,45 @@
       예를 들어 속성 <code>library</code> 하나를 정의하면 문서마다 Keras·pandas 같은 값이 뽑혀
       그래프 노드가 되고, 같은 값은 전역 1개로 합쳐져 여러 문서가 그 노드를 공유합니다.
       <ul>
-        <li><b>계층 체인</b>(2~5칸) — 그래프 2층부터 순서대로 쌓이는 뼈대. 첫 칸이 🔗 진입점(질문이 들어오면 여기서 검색 시작)</li>
-        <li><b>⭐ 검증귀속</b> — 성공/실패 카운트와 추천이 붙는 칸. 체인 중 하나를 고릅니다(기본 마지막)</li>
-        <li><b>속성</b>(9층) — 자유롭게 추가. 진입점에 연결됩니다. <b>관계</b>는 엔티티 사이 점선 연결</li>
-        <li>이 스키마는 <b>문서 구조화와 대화(세션) 추출 양쪽</b>에 쓰입니다 — 대화는 활성(★) 라인을 사용</li>
+        <li><b>계층 칸</b>(2~5개) — 그래프 2층부터 순서대로 쌓이는 뼈대. 첫 칸이 🔗 진입점(질문이 들어오면 여기서 검색 시작)</li>
+        <li><b>⭐ 검증귀속</b> — 성공/실패 카운트와 추천이 붙는 칸. 계층 중 하나를 고릅니다(기본 마지막)</li>
+        <li><b>속성</b>(9층) — 진입점에 붙는 부가 정보. <b>관계</b>는 엔티티 사이 점선 연결(파란 점을 끌어 만듭니다)</li>
+        <li>이 스키마 <b>한 벌</b>이 문서 구조화와 대화(세션) 추출 양쪽에 쓰입니다 — 버전은 없고 저장은 덮어쓰기입니다</li>
       </ul>
       키·표시명·설명은 전부 바꿔도 됩니다. <code>goal</code>·<code>approach</code>는 기본 이름일 뿐입니다.
       (행동/도구 노드는 대화에서 자동 생성 — 8층)
     </div>
   </details>
-  <div id="entLines"><span class="hint">불러오는 중…</span></div>
-  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-    <div class="fgroup">
-      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 왼쪽에서 항목을 고르고 오른쪽에서 내용을 채웁니다. 들여쓴 항목은 그 위 계층 칸에 붙는 속성입니다</small></div>
-      <div class="ve2">
-        <div class="velist">
-          <ul id="veList" role="listbox" aria-label="계층 칸과 속성 목록"></ul>
-          <div class="schedrow" style="margin:8px 0 0">
-            <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5칸) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
-            <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 칸에 붙는 부가 정보(그래프 9층)">＋ 속성</button>
-            <span class="hint" id="veCount" style="margin:0"></span>
-          </div>
-        </div>
-        <div class="vedetail" id="veDetail"></div>
-      </div>
-      <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
-        <div class="fgroup-t" style="margin-bottom:4px">관계 <small>— 위 엔티티들 사이의 타입드 관계. 문서에서 함께 추출되어 그래프에 점선으로 연결됩니다 (선택)</small></div>
-        <table class="vertable">
-          <thead><tr><th style="width:120px">키 (영문 권장)</th><th style="width:100px">표시명</th><th>설명 (추출 기준)</th><th style="width:130px">출발 타입</th><th style="width:130px">도착 타입</th><th style="width:36px"><span class="sronly">삭제</span></th></tr></thead>
-          <tbody id="veRels"></tbody>
-        </table>
-        <div class="schedrow" style="margin:6px 0 0">
-          <button type="button" class="ghost" id="veRelAdd">＋ 관계 추가</button>
-          <span class="hint" style="margin:0">예: located(위치) — company → place. 출발·도착은 위 표의 엔티티 키 중에서 고릅니다</span>
-        </div>
-      </div>
-    </div>
-    <div class="fgroup">
-      <div class="fgroup-t">2️⃣ 문서 포함/제외 기준 <small>— 어떤 문서를 지식으로 인정할지 + 뽑는 방식 지침 (선택, 빈값=코드 기본)</small></div>
-      <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
-    </div>
-    <div class="fgroup">
-      <div class="fgroup-t">3️⃣ 저장 <small>— 라인 목록에서 버전을 선택했으면 [✚ 버전 업], 새로 만들면 이름 넣고 [＋ 새 라인]</small></div>
-      <div id="veGate" class="vegate" style="margin:0 0 8px"></div>
-      <div class="schedrow" style="margin:0">
-        <label class="fld"><span>새 라인 이름</span>
-          <input id="veName" placeholder="비우면 버전 업만" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
-        <label class="fld" style="flex:1;min-width:240px"><span>설명 (사람용 — 이 추출기가 뭘 뽑는지)</span>
-          <input id="veDescr" placeholder="예: 기술 Q&A·문제해결 문서" style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
-        <label class="fld"><span>버전 메모</span>
-          <input id="veNote" placeholder="선택" style="min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
-        <button type="button" class="ghost" id="entNew">＋ 새 라인 만들기</button>
-        <span class="hint" id="veMsg" style="margin:0"></span>
-      </div>
-    </div>
-    <details id="entGraphPv" style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">🔒 그래프 구조 미리보기 — 지금 편집 중인 계층·속성·관계를 그림으로</summary>
-      <div id="entSchemaPv"></div>
-    </details>
-    <details style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 위 1·2로 생성되는 실제 프롬프트 · 출력 형식은 코드가 생성해 잠금</summary>
-      <div class="schedrow" style="margin:4px 0 0">
-        <button type="button" class="ghost" id="entPvBtn">🔄 현재 폼으로 미리보기</button>
-        <button type="button" class="ghost" id="entPvFillBtn">📄 실제 문서로 채워보기</button>
-        <span class="hint" style="margin:0">〔자동 입력: …〕 = 실행 때 문서·도메인 값이 자동으로 채워지는 칸</span>
-      </div>
-      <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">불러오는 중…</pre>
-    </details>
-    <details style="margin:6px 0">
-      <summary class="hint" style="cursor:pointer;margin:0">⚙ 고급 — 원문 전체 편집 (스캐폴드를 통째로 대체, 지정 시 위 2번 지침보다 우선)</summary>
-      <label class="k2">문서 판정 프롬프트 <small>{domain} {kind} {title} {body} — <b>{body} 필수</b>, 빈값=코드 기본</small></label>
-      <textarea id="veDoc" class="psta" spellcheck="false"></textarea>
-      <label class="k2">묶음 판정 프롬프트 <small>{domain} {docs} — <b>{docs} 필수</b></small></label>
-      <textarea id="vePack" class="psta" spellcheck="false"></textarea>
-    </details>
+  <div class="schedrow" style="margin:6px 0 0">
+    <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5개) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
+    <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 칸에 붙는 부가 정보(그래프 9층)">＋ 속성</button>
+    <button type="button" class="ghost" id="veRelAdd" title="선택한 노드에서 시작하는 관계 추가 — 파란 점을 끌어서 만들 수도 있습니다">＋ 관계</button>
+    <span class="hint" id="veCount" style="margin:0"></span>
   </div>
+  <div class="ve2 vecanvas">
+    <div id="entCanvas"></div>
+    <div class="vedetail" id="veDetail"></div>
+  </div>
+  <div class="fgroup">
+    <div class="fgroup-t">문서 포함/제외 기준 <small>— 어떤 문서를 지식으로 인정할지 + 뽑는 방식 지침 (선택, 빈값=코드 기본)</small></div>
+    <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
+  </div>
+  <div class="schedrow" style="margin:8px 0 0">
+    <label class="fld" style="flex:1;min-width:240px"><span>설명 (사람용 — 이 추출기가 뭘 뽑는지)</span>
+      <input id="veDescr" placeholder="예: 기술 Q&A·문제해결 문서" style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
+    <button type="button" id="entSave" title="지금 화면의 스키마로 덮어씁니다 — 새로 만드는 run이 이 스키마로 판정합니다">💾 저장 (덮어쓰기)</button>
+    <span class="hint" id="veMsg" style="margin:0"></span>
+  </div>
+  <div id="veGate" class="vegate" style="margin:6px 0 0"></div>
+  <details style="margin:8px 0 0">
+    <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 이 스키마·지침으로 만들어지는 실제 프롬프트</summary>
+    <div class="schedrow" style="margin:4px 0 0">
+      <button type="button" class="ghost" id="entPvBtn">🔄 현재 화면으로 미리보기</button>
+      <button type="button" class="ghost" id="entPvFillBtn">📄 실제 문서로 채워보기</button>
+      <span class="hint" style="margin:0">〔자동 입력: …〕 = 실행 때 문서·도메인 값이 자동으로 채워지는 칸</span>
+    </div>
+    <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">[🔄 현재 화면으로 미리보기]를 누르면 조립 결과가 보입니다</pre>
+  </details>
 </section>
 <section class="card" id="sec-cluster">
   <h2>② 병합 (클러스터) <small>①에서 뽑은 문구를 그래프에 합치기(dedup)</small></h2>
@@ -2636,134 +2614,329 @@ function chainBadge(c, i) {
   return i === 0 ? "진입점 🔗" : ((c.tags || []).includes("solution") ? "검증귀속 ⭐"
                                   : `체인 ${i + 1}단계`);
 }
-// ── 엔티티 스키마 편집기 — 들여쓴 목록 + 오른쪽 상세 (콘텐츠 모델링 도구 공통 패턴) ──
-// 계층은 들여쓰기로 보이고(속성은 소속 계층 칸 아래), 프로세(설명=추출 기준)는 상세 패널에서
-// 넓게 쓴다. 표 안에 입력칸을 늘어놓으면 열 폭을 다투고 무엇을 넣는 칸인지 안 읽힌다.
-const VE = {chain: [], attrs: [], sel: null};   // sel = {kind:"chain"|"attr", i}
+// ── ① 추출 (엔티티) — 스키마 캔버스가 편집기다 ────────────────────────────────
+// 엔티티는 **한 벌**이고 버전이 없다(저장=덮어쓰기). 노드를 클릭하면 오른쪽 패널에서
+// 내용을 채우고, 노드의 ＋로 다음 계층·속성을 뻗고, 파란 점을 끌어 놓으면 관계가 생긴다.
+// 배치는 자동 — 노드 좌표를 사람이 관리할 이유가 없다(저장도 안 한다).
+const VE = {chain: [], attrs: [], rels: [], sel: null, pos: {}, dirty: false};
+const VE_MAXCHAIN = 5;
+const SVGNS = "http://www.w3.org/2000/svg";
 
-function veTypesRead() {   // 모델 → etypes (체인 순서 + 속성)
-  return chainToEtypes(_veChainNorm(VE.chain.map(c => ({...c}))), VE.attrs);
+function _veNorm() {   // ⭐ 검증귀속 1개 보장 (첫 칸 제외, 없으면 마지막)
+  let sp = VE.chain.findIndex(c => (c.tags || []).includes("solution"));
+  if (sp <= 0) sp = VE.chain.length - 1;
+  VE.chain.forEach((c, i) => { c.tags = i === sp ? ["solution"] : []; });
+  return sp;
 }
-function veTypesSet(arr) {   // etypes → 모델 (v1 스키마도 normEtypes가 체인으로 변환)
-  const {chain, attrs} = normEtypes(arr);
-  VE.chain = chain; VE.attrs = attrs;
-  VE.sel = {kind: "chain", i: 0};
-  veRender();
-}
-function _veChainNorm(ch) {   // ⭐ 검증귀속 1개 보장 (첫 칸 제외, 없으면 마지막)
-  let spos = ch.findIndex(c => (c.tags || []).includes("solution"));
-  if (spos <= 0) spos = ch.length - 1;
-  ch.forEach((c, i) => { c.tags = i === spos ? ["solution"] : []; });
-  return ch;
+function veTypesRead() { return chainToEtypes(VE.chain, VE.attrs); }
+function veRelsRead() { return VE.rels.filter(r => r.key && r.source && r.target); }
+function veSchemaKeys() { return [...VE.chain, ...VE.attrs].filter(x => x.key).map(x => [x.key, x.label]); }
+function veItem(sel) {
+  if (!sel) return null;
+  return sel.kind === "chain" ? VE.chain[sel.i]
+       : sel.kind === "attr" ? VE.attrs[sel.i] : VE.rels[sel.i];
 }
 function veSel(kind, i) { VE.sel = {kind, i}; veRender(); }
+function veRender() { _veNorm(); veCanvas(); veDetail(); veGate(); veRail(); }
 
-function veRenderList() {   // 목록·카운트·저장가드만 (입력 중 포커스 유지)
-  _veChainNorm(VE.chain);
-  const ul = $("veList"); if (!ul) return;
-  ul.innerHTML = "";
-  const entry = VE.chain[0] || {key: "?"};
-  const li = (opts) => {
-    const el = document.createElement("li");
-    el.className = opts.cls; el.tabIndex = 0; el.setAttribute("role", "option");
-    el.setAttribute("aria-selected", String(!!opts.on));
-    if (opts.on) el.classList.add("on");
-    el.onclick = opts.pick; el.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); opts.pick(); } };
-    if (opts.badge) {
-      const b = document.createElement("span");
-      b.className = "vebadge " + opts.badgeCls; b.textContent = opts.badge;
-      el.appendChild(b);
-    }
-    const k = document.createElement("span"); k.className = "k"; k.textContent = opts.key || "(키 없음)";
-    el.appendChild(k);
-    if (opts.label) { const l = document.createElement("span"); l.className = "lbl";
-      l.textContent = opts.label; el.appendChild(l); }
-    const m = document.createElement("span"); m.className = "meta"; m.textContent = opts.meta;
-    el.appendChild(m);
-    (opts.btns || []).forEach(([txt, fn, dis, title]) => {
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "rowbtn"; b.textContent = txt; b.disabled = !!dis;
-      if (title) b.title = title;
-      b.onclick = (e) => { e.stopPropagation(); fn(); };
-      el.appendChild(b);
-    });
-    ul.appendChild(el);
-  };
-  VE.chain.forEach((c, i) => {
-    const isSol = (c.tags || []).includes("solution");
-    li({cls: "chain", on: VE.sel?.kind === "chain" && VE.sel.i === i,
-        pick: () => veSel("chain", i),
-        badge: i === 0 ? "🔗 진입점" : (isSol ? "⭐ 검증귀속" : null),
-        badgeCls: i === 0 ? "entry" : "sol",
-        key: c.key, label: c.label, meta: `${i + 1}단계 · 그래프 ${2 + i}층`,
-        btns: [
-          ["▲", () => { const a = VE.chain; [a[i - 1], a[i]] = [a[i], a[i - 1]]; veSel("chain", i - 1); },
-           i < 2, "위로 (첫 칸=진입점은 자리 고정)"],
-          ["▼", () => { const a = VE.chain; [a[i + 1], a[i]] = [a[i], a[i + 1]]; veSel("chain", i + 1); },
-           i < 1 || i >= VE.chain.length - 1, "아래로"],
-          ["✕", () => { const k = VE.chain[i].key;
-            VE.chain.splice(i, 1);
-            VE.rels_cleanup = k;   // 관계에서 이 키를 쓰던 행 제거
-            veRelsSet(veRelsRead().filter(r => r.source !== k && r.target !== k));
-            veSel("chain", Math.max(0, i - 1)); },
-           VE.chain.length <= 2 || i === 0, "이 계층 칸 삭제"],
-        ]});
-    if (i === 0)   // 속성은 진입점 칸에 붙는다 (백엔드 apply_extras 규약) → 그 아래 들여쓰기
-      VE.attrs.forEach((a, j) => li({
-        cls: "attr", on: VE.sel?.kind === "attr" && VE.sel.i === j,
-        pick: () => veSel("attr", j), key: a.key, label: a.label,
-        meta: `속성 → ${entry.key} · 그래프 9층`,
-        btns: [["✕", () => { const k = VE.attrs[j].key;
-          VE.attrs.splice(j, 1);
-          veRelsSet(veRelsRead().filter(r => r.source !== k && r.target !== k));
-          veSel("chain", 0); }, false, "이 속성 삭제"]]}));
-  });
-  $("veCount").textContent = `계층 ${VE.chain.length}/5 · 속성 ${VE.attrs.length}`;
-  veGate();
+async function veLoad() {
+  const j = await fetch("/admin/entity-schema").then(r => r.ok ? r.json() : null).catch(() => null);
+  const {chain, attrs} = normEtypes(parseEtypes(j && j.etypes));
+  VE.chain = chain; VE.attrs = attrs; VE.rels = parseEtypes(j && j.rtypes);
+  VE.sel = {kind: "chain", i: 0}; VE.dirty = false;
+  $("veCrit").value = (j && j.criteria) || "";
+  $("veDescr").value = (j && j.descr) || "";
+  $("veMsg").textContent = "";
+  veRender();
 }
-function veRender() { veRenderList(); veDetail(); }
+async function veSave() {
+  if (!veGate()) { $("veMsg").textContent = "위 ⚠ 사유를 먼저 해결하세요"; return; }
+  const r = await fetch("/admin/entity-schema", {method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({etypes: veTypesRead(), rtypes: veRelsRead(),
+                          criteria: $("veCrit").value, descr: $("veDescr").value})});
+  const j = await r.json().catch(() => ({}));
+  $("veMsg").textContent = r.ok ? `✓ ${j.note || "저장됨"}`
+    : (typeof j.detail === "string" ? j.detail : `저장 실패 ${r.status}`);
+  if (r.ok) { VE.dirty = false; veRail(); }
+}
 
+// 상태 레일 — 지금 스키마가 어떤 모양이고 저장됐는지 한 줄
+function veRail() {
+  const rail = $("entRail"); if (!rail) return;
+  rail.innerHTML = "";
+  const add = (t, cls) => { const s = document.createElement("span");
+    if (cls) s.className = cls; s.textContent = t; rail.appendChild(s); };
+  add("① 추출 (엔티티)", "step");
+  add(`계층 ${VE.chain.length}칸 · 속성 ${VE.attrs.length} · 관계 ${veRelsRead().length}`);
+  add("·", "sep");
+  add(VE.dirty ? "저장 안 된 변경 있음" : "저장됨", VE.dirty ? "" : "live");
+  add("·", "sep");
+  add("다음 → " + (VE.dirty ? "[💾 저장]을 누르면 새 run이 이 스키마로 판정합니다"
+                            : "노드를 클릭해 고치거나 ＋로 계층·속성을 늘리세요"), "next");
+}
+
+// ── 캔버스 (편집) — 자동 배치 ────────────────────────────────────────────────
+function veCanvas() {
+  const box = $("entCanvas"); if (!box) return;
+  box.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "scWrap"; wrap.id = "veWrap";
+  wrap.setAttribute("role", "group");
+  wrap.setAttribute("aria-label", "엔티티 스키마 — 노드를 클릭하면 오른쪽에서 편집합니다");
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "scEdges"); svg.id = "veSvg";
+  wrap.appendChild(svg); box.appendChild(wrap);
+  // 자동 배치: 계층은 왼쪽 세로열(위→아래 = 2층→n층), 속성은 진입점 오른쪽 열
+  const gapY = Math.max(76, Math.min(104, 420 / Math.max(1, VE.chain.length)));
+  VE.pos = {};
+  VE.chain.forEach((c, i) => { VE.pos["chain" + i] = {x: 24, y: 16 + i * gapY}; });
+  VE.attrs.forEach((a, i) => { VE.pos["attr" + i] = {x: 268, y: 16 + i * 92}; });
+  VE.els = {};
+  VE.chain.forEach((c, i) => wrap.appendChild(veNodeEl("chain", i)));
+  VE.attrs.forEach((a, i) => wrap.appendChild(veNodeEl("attr", i)));
+  const needH = 30 + Math.max(VE.chain.length * gapY, VE.attrs.length * 92);
+  wrap.style.height = Math.max(300, needH) + "px";
+  veEdges();
+}
+
+function veNodeEl(kind, i) {
+  const item = kind === "chain" ? VE.chain[i] : VE.attrs[i];
+  const on = VE.sel && VE.sel.kind === kind && VE.sel.i === i;
+  const el = document.createElement("div");
+  el.className = "scNode " + kind + (on ? " on" : "")
+    + (kind === "chain" && i === 0 ? " entry" : "")
+    + (kind === "chain" && (item.tags || []).includes("solution") ? " solution" : "");
+  const p = VE.pos[kind + i];
+  el.style.left = p.x + "px"; el.style.top = p.y + "px";
+  // 노드 본문 자체가 버튼 — 클릭·Enter로 선택된다. (버튼 안에 버튼을 두면 nested-interactive)
+  const pick = document.createElement("button");
+  pick.type = "button"; pick.className = "nsel";
+  pick.setAttribute("aria-pressed", on ? "true" : "false");
+  const r = document.createElement("span"); r.className = "r";
+  r.textContent = kind === "chain" ? `${chainBadge(item, i)} · ${2 + i}층` : "속성 ✏ · 9층";
+  const k = document.createElement("span"); k.className = "k"; k.textContent = item.key || "(키 없음)";
+  const l = document.createElement("span"); l.className = "l"; l.textContent = item.label || "(표시명 없음)";
+  pick.append(r, k, l);
+  pick.title = (item.desc || "(설명 없음)") + "\n선택하면 오른쪽에서 편집합니다";
+  pick.onclick = ev => { ev.stopPropagation(); veSel(kind, i); };
+  el.appendChild(pick);
+  // ＋ = 여기서 뻗기 (계층 노드는 다음 계층 칸, 속성 노드는 속성 하나 더)
+  const plus = document.createElement("button");
+  plus.type = "button"; plus.className = "nbtn plus"; plus.textContent = "＋";
+  plus.title = kind === "chain" ? "이 칸 다음에 계층 칸 추가" : "속성 하나 더 추가";
+  plus.onclick = ev => { ev.stopPropagation();
+    if (kind === "chain") veChainAdd(i + 1); else veAttrAdd(); };
+  el.appendChild(plus);
+  // ✕ = 삭제 (계층은 2칸 미만·진입점 불가)
+  const del = document.createElement("button");
+  del.type = "button"; del.className = "nbtn del"; del.textContent = "✕";
+  const canDel = kind === "attr" || (i > 0 && VE.chain.length > 2);
+  del.disabled = !canDel;
+  del.title = canDel ? "삭제"
+    : (i === 0 ? "진입점 칸은 지울 수 없습니다" : "계층은 2칸 이상이어야 합니다");
+  del.onclick = ev => { ev.stopPropagation(); veDelete(kind, i); };
+  el.appendChild(del);
+  // 관계용 포트 — 끌어서 다른 노드에 놓으면 관계 생성 (키보드 대체 = [＋ 관계] 버튼)
+  const port = document.createElement("div");
+  port.className = "scPort"; port.title = "끌어서 다른 노드에 놓으면 관계가 생깁니다";
+  port.onpointerdown = ev => vePortDrag(ev, item.key);
+  el.appendChild(port);
+  VE.els[kind + i] = el;
+  return el;
+}
+
+function veChainAdd(at) {
+  if (VE.chain.length >= VE_MAXCHAIN) { $("veMsg").textContent = `계층은 최대 ${VE_MAXCHAIN}칸입니다`; return; }
+  let n = 1; while (VE.chain.some(c => c.key === "step" + n)) n++;
+  const pos = at == null ? VE.chain.length : Math.max(1, at);
+  VE.chain.splice(pos, 0, {key: "step" + n, label: "", desc: "", tags: []});
+  VE.dirty = true; veSel("chain", pos);
+}
+function veAttrAdd() {
+  let n = 1; while (VE.attrs.some(a => a.key === "attr" + n)) n++;
+  VE.attrs.push({key: "attr" + n, label: "", desc: ""});
+  VE.dirty = true; veSel("attr", VE.attrs.length - 1);
+}
+function veRelAdd() {
+  const keys = veSchemaKeys().map(([k]) => k);
+  if (keys.length < 2) { $("veMsg").textContent = "관계는 엔티티가 2개 이상일 때 만듭니다"; return; }
+  const from = veItem(VE.sel) && VE.sel.kind !== "rel" ? veItem(VE.sel).key : keys[0];
+  const to = keys.find(k => k !== from) || keys[0];
+  let n = 1; while (VE.rels.some(r => r.key === "rel" + n)) n++;
+  VE.rels.push({key: "rel" + n, label: "", desc: "", source: from, target: to});
+  VE.dirty = true; veSel("rel", VE.rels.length - 1);
+}
+function veDelete(kind, i) {
+  const key = (kind === "chain" ? VE.chain[i] : VE.attrs[i]).key;
+  if (kind === "chain") VE.chain.splice(i, 1); else VE.attrs.splice(i, 1);
+  VE.rels = VE.rels.filter(r => r.source !== key && r.target !== key);   // 매달린 관계 정리
+  VE.dirty = true; VE.sel = {kind: "chain", i: 0}; veRender();
+}
+
+// 포트 드래그 → 관계 생성 (키보드 대체는 [＋ 관계] 버튼)
+function vePortDrag(ev, srcKey) {
+  ev.preventDefault(); ev.stopPropagation();
+  const wrap = $("veWrap"), svg = $("veSvg");
+  const rect = wrap.getBoundingClientRect();
+  const line = document.createElementNS(SVGNS, "path");
+  line.setAttribute("stroke", "#4a7dff"); line.setAttribute("stroke-width", "2");
+  line.setAttribute("stroke-dasharray", "4,3"); line.setAttribute("fill", "none");
+  svg.appendChild(line);
+  const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+  let hit = null;
+  const move = e => {
+    const x2 = e.clientX - rect.left, y2 = e.clientY - rect.top;
+    line.setAttribute("d", `M ${x1} ${y1} L ${x2} ${y2}`);
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const node = el && el.closest ? el.closest(".scNode") : null;
+    if (hit && hit !== node) hit.classList.remove("linktarget");
+    hit = node; if (hit) hit.classList.add("linktarget");
+  };
+  const up = () => {
+    document.removeEventListener("pointermove", move);
+    document.removeEventListener("pointerup", up);
+    line.remove();
+    if (hit) hit.classList.remove("linktarget");
+    const dstKey = hit && hit.querySelector(".k") ? hit.querySelector(".k").textContent : "";
+    if (dstKey && dstKey !== srcKey && dstKey !== "(키 없음)") {
+      let n = 1; while (VE.rels.some(r => r.key === "rel" + n)) n++;
+      VE.rels.push({key: "rel" + n, label: "", desc: "", source: srcKey, target: dstKey});
+      VE.dirty = true; veSel("rel", VE.rels.length - 1);
+      $("veMsg").textContent = `관계 추가: ${srcKey} → ${dstKey} — 오른쪽에서 키·설명을 채우세요`;
+    }
+  };
+  document.addEventListener("pointermove", move);
+  document.addEventListener("pointerup", up);
+}
+
+function veEdges() {
+  const svg = $("veSvg"); if (!svg) return;
+  svg.innerHTML = `<defs>
+    <marker id="veArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#7c5cd6"/></marker>
+    <marker id="veArrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#9aa3b2"/></marker></defs>`;
+  const idOf = key => {
+    let i = VE.chain.findIndex(c => c.key === key);
+    if (i >= 0) return "chain" + i;
+    i = VE.attrs.findIndex(a => a.key === key);
+    return i >= 0 ? "attr" + i : null;
+  };
+  const box = id => { const el = VE.els[id], p = VE.pos[id];
+    return el && p ? {x: p.x, y: p.y, w: el.offsetWidth, h: el.offsetHeight} : null; };
+  const draw = (fromId, toId, label, rel) => {
+    const a = box(fromId), b = box(toId);
+    if (!a || !b || fromId === toId) return;
+    const vertical = Math.abs((a.x + a.w / 2) - (b.x + b.w / 2)) < 40;
+    const p1 = vertical ? {x: a.x + a.w / 2, y: a.y + a.h} : {x: a.x + a.w, y: a.y + a.h / 2};
+    const p2 = vertical ? {x: b.x + b.w / 2, y: b.y} : {x: b.x, y: b.y + b.h / 2};
+    const path = document.createElementNS(SVGNS, "path");
+    path.setAttribute("d", vertical
+      ? `M ${p1.x} ${p1.y} C ${p1.x} ${p1.y + 26}, ${p2.x} ${p2.y - 26}, ${p2.x} ${p2.y}`
+      : `M ${p1.x} ${p1.y} C ${p1.x + 40} ${p1.y}, ${p2.x - 40} ${p2.y}, ${p2.x} ${p2.y}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", rel ? "#7c5cd6" : "#9aa3b2");
+    path.setAttribute("stroke-width", "1.8");
+    if (rel) path.setAttribute("stroke-dasharray", "5,4");
+    path.setAttribute("marker-end", rel ? "url(#veArr)" : "url(#veArrG)");
+    svg.appendChild(path);
+    const tx = document.createElementNS(SVGNS, "text");
+    if (vertical) {   // 세로 간선 — 라벨을 두 노드 사이 빈칸에 (노드에 가리지 않게)
+      tx.setAttribute("x", (p1.x + p2.x) / 2 + 8);
+      tx.setAttribute("y", (a.y + a.h + b.y) / 2 + 4);
+      tx.setAttribute("text-anchor", "start");
+    } else {          // 가로 간선은 관계·속성 라벨이 겹치지 않게 위치를 어긋나게
+      const t = rel ? .62 : .34;
+      tx.setAttribute("x", p1.x + (p2.x - p1.x) * t);
+      tx.setAttribute("y", p1.y + (p2.y - p1.y) * t - 6);
+      tx.setAttribute("text-anchor", "middle");
+    }
+    tx.setAttribute("class", "lbl");
+    if (!rel) { tx.setAttribute("fill", "#9aa3b2"); tx.setAttribute("font-weight", "400"); }
+    tx.textContent = label;
+    if (rel) {   // 관계 라벨 클릭 = 그 관계 편집
+      tx.style.cursor = "pointer";
+      tx.onclick = () => veSel("rel", VE.rels.indexOf(rel));
+    }
+    svg.appendChild(tx);
+  };
+  for (let i = 0; i < VE.chain.length - 1; i++)
+    draw("chain" + i, "chain" + (i + 1), `${2 + i}층 → ${3 + i}층`, null);
+  VE.attrs.forEach((a, i) => draw("chain0", "attr" + i, "속성", null));
+  VE.rels.forEach(r => {
+    const f = idOf(r.source), t = idOf(r.target);
+    if (f && t) draw(f, t, r.key, r);
+  });
+}
+
+// ── 오른쪽 상세 패널 — 계층 칸 / 속성 / 관계 ────────────────────────────────
 function veDetail() {
   const box = $("veDetail"); if (!box) return;
   box.innerHTML = "";
-  const sel = VE.sel;
-  const item = !sel ? null
-    : sel.kind === "chain" ? VE.chain[sel.i] : VE.attrs[sel.i];
+  const sel = VE.sel, item = veItem(sel);
   if (!item) {
-    box.innerHTML = `<div class="hint" style="margin:0">왼쪽에서 계층 칸이나 속성을 고르면 여기서 편집합니다</div>`;
+    box.innerHTML = `<div class="hint" style="margin:0">캔버스에서 노드나 관계 라벨을 클릭하면 여기서 편집합니다</div>`;
     return;
   }
-  const isChain = sel.kind === "chain";
-  const pos = sel.i;
+  const kind = sel.kind, pos = sel.i;
   const t = document.createElement("div"); t.className = "dt";
-  t.textContent = isChain
-    ? `${pos + 1}단계 계층 칸` : "속성";
+  t.textContent = kind === "chain" ? `${pos + 1}단계 계층 칸` : kind === "attr" ? "속성" : "관계";
   const ts = document.createElement("small");
-  ts.textContent = isChain ? `그래프 ${2 + pos}층에 저장` : `그래프 9층 · ${VE.chain[0]?.key}에 연결`;
+  ts.textContent = kind === "chain" ? `그래프 ${2 + pos}층에 저장`
+    : kind === "attr" ? `그래프 9층 · ${VE.chain[0] ? VE.chain[0].key : ""}에 연결`
+    : "문서에서 함께 추출되어 점선으로 연결";
   t.appendChild(ts); box.appendChild(t);
   const fld = (labelText, val, onInput, isArea, ph) => {
     const l = document.createElement("label"); l.textContent = labelText;
     const el = document.createElement(isArea ? "textarea" : "input");
     el.value = val || ""; if (ph) el.placeholder = ph;
-    el.oninput = () => onInput(el.value);
-    const id = "vd_" + labelText.replace(/\W/g, "");
+    el.oninput = () => { onInput(el.value); VE.dirty = true; };
+    const id = "vd_" + kind + labelText.replace(/\W/g, "");
     el.id = id; l.setAttribute("for", id);
     box.append(l, el);
     return el;
   };
-  fld("키 (영문 권장 — 추출 결과의 JSON 키)", item.key, v => {
-    const old = item.key; item.key = v.trim();
-    veRelsSet(veRelsRead().map(r => ({...r,
-      source: r.source === old ? item.key : r.source,
-      target: r.target === old ? item.key : r.target})));
-    veRenderList();
-  }, false, isChain ? "예: situation" : "예: library");
-  fld("표시명 (사람이 읽는 이름)", item.label, v => { item.label = v; veRenderList(); },
-      false, isChain ? "예: 문제상황" : "예: 라이브러리");
-  fld("설명 — 이 설명이 곧 추출 기준입니다", item.desc, v => { item.desc = v; }, true,
-      isChain ? "예: 문서가 다루는 문제를 한 문장으로 일반화" : "예: 문서에서 언급된 라이브러리 이름");
-  if (isChain) {
+  if (kind === "rel") {
+    fld("키 (영문 권장 — 관계 타입 이름)", item.key, v => { item.key = v.trim(); veCanvas(); veGate(); },
+        false, "예: uses");
+    fld("표시명", item.label, v => { item.label = v; }, false, "예: 사용");
+    fld("설명 — 이 관계가 무엇인지", item.desc, v => { item.desc = v; }, true,
+        "예: 접근법이 사용하는 라이브러리");
+    const mk = (labelText, cur, set) => {
+      const l = document.createElement("label"); l.textContent = labelText;
+      const s = document.createElement("select");
+      s.innerHTML = veSchemaKeys()
+        .map(([k, lb]) => `<option value="${esc(k)}">${esc(k)}${lb ? ` (${esc(lb)})` : ""}</option>`).join("");
+      if (cur) s.value = cur;
+      s.onchange = () => { set(s.value); VE.dirty = true; veCanvas(); veGate(); };
+      const id = "vd_rel_" + labelText.replace(/\W/g, "");
+      s.id = id; l.setAttribute("for", id);
+      box.append(l, s);
+    };
+    mk("출발 엔티티", item.source, v => item.source = v);
+    mk("도착 엔티티", item.target, v => item.target = v);
+    const rm = document.createElement("button");
+    rm.type = "button"; rm.className = "ghost"; rm.style.marginTop = "10px";
+    rm.textContent = "✕ 이 관계 삭제";
+    rm.onclick = () => { VE.rels.splice(pos, 1); VE.dirty = true; VE.sel = {kind: "chain", i: 0}; veRender(); };
+    box.appendChild(rm);
+  } else {
+    fld("키 (영문 권장 — 추출 결과의 JSON 키)", item.key, v => {
+      const old = item.key; item.key = v.trim();
+      VE.rels.forEach(r => {          // 키를 고치면 관계의 출발·도착도 따라간다
+        if (r.source === old) r.source = item.key;
+        if (r.target === old) r.target = item.key;
+      });
+      veCanvas(); veGate();
+    }, false, kind === "chain" ? "예: situation" : "예: library");
+    fld("표시명 (사람이 읽는 이름)", item.label, v => { item.label = v; veCanvas(); },
+        false, kind === "chain" ? "예: 문제상황" : "예: 라이브러리");
+    fld("설명 — 이 설명이 곧 추출 기준입니다", item.desc, v => { item.desc = v; }, true,
+        kind === "chain" ? "예: 문서가 다루는 문제를 한 문장으로 일반화"
+                         : "예: 문서에서 언급된 라이브러리 이름");
+  }
+  if (kind === "chain") {
     const rl = document.createElement("label"); rl.textContent = "역할";
     const rs = document.createElement("div"); rs.className = "roles";
     const mkRole = (txt, checked, dis, fn, note) => {
@@ -2772,8 +2945,8 @@ function veDetail() {
       r.type = "radio"; r.name = "veRole"; r.checked = checked; r.disabled = dis;
       r.onchange = fn;
       l.append(r, document.createTextNode(txt));
-      if (note) { const s = document.createElement("small");
-        s.style.color = "var(--mut)"; s.textContent = " " + note; l.appendChild(s); }
+      if (note) { const sm = document.createElement("small");
+        sm.style.color = "var(--mut)"; sm.textContent = " " + note; l.appendChild(sm); }
       rs.appendChild(l);
     };
     const isSol = (item.tags || []).includes("solution");
@@ -2781,116 +2954,68 @@ function veDetail() {
            pos === 0 ? "(첫 칸 고정)" : "(첫 칸만 가능)");
     mkRole("⭐ 검증귀속 — 성공/실패 카운트·추천이 붙음", isSol, pos === 0, () => {
       VE.chain.forEach((c, i) => { c.tags = i === pos ? ["solution"] : []; });
-      veRender();
+      VE.dirty = true; veRender();
     }, pos === 0 ? "(진입점 칸은 불가)" : "");
     mkRole("없음 — 중간 단계", !isSol && pos !== 0, pos === 0, () => {
-      if (isSol) {   // 마지막 칸으로 되돌림
+      if (isSol) {
         VE.chain.forEach((c, i) => { c.tags = i === VE.chain.length - 1 ? ["solution"] : []; });
-        veRender();
+        VE.dirty = true; veRender();
       }
     });
     box.append(rl, rs);
   }
   const n = document.createElement("div"); n.className = "note";
-  n.textContent = isChain
+  n.textContent = kind === "chain"
     ? "계층 칸은 순서대로 그래프에 쌓입니다. 모든 계층 칸의 값이 문서에서 나와야 그 문서가 반영됩니다 (하나라도 없으면 제외)."
-    : "속성은 값이 있을 때만 뽑힙니다. 같은 값(예: Keras)은 그래프 전체에서 노드 1개로 합쳐져 여러 문서가 공유합니다.";
+    : kind === "attr"
+    ? "속성은 값이 있을 때만 뽑힙니다. 같은 값(예: Keras)은 그래프 전체에서 노드 1개로 합쳐져 여러 문서가 공유합니다."
+    : "관계는 두 엔티티가 한 문서에서 같이 나왔을 때만 연결됩니다. 출발·도착은 위 엔티티 키 중에서 고릅니다.";
   box.appendChild(n);
 }
+
+// 저장 게이트 — 막혔으면 사유를 이름 대고 말한다
 function veGate() {
-  const el = $("veGate"); if (!el) return;
-  const msgs = [];
-  const ch = VE.chain;
-  if (ch.length < 2) msgs.push("계층 칸이 2개 이상이어야 합니다");
-  if (ch.some(c => !c.key.trim())) msgs.push("키가 빈 계층 칸이 있습니다");
+  const el = $("veGate"); if (!el) return true;
+  const msgs = [], keys = [...VE.chain.map(c => c.key), ...VE.attrs.map(a => a.key)].filter(Boolean);
+  if (VE.chain.length < 2) msgs.push("계층 칸이 2개 이상이어야 합니다");
+  if (VE.chain.some(c => !c.key.trim())) msgs.push("키가 빈 계층 칸이 있습니다");
   if (VE.attrs.some(a => !a.key.trim())) msgs.push("키가 빈 속성이 있습니다");
-  const keys = [...ch.map(c => c.key), ...VE.attrs.map(a => a.key)].filter(Boolean);
   if (new Set(keys).size !== keys.length) msgs.push("키가 중복됩니다");
-  if (!ch.some(c => (c.tags || []).includes("solution")) && ch.length >= 2)
+  if (!VE.chain.some(c => (c.tags || []).includes("solution")) && VE.chain.length >= 2)
     msgs.push("⭐ 검증귀속 칸을 골라야 합니다");
+  const bad = VE.rels.filter(r => !r.key.trim() || !keys.includes(r.source) || !keys.includes(r.target));
+  if (bad.length) msgs.push(`관계 ${bad.length}개의 키·출발·도착을 채워야 합니다`);
   el.className = "vegate" + (msgs.length ? "" : " ok");
-  el.textContent = msgs.length ? "⚠ 저장 불가: " + msgs.join(" · ")
-                               : "✓ 저장 가능 — 아래에서 버전 업 또는 새 라인";
+  el.textContent = msgs.length ? "⚠ 저장 불가: " + msgs.join(" · ") : "✓ 저장 가능";
+  const cnt = $("veCount");
+  if (cnt) cnt.textContent = `계층 ${VE.chain.length}/${VE_MAXCHAIN} · 속성 ${VE.attrs.length} · 관계 ${VE.rels.length}`;
   return !msgs.length;
 }
-const _entPv = document.getElementById("entGraphPv");
-if (_entPv) _entPv.addEventListener("toggle", () => {
-  if (_entPv.open) scShowModel("entSchemaPv");
-});
 
-$("veChainAdd").onclick = () => {
-  if (VE.chain.length >= 5) { $("veMsg").textContent = "계층은 최대 5칸입니다"; return; }
-  let n = 1; while (VE.chain.some(c => c.key === "step" + n)) n++;
-  VE.chain.push({key: "step" + n, label: "", desc: "", tags: []});
-  veSel("chain", VE.chain.length - 1);
-};
-$("veTypeAdd").onclick = () => {
-  let n = 1; while (VE.attrs.some(a => a.key === "attr" + n)) n++;
-  VE.attrs.push({key: "attr" + n, label: "", desc: ""});
-  veSel("attr", VE.attrs.length - 1);
-};
-veTypesSet([]);   // 초기 표시 — 라인 선택 전 기본 2칸 (목표→접근법)
-// ── 관계 행 편집기 — 출발/도착 select는 현재 폼의 엔티티 키로 (focus 시 재구성) ──
-function veSchemaKeys() {   // 관계 출발·도착 후보 = 계층 칸 + 속성 (모델에서)
-  return [...VE.chain, ...VE.attrs].filter(x => x.key).map(x => [x.key, x.label]);
-}
-function _veRelSel(cur) {
-  const s = document.createElement("select");
-  s.style.cssText = "width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid var(--line);border-radius:6px";
-  const fill = () => {
-    const v = s.value || cur || "";
-    s.innerHTML = veSchemaKeys()
-      .map(([k, l]) => `<option value="${esc(k)}">${esc(k)}${l ? ` (${esc(l)})` : ""}</option>`).join("");
-    if (v && [...s.options].some(o => o.value === v)) s.value = v;
-  };
-  fill(); s.onfocus = fill;   // 엔티티 키가 바뀌어도 열 때 최신 반영
-  return s;
-}
-function veRelRow(key, label, desc, source, target) {
-  const tr = document.createElement("tr"); tr.className = "relrow";
-  const mk = (ph, val) => { const td = document.createElement("td");
-    const i = document.createElement("input"); i.placeholder = ph; i.value = val || "";
-    i.style.cssText = _VE_IN; td.appendChild(i); tr.appendChild(td); return i; };
-  mk("키 (예: located)", key); mk("표시명 (예: 위치)", label);
-  mk("무엇이 이 관계인지 (예: 회사가 위치한 장소)", desc);
-  const ts = document.createElement("td"); const ss = _veRelSel(source); ts.appendChild(ss); tr.appendChild(ts);
-  const td2 = document.createElement("td"); const tt = _veRelSel(target); td2.appendChild(tt); tr.appendChild(td2);
-  const cx = document.createElement("td");
-  const x = document.createElement("button"); x.type = "button"; x.className = "ghost"; x.textContent = "✕";
-  x.onclick = () => tr.remove(); cx.appendChild(x); tr.appendChild(cx);
-  $("veRels").appendChild(tr);
-}
-function veRelsRead() {
-  return [...$("veRels").querySelectorAll(".relrow")].map(r => {
-    const ins = r.querySelectorAll("input"), sels = r.querySelectorAll("select");
-    return {key: ins[0].value.trim(), label: ins[1].value.trim(), desc: ins[2].value.trim(),
-            source: sels[0].value, target: sels[1].value};
-  }).filter(t => t.key);
-}
-function veRelsSet(arr) {
-  $("veRels").innerHTML = "";
-  (arr || []).forEach(t => veRelRow(t.key, t.label, t.desc, t.source, t.target));
-}
-$("veRelAdd").onclick = () => veRelRow("", "", "", "", "");
-$("entPvBtn").onclick = async () => {   // 현재 폼(스키마+지침)으로 서버 조립 미리보기 (한글 주석)
+$("veChainAdd").onclick = () => veChainAdd(null);
+$("veTypeAdd").onclick = () => veAttrAdd();
+$("veRelAdd").onclick = () => veRelAdd();
+$("entSave").onclick = () => veSave();
+$("veCrit").oninput = () => { VE.dirty = true; veRail(); };
+$("veDescr").oninput = () => { VE.dirty = true; veRail(); };
+$("entPvBtn").onclick = async () => {
   $("entScaffold").textContent = "조립 중…";
   const pv = await entPreview($("veCrit").value, veTypesRead(), false, veRelsRead());
   $("entScaffold").textContent = pv
     ? "── 문서 판정 프롬프트 ──\n" + annotatePh(pv.doc_prompt) +
-      "\n\n── 묶음 판정 프롬프트 ──\n" + annotatePh(pv.pack_prompt)
+      "\n\n── 묶음 판정 프롬프트 ──\n" + annotatePh(pv.pack_prompt) +
+      "\n\n── 대화(세션) 추출 프롬프트 ──\n" + annotatePh(pv.session_prompt)
     : "미리보기 실패";
 };
-$("entPvFillBtn").onclick = async () => {   // 실제 문서 1건으로 채운 완성본 — 보자마자 아는 미리보기
+$("entPvFillBtn").onclick = async () => {
   $("entScaffold").textContent = "실제 문서로 채우는 중…";
   const pv = await entPreview($("veCrit").value, veTypesRead(), true, veRelsRead());
-  if (pv && pv.doc_prompt_filled) {
-    $("entScaffold").textContent =
-      `📄 샘플: [${pv.sample.source}:${pv.sample.src_id}] ${pv.sample.title}\n` +
-      "── 이 문서가 실제로 LLM에게 가는 모습 ──\n" + pv.doc_prompt_filled;
-  } else {
-    $("entScaffold").textContent = "채울 샘플 문서가 없습니다 (도메인 지정된 소스에 적재 문서 필요)";
-  }
+  $("entScaffold").textContent = pv && pv.doc_prompt_filled
+    ? `📄 샘플: [${pv.sample.source}:${pv.sample.src_id}] ${pv.sample.title}\n` +
+      "── 이 문서가 실제로 LLM에게 가는 모습 ──\n" + pv.doc_prompt_filled
+    : "채울 샘플 문서가 없습니다 (도메인 지정된 소스에 적재 문서 필요)";
 };
+
 function parseEtypes(v) {   // 백엔드는 etypes를 JSON 문자열로 반환
   try { const a = JSON.parse(v || "[]"); return Array.isArray(a) ? a : []; }
   catch { return []; }
@@ -2911,68 +3036,6 @@ function annotatePh(t) {
   return Object.entries(_PH_KO).reduce(
     (s, [k, l]) => s.split("{" + k + "}").join("〔자동 입력: " + l + "〕"), t || "");
 }
-const ENTITY_VM = {
-  title: "① 추출(엔티티)", lines: "entLines", name: "veName", msg: "veMsg", newBtn: "entNew", radio: "entpick",
-  rail: "entRail", step: "① 추출 (엔티티)",
-  usedFor: "문서 구조화와 대화 추출이 이 스키마로 값을 뽑습니다",
-  hasDescr: true, scaffold: "entScaffold",
-  linesEndpoint: "/admin/entity-lines",
-  versions: n => `/admin/entity-lines/${encodeURIComponent(n)}/versions`,
-  setDefault: (n, v) => `/admin/entity-lines/${encodeURIComponent(n)}/versions/${v}/default`,
-  readForm: () => ({criteria: $("veCrit").value, descr: $("veDescr").value,
-    etypes: veTypesRead(), rtypes: veRelsRead(),
-    doc_prompt: $("veDoc").value, pack_prompt: $("vePack").value, note: $("veNote").value}),
-  setForm: v => { $("veCrit").value = v.criteria || ""; $("veDescr").value = v.descr || "";
-    veTypesSet(parseEtypes(v.etypes)); veRelsSet(parseEtypes(v.rtypes));
-    $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
-  summary: v => {
-    const {chain, attrs} = normEtypes(parseEtypes(v.etypes));
-    const nRel = parseEtypes(v.rtypes).length;
-    return (v.doc_prompt ? "원문:커스텀(고급)"
-            : chain.map(c => c.label || c.key).join("→")) +
-           (attrs.length ? `·속성${attrs.length}종` : "") + (nRel ? `·관계${nRel}종` : "") +
-           (v.criteria ? "·지침" : "");
-  },
-  viewSections: async v => {   // 서버 조립 결과 = 실제 LLM에 가는 프롬프트
-    const et = parseEtypes(v.etypes), rt = parseEtypes(v.rtypes);
-    const {chain, attrs} = normEtypes(et);
-    const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr, empty: "(설명 없음)"},
-                  {label: `스키마 — 계층 체인 ${chain.length}칸 + 속성 ${attrs.length}종`,
-                   table: {head: ["역할", "키", "표시명", "설명 (추출 기준)", "저장"], badge0: true,
-                           rows: [...chain.map((c, i) =>
-                                    [chainBadge(c, i), c.key, c.label || "", c.desc || "",
-                                     `그래프 ${2 + i}층`]),
-                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 9층"])]}}];
-    if (rt.length)
-      secs.push({label: `관계 (${rt.length}종)`,
-                 table: {head: ["키", "표시명", "설명", "시그니처"], badge0: true,
-                         rows: rt.map(r => [r.key, r.label || "", r.desc || "",
-                                            `${r.source} → ${r.target}`])}});
-    secs.push({label: "판정 지침 (문서 포함/제외 기준)", text: v.criteria, empty: "(없음 — 코드 기본 기준)"});
-    if (v.doc_prompt || v.pack_prompt) {   // 고급 원문 override가 있으면 그걸 표시
-      secs.push({label: "문서 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.doc_prompt), collapsed: true},
-                {label: "묶음 판정 프롬프트 — 커스텀(고급)", text: annotatePh(v.pack_prompt), collapsed: true});
-    } else {
-      const pv = await entPreview(v.criteria, et, false, rt);
-      secs.push({label: "적용될 문서 프롬프트 (서버 조립 결과 — 〔자동 입력〕은 실행 때 채워짐)",
-                 text: annotatePh(pv && pv.doc_prompt), collapsed: true},
-                {label: "적용될 묶음 프롬프트 (서버 조립 결과)",
-                 text: annotatePh(pv && pv.pack_prompt), collapsed: true},
-                {label: "적용될 세션(대화) 추출 프롬프트 (이 라인이 활성일 때 — 서버 조립 결과)",
-                 text: annotatePh(pv && pv.session_prompt), collapsed: true},
-                {label: "적용될 세션(태스크) 판정 프롬프트 (서버 조립 결과)",
-                 text: annotatePh(pv && pv.session_judge_prompt), collapsed: true});
-    }
-    secs.push({label: "메모", text: v.note, empty: "(없음)"});
-    return secs;
-  },
-  validate: () => {
-    if (!veGate()) { $("veMsg").textContent = "위 ⚠ 사유를 먼저 해결하세요"; return false; }
-    if ($("veDoc").value.trim() && !$("veDoc").value.includes("{body}")) { $("veMsg").textContent = "문서 프롬프트에 {body} 필요"; return false; }
-    if ($("vePack").value.trim() && !$("vePack").value.includes("{docs}")) { $("veMsg").textContent = "묶음 프롬프트에 {docs} 필요"; return false; }
-    return true;
-  },
-};
 const CLUSTER_VM = {
   title: "② 병합(클러스터)", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
   rail: "clsRail", step: "② 병합 (클러스터)",
@@ -3147,8 +3210,7 @@ function plPresetApply(p) {
   PL.view = null;
   const lv = (ln, v) => v != null ? `${ln}\t${v}` : undefined;
   PL.sel = {domain_version: p.domain_version ?? undefined,
-            entity: lv(p.entity_line, p.entity_version),
-            cluster: lv(p.cluster_line, p.cluster_version)};
+            cluster: lv(p.cluster_line, p.cluster_version)};   // 엔티티는 한 벌 — 담을 게 없다
   $("plModel").value = p.chat_model || "";
   $("plEmbed").value = p.embed_model || "";
   // 프리셋의 도메인은 소스 등록 도메인을 대신할 수 없다 (run은 소스 도메인으로 생성)
@@ -3173,14 +3235,11 @@ $("plPpSave").onclick = async () => {
       const [n, ver] = v.split("\t"); body[lk] = n; body[vk] = parseInt(ver);
     }
   };
-  split(sel.entity, "entity_line", "entity_version");
   split(sel.cluster, "cluster_line", "cluster_version");
   const r = await fetch("/admin/presets", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const jj = await r.json().catch(() => ({}));
-  $("plMsg").textContent = r.ok
-    ? `✓ ${jj.note}` + (Array.isArray(sel.entity) ? " (라우터 후보는 프리셋에 담기지 않습니다)" : "")
-    : (jj.detail || `저장 실패 ${r.status}`);
+  $("plMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `저장 실패 ${r.status}`);
   if (r.ok) { await plPresetsLoad(); $("plPreset").value = name; }
 };
 $("plPpDel").onclick = async () => {
@@ -3236,14 +3295,17 @@ async function plRefresh() {
   const [maps, datas, ents, clus, runs, status, domv] = await Promise.all([
     fetch(`/admin/sources/${encodeURIComponent(src)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []})),
     fetch(`/admin/sources/${encodeURIComponent(src)}/data-versions`).then(r => r.json()).catch(() => ({versions: []})),
-    fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []})),
+    fetch("/admin/entity-schema").then(r => r.json()).catch(() => null),
     fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []})),
     fetch(`/admin/sources/${encodeURIComponent(src)}/runs`).then(r => r.json()).catch(() => ({runs: []})),
     fetch("/admin/doc-status").then(r => r.json()).catch(() => ({sources: []})),
     dom ? fetch(`/admin/domains/${encodeURIComponent(dom)}/versions?page=1`).then(r => r.json()).catch(() => ({versions: []}))
         : Promise.resolve({versions: []})]);
+  const esc0 = normEtypes(parseEtypes(ents && ents.etypes));
   PL.d = {...PL.d, sinfo, dom, maps: maps.versions || [], datas: datas.versions || [],
-          ents: ents.versions || [], clus: clus.versions || [], runs: runs.runs || [],
+          ent: {chain: esc0.chain.map(c => c.label || c.key), attrs: esc0.attrs.length,
+                rels: parseEtypes(ents && ents.rtypes).length, criteria: !!(ents && ents.criteria)},
+          clus: clus.versions || [], runs: runs.runs || [],
           stat: (status.sources || []).find(x => x.source === src) || {},
           domv: domv.versions || []};
   plRender();
@@ -3412,32 +3474,17 @@ function plRender() {
         sub: (v.extract_hint || "").slice(0, 60), value: v.version})),
       onPick: v => { PL.sel.domain_version = v; plRender(); }}});
   plArrow(wrap);
-  // ⑤ ①추출(엔티티) — value "라인·v" 또는 "라우터·N" (sel.entity: 문자열=단일, 배열=라우터)
-  const eDef = D.ents.find(v => v.is_default) || D.ents[0] || null;
-  const eMulti = !viewing && Array.isArray(sel.entity) ? sel.entity
-    : (viewing && (R.entity_lines || []).length
-       ? R.entity_lines.map(l => `${l.line}\t${l.version}`) : null);
-  const eSelKey = eMulti ? "" : viewing
-    ? (R.entity_version != null ? `${R.entity_line}\t${R.entity_version}` : "")
-    : defOr(sel.entity, eDef ? `${eDef.name}\t${eDef.version}` : "");
-  const [eLn, eVr] = (eSelKey || "\t").split("\t");
+  // ⑤ ①추출(엔티티) — 스키마는 한 벌이라 고를 게 없다. 요약 + 편집 딥링크만.
+  const eSum = D.ent || {};
   plNode(wrap, {title: "① 추출 (엔티티)",
-    value: eMulti ? `라우터·${eMulti.length}` : eVr ? `${eLn}·v${eVr}` : "코드 기본",
-    sub: eMulti ? eMulti.map(s => s.replace("\t", "·v")).join(" + ") + " — 문서마다 분류"
-      : ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🔍더블클릭=구조 보기",
-    custom: !viewing && (Array.isArray(sel.entity) ? sel.entity.length > 0
-      : !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : "")),
-    onDbl: () => { const k = eMulti ? eMulti[0] : eSelKey;
-      const [ln, vr] = (k || "\t").split("\t");
-      scOpen(vr ? ln : "", vr ? parseInt(vr) : null); },
-    star: !viewing && !eMulti && !!eSelKey && eSelKey === (eDef ? `${eDef.name}\t${eDef.version}` : ""),
-    edit: {tab: "entity", label: "① 추출 (엔티티)"},
-    pop: viewing ? null : {title: "추출 스키마 선택 — 2개 이상 체크=라우터", multi: true,
-      current: eMulti || eSelKey,
-      items: D.ents.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
-        sub: v.note || "", value: `${v.name}\t${v.version}`})),
-      onPick: vs => { PL.sel.entity = vs.length > 1 ? vs : (vs[0] || undefined); plRender(); }}});
-  plArrow(wrap);
+    value: eSum.chain && eSum.chain.length ? eSum.chain.join(" → ") : "목표 → 접근법",
+    sub: viewing
+      ? ((R.entity_lines || []).length ? `이 run 스냅샷: 라우터·${R.entity_lines.length}`
+         : R.entity_version != null ? `이 run 스냅샷: ${R.entity_line}·v${R.entity_version}`
+         : "이 run 스냅샷: 코드 기본")
+      : `속성 ${eSum.attrs || 0} · 관계 ${eSum.rels || 0}` + (eSum.criteria ? " · 지침 있음" : ""),
+    fixed: true,
+    edit: {tab: "entity", label: "① 추출 (엔티티)"}});
   // ⑥ ②병합(클러스터)
   const cDef = D.clus.find(v => v.is_default) || D.clus[0] || null;
   const cSelKey = viewing
@@ -3525,9 +3572,6 @@ function plCloneRun(x) {   // run 스냅샷을 노드 선택으로 되돌린다 
   PL.sel = {domain_version: x.domain_version ?? undefined,
             mapping: x.join_version ?? undefined,
             data: x.data_version ?? undefined,
-            entity: (x.entity_lines || []).length
-              ? x.entity_lines.map(l => `${l.line}\t${l.version}`)
-              : (x.entity_version != null ? `${x.entity_line}\t${x.entity_version}` : undefined),
             cluster: x.cluster_version != null ? `${x.cluster_line}\t${x.cluster_version}` : undefined};
   $("plModel").value = x.chat_model || "";
   $("plEmbed").value = x.embed_model || "";
@@ -3544,10 +3588,6 @@ async function plCreateRun() {
   const body = {};
   if (PL.sel.domain_version != null) body.domain_version = PL.sel.domain_version;
   const lv = (s, lk, vk) => { if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
-  if (Array.isArray(PL.sel.entity))   // 라우터 — 라인 후보 2개 이상
-    body.entity_lines = PL.sel.entity.map(s => {
-      const [n, v] = s.split("\t"); return {line: n, version: parseInt(v)}; });
-  else lv(PL.sel.entity, "entity_line", "entity_version");
   lv(PL.sel.cluster, "cluster_line", "cluster_version");
   if (PL.sel.mapping != null) body.join_version = PL.sel.mapping;
   if (PL.sel.data != null) body.data_version = PL.sel.data;
@@ -3564,149 +3604,11 @@ async function plCreateRun() {
 
 // ── 스키마 캔버스 — ①추출 노드 더블클릭: 엔티티·관계를 노드와 선으로 직접 설계 (n8n식) ──
 // 노드 드래그=이동 · 노드 클릭=편집 · 파란 포트를 끌어 다른 노드에 놓기=관계 생성 · 선 라벨 클릭=관계 편집
-const SC = {line: "", ver: null, base: null, nodes: [], rels: [], els: {}};
-function scRoleText(n) {
-  if (n.role === "attr") return "속성 ✏ · 그래프 9층";
-  const i = n.pos || 0;
-  return chainBadge(n, i) + ` · 그래프 ${2 + i}층`;
-}
-function scChainNodes() {   // 체인 노드를 pos 순으로
-  return SC.nodes.filter(n => n.role === "chain").sort((a, b) => a.pos - b.pos);
-}
-function scLayoutChain() {   // 체인 세로열 자동 배치 (속성은 사용자가 끈 자리 유지)
-  const ch = scChainNodes();
-  const gap = Math.min(115, 380 / Math.max(1, ch.length - 1));
-  ch.forEach((n, i) => { n.pos = i; n.x = 30; n.y = 28 + i * gap; });
-}
-
-// 편집 중인 모델을 그대로 그리는 미리보기 — 다이어그램은 '보기'이고 편집은 목록+상세에서.
-function scShowModel(mount) {
-  SC.line = ""; SC.ver = null; SC.mount = mount;
-  SC.base = {criteria: "", descr: "", doc_prompt: "", pack_prompt: ""};
-  SC.nodes = VE.chain.map((c, i) => ({key: c.key, label: c.label || "", desc: c.desc || "",
-                                      role: "chain", pos: i, tags: c.tags || [], x: 0, y: 0}));
-  VE.attrs.forEach((a, i) =>
-    SC.nodes.push({key: a.key, label: a.label || "", desc: a.desc || "", role: "attr",
-                   x: 340 + (i % 3) * 205, y: 50 + Math.floor(i / 3) * 130}));
-  scLayoutChain();
-  SC.rels = veRelsRead();
-  scBuild(); scRender();
-}
-
-async function scOpen(line, ver, mount) {
-  let base = {criteria: "", descr: "", note: "", doc_prompt: "", pack_prompt: "", etypes: "[]", rtypes: "[]"};
-  if (line && ver != null)
-    base = await fetch(`/admin/entity-lines/${encodeURIComponent(line)}/versions/${ver}`)
-      .then(r => r.ok ? r.json() : base).catch(() => base);
-  SC.line = line || ""; SC.ver = ver; SC.base = base; SC.mount = mount || "plSchema";
-  const {chain, attrs} = normEtypes(parseEtypes(base.etypes));   // v1도 체인 2칸으로
-  SC.nodes = chain.map((c, i) => ({key: c.key, label: c.label || "", desc: c.desc || "",
-                                   role: "chain", pos: i, tags: c.tags || [], x: 0, y: 0}));
-  attrs.forEach((t, i) =>
-    SC.nodes.push({key: t.key, label: t.label || "", desc: t.desc || "", role: "attr",
-                   x: 340 + (i % 3) * 205, y: 50 + Math.floor(i / 3) * 130}));
-  scLayoutChain();
-  SC.rels = parseEtypes(base.rtypes);
-  scBuild(); scRender();
-  $("plSchema").scrollIntoView({behavior: "smooth", block: "nearest"});
-}
-
-function scBuild() {
-  // 읽기 전용 뷰어 — 편집은 [① 추출] 탭의 목록+상세에서 한다 (편집 경로를 하나로).
-  // 캔버스를 주 편집기로 쓰는 스키마 도구는 사실상 없다: Airtable 스키마 그래프도
-  // "visualization-only … never modifies your data"이고, 드래그 편집은 WCAG 2.2 SC 2.5.7의
-  // 비드래그 대체 요구까지 따라온다. 그래서 여기서는 '보여주기'만 한다.
-  const box = $(SC.mount || "plSchema"); box.style.display = ""; box.innerHTML = "";
-  const head = document.createElement("div"); head.className = "schedrow"; head.style.marginTop = "10px";
-  const t = document.createElement("b");
-  t.textContent = SC.line ? `🔒 스키마 미리보기 — ${SC.line}·v${SC.ver}` : "🔒 스키마 미리보기";
-  const edit = document.createElement("button"); edit.type = "button"; edit.className = "ghost";
-  edit.textContent = "✏ [① 추출] 탭에서 편집";
-  edit.onclick = () => showTab("entity");
-  const close = document.createElement("button"); close.type = "button"; close.className = "ghost";
-  close.textContent = "✕ 닫기";
-  close.onclick = () => { box.style.display = "none"; box.innerHTML = ""; };
-  const msg = document.createElement("span"); msg.className = "hint"; msg.id = "scvMsg"; msg.style.margin = "0";
-  head.append(t, edit, close, msg); box.appendChild(head);
-  const h = document.createElement("p"); h.className = "hint"; h.style.margin = "2px 0";
-  h.textContent = "회색 실선 = 계층·속성 연결 · 보라 점선 = 관계. 노드에 마우스를 올리면 설명이 보입니다.";
-  box.appendChild(h);
-  const wrap = document.createElement("div"); wrap.className = "scWrap"; wrap.id = "scWrap";
-  wrap.tabIndex = 0; wrap.setAttribute("role", "img");
-  wrap.setAttribute("aria-label", "스키마 구조 미리보기 — 계층·속성·관계 다이어그램");
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "scEdges"); svg.id = "scSvg";
-  wrap.appendChild(svg); box.appendChild(wrap);
-}
-
-function scRender() {
-  const wrap = $("scWrap");
-  wrap.querySelectorAll(".scNode, .scPop").forEach(n => n.remove());
-  SC.els = {};
-  SC.nodes.forEach(n => { const el = scNodeEl(n); wrap.appendChild(el); SC.els[n.key] = el; });
-  scDrawEdges();
-}
-
-function scNodeEl(n) {
-  const el = document.createElement("div");
-  el.className = "scNode " + n.role
-    + (n.role === "chain" && n.pos === 0 ? " entry" : "")
-    + (n.role === "chain" && (n.tags || []).includes("solution") ? " solution" : "");
-  el.dataset.key = n.key;
-  el.style.left = n.x + "px"; el.style.top = n.y + "px";
-  const r = document.createElement("div"); r.className = "r"; r.textContent = scRoleText(n);
-  const k = document.createElement("div"); k.className = "k"; k.textContent = n.key;
-  const l = document.createElement("div"); l.className = "l"; l.textContent = n.label || "(표시명 없음)";
-  el.append(r, k, l);
-  el.title = (n.desc || "(설명 없음)") + "\n편집은 [① 추출] 탭에서";
-  el.style.cursor = "default";
-  return el;
-}
-
-function scDrawEdges() {
-  const svg = $("scSvg");
-  if (!svg) return;
-  svg.innerHTML = `<defs>
-    <marker id="scArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0L10 5L0 10z" fill="#7c5cd6"/></marker>
-    <marker id="scArrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 0L10 5L0 10z" fill="#9aa3b2"/></marker></defs>`;
-  const draw = (srcK, dstK, lbl, rel) => {
-    const s = SC.nodes.find(q => q.key === srcK), d = SC.nodes.find(q => q.key === dstK);
-    const se = SC.els[srcK], de = SC.els[dstK];
-    if (!s || !d || !se || !de || srcK === dstK) return;
-    const x1 = s.x + se.offsetWidth, y1 = s.y + se.offsetHeight / 2;
-    const x2 = d.x, y2 = d.y + de.offsetHeight / 2;
-    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", `M ${x1} ${y1} C ${x1 + 60} ${y1}, ${x2 - 60} ${y2}, ${x2} ${y2}`);
-    p.setAttribute("fill", "none");
-    p.setAttribute("stroke", rel ? "#7c5cd6" : "#9aa3b2");
-    p.setAttribute("stroke-width", "1.8");
-    if (rel) p.setAttribute("stroke-dasharray", "5,4");
-    p.setAttribute("marker-end", rel ? "url(#scArr)" : "url(#scArrG)");
-    svg.appendChild(p);
-    const tx = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    tx.setAttribute("x", (x1 + x2) / 2); tx.setAttribute("y", (y1 + y2) / 2 - 7);
-    tx.setAttribute("text-anchor", "middle");
-    tx.setAttribute("class", "lbl");
-    if (!rel) { tx.setAttribute("fill", "#9aa3b2"); tx.setAttribute("font-weight", "400"); }
-    tx.textContent = lbl;
-    svg.appendChild(tx);
-  };
-  const ch = scChainNodes();
-  for (let i = 0; i < ch.length - 1; i++)   // 계층 체인 구조 간선 — 칸 사이 자동
-    draw(ch[i].key, ch[i + 1].key, `(계층 ${2 + i}층→${3 + i}층)`, null);
-  if (ch.length)   // 속성 부착선 — 진입점 칸에 자동 연결 (실제 그래프 모양 미리보기)
-    SC.nodes.filter(n => n.role === "attr")
-      .forEach(a => draw(ch[0].key, a.key, "속성", null));
-  SC.rels.forEach(r => draw(r.source, r.target, r.key, r));
-}
-
 const TABS = {
   pipe:    {secs: ["sec-pipe"], load: () => loadPipeline()},
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
-  entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
+  entity:  {secs: ["sec-entity"], load: () => veLoad()},
   cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},

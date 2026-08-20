@@ -10,6 +10,7 @@ import time
 import traceback
 from typing import Literal
 
+import oracledb
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -662,53 +663,66 @@ def _cluster_vals(inp) -> dict:
 
 
 # 엔티티 -----------------------------------------------------------------
-@router.get("/admin/entity-versions")
-def admin_entity_versions():
-    """전체 (라인, 버전) 평면 목록 — run 폼 드롭다운용."""
+# 엔티티 스키마는 **한 벌**이다 — 라인·버전 관리를 없앴다 (2026-08-20 결정).
+# 이유: 버전 수·라인 목록이 화면 복잡도의 절반을 차지하는데, 실제로 쓰는 건 항상 최신 한 벌.
+# 저장은 덮어쓰기(이력 없음). 이미 만들어진 run은 자기 스냅샷을 들고 있어 재현·비교가 유지된다.
+SCHEMA_LINE = "기본"
+
+
+def _schema_row(cur) -> tuple[str, int]:
+    """단일 스키마가 사는 (라인, 버전) = (기본, 1). 여러 행이 남아 있으면 한 벌로 접는다.
+    접기 규칙: 남길 내용 = 기본 라인의 최신 버전 (없으면 아무 라인의 최신) — 마지막으로 쓰던 스키마.
+    관례와 다른 지점: 여기서만 name·version을 직접 UPDATE한다 (versioning 헬퍼는 append 전용)."""
+    _ensure_entity_versions(cur)
+    cur.execute("SELECT COUNT(*) FROM entity_versions")
+    n = cur.fetchone()[0]
+    if not n:
+        versioning.new_line(cur, versioning.ENTITY_SPEC, SCHEMA_LINE, _EMPTY_SCHEMA_VALS)
+    elif n > 1:
+        cur.execute("""SELECT name, version FROM entity_versions
+                       ORDER BY CASE WHEN name = :1 THEN 0 ELSE 1 END, version DESC
+                       FETCH FIRST 1 ROWS ONLY""", [SCHEMA_LINE])
+        keep = cur.fetchone()
+        cur.execute("DELETE FROM entity_versions WHERE NOT (name = :1 AND version = :2)", keep)
+    # 원문 프롬프트 override(고급)는 UI에서 없앴다 — 남아 있으면 조용히 조립 결과를 덮어쓰므로 비운다
+    cur.execute("""UPDATE entity_versions SET name = :1, version = 1, is_default = 'Y',
+                   doc_prompt = NULL, pack_prompt = NULL, note = NULL""", [SCHEMA_LINE])
+    return SCHEMA_LINE, 1
+
+
+_EMPTY_SCHEMA_VALS = {"doc_prompt": None, "pack_prompt": None, "criteria": None,
+                      "descr": None, "etypes": None, "rtypes": None}
+
+
+@router.get("/admin/entity-schema")
+def admin_entity_schema():
+    """지금 쓰는 엔티티 스키마 한 벌 + 코드 기본 프롬프트."""
     with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        return {"versions": versioning.list_flat(cur, versioning.ENTITY_SPEC)}
-
-
-@router.get("/admin/entity-lines")
-def admin_entity_lines():
-    """엔티티 라인 목록(+최신 설명) + 코드 기본 프롬프트 — 빈 버전의 실체를 UI가 보여줄 수 있게."""
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        lines = versioning.list_lines(cur, versioning.ENTITY_SPEC)
-        cur.execute("""SELECT e.name, e.descr FROM entity_versions e
-                       WHERE e.version = (SELECT MAX(version) FROM entity_versions
-                                          WHERE name = e.name)""")
-        descr = {r[0]: (r[1] or "") for r in cur.fetchall()}
-        for ln in lines:
-            ln["descr"] = descr.get(ln["name"], "")
-        return {"lines": lines,
-                "defaults": {"doc_prompt": _judge.DOC_PROMPT,
-                             "pack_prompt": _judge.PACK_PROMPT}}
-
-
-@router.get("/admin/entity-lines/{name}/versions")
-def admin_entity_line_versions(name: str, page: int = 1):
-    """한 라인의 버전 목록 — 최신순, 10개 페이지."""
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        return versioning.list_versions(cur, versioning.ENTITY_SPEC, name, page)
-
-
-@router.get("/admin/entity-lines/{name}/versions/{v}")
-def admin_entity_version_get(name: str, v: int):
-    """버전 단건 조회 — 스키마 캔버스가 특정 (라인, 버전)의 내용을 로드할 때."""
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, descr, etypes, rtypes, note
-                       FROM entity_versions WHERE name = :1 AND version = :2""", [name, v])
+        name, ver = _schema_row(cur)
+        cur.execute("""SELECT criteria, descr, etypes, rtypes FROM entity_versions
+                       WHERE name = :1 AND version = :2""", [name, ver])
         r = cur.fetchone()
-        if not r:
-            raise HTTPException(404, f"없는 버전: {name} v{v}")
-    return {"name": name, "version": v,
-            "doc_prompt": _lob_str(r[0]), "pack_prompt": _lob_str(r[1]),
-            "criteria": _lob_str(r[2]), "descr": r[3] or "",
-            "etypes": _lob_str(r[4]), "rtypes": _lob_str(r[5]), "note": r[6] or ""}
+    return {"criteria": _lob_str(r[0]), "descr": r[1] or "",
+            "etypes": _lob_str(r[2]), "rtypes": _lob_str(r[3]),
+            "defaults": {"doc_prompt": _judge.DOC_PROMPT, "pack_prompt": _judge.PACK_PROMPT}}
+
+
+@router.put("/admin/entity-schema")
+def admin_entity_schema_put(inp: EntityVersionIn):
+    """덮어쓰기 저장 — 검증은 EntityVersionIn의 _etypes/_rtypes가 그대로 한다."""
+    import json
+    with db_cursor() as cur:
+        name, ver = _schema_row(cur)
+        cur.setinputsizes(etypes=oracledb.DB_TYPE_CLOB, rtypes=oracledb.DB_TYPE_CLOB,
+                          criteria=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE entity_versions
+                       SET etypes = :etypes, rtypes = :rtypes, criteria = :criteria, descr = :descr
+                       WHERE name = :nm AND version = :vr""",
+                    {"etypes": json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None,
+                     "rtypes": json.dumps(inp.rtypes, ensure_ascii=False) if inp.rtypes else None,
+                     "criteria": inp.criteria.strip() or None,
+                     "descr": inp.descr.strip() or None, "nm": name, "vr": ver})
+    return {"ok": True, "note": "엔티티 스키마 저장됨 — 새로 만드는 run이 이 스키마로 판정합니다"}
 
 
 class EntityPreviewIn(BaseModel):
@@ -758,43 +772,6 @@ def admin_entity_preview(inp: EntityPreviewIn):
                     out["sample"] = {"source": sname, "src_id": doc[0],
                                      "title": (doc[1] or "").strip()[:120]}
     return out
-
-
-@router.post("/admin/entity-lines")
-def admin_entity_line_add(inp: EntityLineIn):
-    """새 라인 = 새 이름 v1 (기본 지정은 별도)."""
-    _validate_entity(inp.doc_prompt, inp.pack_prompt)
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        try:
-            versioning.new_line(cur, versioning.ENTITY_SPEC, inp.name, _entity_vals(inp))
-        except ValueError as e:
-            raise HTTPException(409, str(e))
-    return {"ok": True, "note": f"라인 '{inp.name}' v1 생성됨 — 기본으로 쓰려면 [기본으로 지정]"}
-
-
-@router.post("/admin/entity-lines/{name}/versions")
-def admin_entity_version_up(name: str, inp: EntityVersionIn):
-    """버전 업 — 기존 라인에 새 버전 (기본 지정은 별도)."""
-    _validate_entity(inp.doc_prompt, inp.pack_prompt)
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        try:
-            v = versioning.version_up(cur, versioning.ENTITY_SPEC, name, _entity_vals(inp))
-        except KeyError:
-            raise HTTPException(404, f"없는 라인: {name} (버전 업은 기존 라인에만)")
-    return {"ok": True, "version": v, "note": f"{name} v{v} 생성됨 — 아직 기본이 아닙니다"}
-
-
-@router.post("/admin/entity-lines/{name}/versions/{v}/default")
-def admin_entity_version_default(name: str, v: int):
-    with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        try:
-            versioning.set_default(cur, versioning.ENTITY_SPEC, name, v)
-        except KeyError:
-            raise HTTPException(404, f"없는 버전: {name} v{v}")
-    return {"ok": True, "note": f"{name} v{v}이(가) 기본 — 새 조합 run이 이 기준으로 스냅샷"}
 
 
 # 클러스터 ---------------------------------------------------------------
@@ -1579,7 +1556,6 @@ def admin_source_runs(sname: str):
             row["labels"] = sorted(lbl.get(row["run_id"], []))
         # stale 배지 (Dagster 패턴) — 활성 run의 조합이 현재 기본 버전들보다 뒤처졌는지
         from graph.doc_pipeline.runs import _default_mapping_ver, _default_data_ver
-        en, ev = versioning.active(cur, "entity_versions")
         cn, cv = versioning.active(cur, "cluster_versions")
         mv = _default_mapping_ver(cur, sname)
         dv = _default_data_ver(cur, sname)
@@ -1597,12 +1573,6 @@ def admin_source_runs(sname: str):
                 stale.append(f"도메인 v{row['domain_version']}→v{int(dmr[0])}")
             def _lv(ln, v):   # 라인·버전 표기 (미지정 run은 '미지정')
                 return f"{ln}·v{v}" if v is not None else "미지정"
-            if row["entity_lines"]:   # 라우터 run — 활성 (라인, 버전)이 후보 집합 밖일 때만
-                if en and ev is not None and \
-                        (en, ev) not in {(l["line"], l["version"]) for l in row["entity_lines"]}:
-                    stale.append(f"①추출 라우터·{len(row['entity_lines'])}→{en}·v{ev}")
-            elif en and ev is not None and (row["entity_line"], row["entity_version"]) != (en, ev):
-                stale.append(f"①추출 {_lv(row['entity_line'], row['entity_version'])}→{en}·v{ev}")
             if cn and cv is not None and (row["cluster_line"], row["cluster_version"]) != (cn, cv):
                 stale.append(f"②병합 {_lv(row['cluster_line'], row['cluster_version'])}→{cn}·v{cv}")
             if mv is not None and row["join_version"] not in (None, mv):
