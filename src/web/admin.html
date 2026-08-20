@@ -1040,10 +1040,11 @@ async function loadDomainOptions(force) {
 }
 async function loadCols(t) {   // 매핑 편집기의 컬럼 select 채우기
   const selects = ["mvId", "mvTs", ...ROLE_IDS];
-  if (!t) { selects.forEach(id => { $(id).length = 1; }); return; }
+  selects.forEach(id => { $(id).length = 1; });   // 먼저 비운다 — 조회 실패 시
+  if (!t) return;                                 // 다른 테이블의 컬럼이 남지 않게
   if (!_colCache[t]) {
     const r = await fetch("/admin/sources/tables/" + encodeURIComponent(t));
-    if (!r.ok) return;
+    if (!r.ok) return;   // 테이블이 없어졌거나 화이트리스트 밖 — 등록값만 _ensureOpt로 표시
     _colCache[t] = (await r.json()).columns;
   }
   selects.forEach(id => {
