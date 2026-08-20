@@ -155,6 +155,8 @@ class NodeEvidence(Base):
                      primary_key=True)
     kind = Column(String(10), primary_key=True)   # session|doc
     ref = Column(String(400), primary_key=True)   # 세션id 또는 소스명:원천id
+    # run 귀속 (B-full 버저닝) — 같은 문서를 두 run이 판정해도 PK 충돌 없음. 세션은 '-'.
+    run_id = Column(String(32), primary_key=True, server_default=text("'-'"))
     __table_args__ = (CheckConstraint("kind IN ('session','doc')",
                                       name="node_evidence_kind_ck"),)
 

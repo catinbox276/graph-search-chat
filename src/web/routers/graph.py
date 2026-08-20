@@ -26,7 +26,8 @@ def graph_search(q: str, request: Request, n: int = 40):
 
 
 @router.get("/graph/data")
-def graph_data(request: Request):
+def graph_data(request: Request, relations_run: str = ""):
+    """relations_run: 특정 run의 관계까지 미리보기(관리자 검토용) — 기본은 활성 run만."""
     auth.require_user(request)
     con = db()
     cur = con.cursor()
@@ -60,7 +61,9 @@ def graph_data(request: Request):
                        FROM entity_relations er
                        WHERE er.run_id = '-'
                           OR er.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')
-                       GROUP BY er.src, er.dst, er.rtype""")
+                          OR er.run_id = :rr
+                       GROUP BY er.src, er.dst, er.rtype""",
+                    {"rr": relations_run or "-"})
         relations = [{"src": r[0], "dst": r[1], "rtype": r[2], "count": r[3]}
                      for r in cur.fetchall()]
     except Exception:

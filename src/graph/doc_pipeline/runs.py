@@ -94,12 +94,17 @@ def ensure_runs(cur):
                    WHERE table_name = 'NODE_EVIDENCE' AND column_name = 'RUN_ID'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE node_evidence ADD (run_id VARCHAR2(32) DEFAULT '-' NOT NULL)")
-        # 구버전 PK는 시스템 이름(SYS_C…)일 수 있어 실제 이름을 조회해 드랍
-        cur.execute("""SELECT constraint_name FROM user_constraints
-                       WHERE table_name = 'NODE_EVIDENCE' AND constraint_type = 'P'""")
-        r = cur.fetchone()
-        if r:
-            cur.execute(f'ALTER TABLE node_evidence DROP CONSTRAINT "{r[0]}" DROP INDEX')
+    # PK가 run_id를 포함하는지 — 컬럼 유무가 아니라 PK 구성으로 판정 (멱등).
+    # ORM create_all(3컬럼 PK) 후 컬럼만 추가된 어긋난 상태도 여기서 복구된다:
+    # 같은 문서를 두 run이 판정하면 3컬럼 PK가 ORA-00001을 내는 버그의 근본 수정.
+    cur.execute("""SELECT c.constraint_name FROM user_constraints c
+                   WHERE c.table_name = 'NODE_EVIDENCE' AND c.constraint_type = 'P'
+                     AND NOT EXISTS (SELECT 1 FROM user_cons_columns cc
+                                     WHERE cc.constraint_name = c.constraint_name
+                                       AND cc.column_name = 'RUN_ID')""")
+    r = cur.fetchone()
+    if r:   # 구버전 PK(시스템 이름 가능) → run_id 포함 PK로 교체. 4컬럼은 3컬럼의 상위집합이라 안전
+        cur.execute(f'ALTER TABLE node_evidence DROP CONSTRAINT "{r[0]}" DROP INDEX')
         cur.execute("""ALTER TABLE node_evidence ADD CONSTRAINT node_evidence_pk
                        PRIMARY KEY (node_id, kind, ref, run_id)""")
     _backfill_legacy(cur)

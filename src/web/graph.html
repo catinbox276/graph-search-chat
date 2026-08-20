@@ -109,7 +109,9 @@ const LAYER_NAME = {1: "도메인", 2: "목표", 3: "접근법", 4: "행동/도�
 let NODES = [], EDGES = [], net, vnodes, vedges;
 let PARENTS = {}, CHILDREN = {};  // 인접 맵 (조상 연결·도메인 서브트리용)
 
-fetch("/graph/data").then(r => r.json()).then(({nodes, edges, relations}) => {
+const _RUNQ = new URLSearchParams(location.search).get("run") || "";  // ?run=<id> = 그 run 관계 미리보기
+fetch("/graph/data" + (_RUNQ ? "?relations_run=" + encodeURIComponent(_RUNQ) : ""))
+  .then(r => r.json()).then(({nodes, edges, relations}) => {
   NODES = nodes;
   // 타입드 관계(점선)를 계층 엣지와 같은 배열에 합류 — 필터·이웃 확장이 자동 포함
   EDGES = edges.concat((relations || []).map(r => ({...r, isRel: true})));
@@ -174,6 +176,8 @@ function nodeSpec(n) {
   const nm = n.etype ? `${n.etype}: ${n.name}` : n.name;  // 엔티티(5층)는 타입 접두사
   return {
     id: n.id,
+    title: `${LAYER_NAME[n.layer] || n.layer}${n.etype ? " · " + n.etype : ""}\n${n.name}\n사용 ${n.uses}회`
+           + (n.docs ? ` · 문서 ${n.docs}` : "") + (n.success ? ` · 성공 ${n.success}` : ""),
     label: nm.length > 24 ? nm.slice(0, 24) + "…" : nm,
     color: {background: n.fail ? FAIL : COLORS[n.layer],
             border: n.fail ? FAIL : COLORS[n.layer],
