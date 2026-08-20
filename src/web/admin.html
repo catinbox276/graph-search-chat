@@ -235,6 +235,13 @@
   .plnode .t { font-size: .7rem; color: var(--mut); margin-bottom: 3px; white-space: nowrap; }
   .plnode .v { font-weight: 700; font-size: .84rem; word-break: break-all; }
   .plnode .s { font-size: .69rem; color: var(--mut); margin-top: 4px; line-height: 1.35; }
+  /* 노드 안에서 바로 보이는 두 가지: 지금 값이 활성인지, 정의를 어디서 고치는지 */
+  .plnode .plstar { margin-left: 5px; font-size: .64rem; font-weight: 700; color: var(--ok-ink);
+                    white-space: nowrap; }
+  .plnode .pledit { display: block; margin-top: 5px; padding: 1px 6px; font-size: .66rem;
+                    background: none; border: 1px solid var(--line); border-radius: 6px;
+                    color: var(--path-ink); cursor: pointer; }
+  .plnode .pledit:hover { border-color: var(--path); }
   .plnode .warn { display: inline-block; padding: 0 6px; border-radius: 99px; font-size: .68rem;
                   background: rgba(255, 160, 0, .18); }
   .plarrow { display: flex; align-items: center; padding: 0 7px; color: var(--mut);
@@ -259,6 +266,11 @@
                     padding: 8px 14px; cursor: pointer; color: var(--mut); font-size: .85rem; }
   .admtabs button.on { color: var(--ink); border-bottom: 2px solid var(--acc, #4a7dff);
                        font-weight: 700; background: var(--card, transparent); }
+  /* 탭 13개는 목록이지 구조가 아니었다 — 무엇을 하러 온 탭인지로 묶는다 */
+  .admtabs .tgrp { align-self: center; font-size: .7rem; font-weight: 700; color: var(--mut);
+                   letter-spacing: .02em; padding-left: 10px; margin-left: 4px;
+                   border-left: 1px solid var(--line); }
+  .admtabs .tgrp:first-child { padding-left: 0; margin-left: 0; border-left: 0; }
   .structprompts { margin: 8px 0; }
   .structprompts > summary { cursor: pointer; font-size: .82rem; color: var(--mut); }
   .structprompts .k2 { display: block; font-size: .8rem; margin: 8px 0 3px; }
@@ -327,17 +339,20 @@
 
 <main>
 <nav id="admtabs" class="admtabs" aria-label="관리 항목">
+  <span class="tgrp">실행</span>
   <button data-tab="pipe">🔀 파이프라인</button>
-  <button data-tab="models">모델</button>
-  <button data-tab="mcp">MCP 서버</button>
-  <button data-tab="agent">에이전트</button>
+  <button data-tab="sources">원천 테이블·구조화</button>
+  <span class="tgrp">정의</span>
   <button data-tab="domains">도메인 시드</button>
   <button data-tab="entity">① 추출 (엔티티)</button>
   <button data-tab="cluster">② 병합 (클러스터)</button>
   <button data-tab="mapping">매핑 버전</button>
   <button data-tab="data">데이터 버전</button>
-  <button data-tab="presets">조합 프리셋</button>
-  <button data-tab="sources">원천 테이블·구조화</button>
+  <span class="tgrp">모델·연결</span>
+  <button data-tab="models">모델</button>
+  <button data-tab="mcp">MCP 서버</button>
+  <button data-tab="agent">에이전트</button>
+  <span class="tgrp">관리</span>
   <button data-tab="events">활동 로그</button>
   <button data-tab="users">계정 관리</button>
 </nav>
@@ -365,22 +380,36 @@
       <select id="plModel" title="빈값=전처리 기본 모델"><option value="">기본 모델</option></select></label>
     <label class="fld"><span>임베딩</span>
       <select id="plEmbed" title="빈값=기본 임베딩"><option value="">기본 임베딩</option></select></label>
+    <label class="fld"><span>프리셋 (저장된 조합)</span>
+      <select id="plPreset" title="저장된 조합을 노드에 불러옵니다 — 불러온 뒤 [▶ run 생성]">
+        <option value="">— 직접 고르기 —</option></select></label>
+    <button type="button" class="ghost" id="plPpSave" title="지금 노드에 표시된 조합을 이름 붙여 저장">💾 이 조합 저장</button>
+    <button type="button" class="ghost" id="plPpDel" title="선택한 프리셋 삭제">🗑 프리셋</button>
     <button type="button" class="ghost" id="plReset" title="노드 선택을 전부 기본(활성)으로 되돌림">↺ 기본값</button>
     <button type="button" id="plGo" title="지금 노드들에 표시된 조합으로 run 생성 (비활성 — 구조화·활성 전환은 아래 run 목록에서)">▶ 이 조합으로 run 생성</button>
     <button type="button" class="ghost" id="plStop" title="이 소스의 진행 중 구조화를 배치 경계에서 중지">⏹ 중지</button>
     <span class="hint" id="plMsg" style="margin:0"></span>
   </div>
+  <details style="margin:4px 0">
+    <summary class="hint" style="cursor:pointer;margin:0">⚙ 고급 — 판정 입력 크기 (빈값=현재 설정값)</summary>
+    <div class="schedrow" style="margin:4px 0 0">
+      <label class="fld"><span>본문 길이 (자)</span>
+        <input id="plChars" type="number" min="0" style="width:110px" title="문서 판정에 넣는 본문 길이 — 빈값=현재 설정"></label>
+      <label class="fld"><span>묶음 토큰</span>
+        <input id="plPack" type="number" min="0" style="width:110px" title="묶음 판정 토큰 한도 — 빈값=현재 설정"></label>
+    </div>
+  </details>
   <div id="plBanner"></div>
   <div id="plCanvas" class="plscroll"><span class="hint">불러오는 중…</span></div>
   <div id="plSchema" style="display:none"></div>
   <div id="plRuns"></div>
   <p class="hint" style="margin-top:4px">파란 테두리 = 기본과 다르게 고른 노드 ·
-     <b>① 추출 노드 더블클릭</b> = 스키마 캔버스(엔티티·관계를 노드와 선으로 설계)</p>
+     <b>① 추출 노드 더블클릭</b> = 그 스키마의 구조 그림 (편집은 [① 추출] 탭)</p>
 </section>
 <section class="card" id="sec-data">
   <h2>데이터 버전 <small>소스별 적재 시점·문서수 스냅샷 — 데이터가 업데이트되면 새 버전으로</small></h2>
   <div id="verData"><span class="hint">불러오는 중…</span></div>
-  <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 구조화</b>는 [원천 테이블·구조화] 탭 → 소스 클릭 → "✚ 새 조합 run"에서.</p>
+  <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 run 생성</b>은 [🔀 파이프라인] 탭에서 — 노드에서 이 버전을 고르고 [▶ run 생성].</p>
 </section>
 <section class="card" id="sec-entity">
   <h2>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h2>
@@ -541,28 +570,6 @@
        <b>[⚠ 전량 재적재]</b>로 코퍼스를 다시 만들어야 반영됩니다.</p>
   </div>
   <div id="verMapping" style="margin-top:10px"><span class="hint">불러오는 중…</span></div>
-</section>
-<section class="card" id="sec-presets">
-  <h2>조합 프리셋 <small>차원별 버전 선택을 이름 있는 세트로 저장 — 헬름차트처럼 조합해 소스에 적용(run 생성)</small></h2>
-  <p class="hint" style="margin:4px 0 8px">프리셋 = 도메인(+버전) · 엔티티 라인·버전 · 클러스터 라인·버전 · 모델 · 임베딩.
-     소스별 항목(매핑·데이터 버전)은 [▶ 적용] 때 고릅니다. 도메인을 지정하면 소스 등록 도메인을 <b>오버라이드</b>합니다.</p>
-  <div id="presetList"><span class="hint">불러오는 중…</span></div>
-  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-    <div class="schedrow" style="margin:6px 0">
-      <input id="ppName" placeholder="프리셋 이름" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <select id="ppDomain" title="소스 등록 도메인 오버라이드 — 빈값=소스 도메인 사용"><option value="">도메인(소스 기본)</option></select>
-      <input id="ppDomainVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:130px" title="빈값=그 도메인의 기본 버전">
-      <select id="ppEntity" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option></select>
-      <select id="ppCluster" title="② 병합(클러스터) 라인·버전"><option value="">②병합(활성)</option></select>
-      <select id="ppModel" title="판정 LLM"><option value="">LLM(기본)</option></select>
-      <select id="ppEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option></select>
-      <input id="ppNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" id="ppSave">💾 프리셋 저장</button>
-      <span class="hint" id="ppMsg" style="margin:0"></span>
-    </div>
-  </div>
-  <p class="hint">행 클릭=폼에 불러오기(같은 이름으로 저장=수정) · [▶ 적용]=소스와 매핑·데이터 버전을 골라 run 생성(비활성) —
-     생성된 run은 [원천 테이블·구조화] 탭에서 구조화·활성 전환합니다.</p>
 </section>
 <section class="card" id="sec-users">
   <h2>계정 관리 <small>가입 승인·관리자 권한 부여 — 관리자 계정(.env)은 목록에 없음</small></h2>
@@ -1509,7 +1516,7 @@ async function openRunPanel(src) {
   p.innerHTML = "";
   if (!_runSrc) return;
   p.innerHTML = `<h4 style="margin:10px 0 4px">📦 ${esc(src)} — 구조화 실행(run) 버전</h3>
-    <div id="runlist">⏳</div><div id="runform"></div>
+    <div id="runlist">⏳</div>
     <h4 style="margin:10px 0 4px">📄 문서별 결과</h3>
     <div id="docfilter"></div><div id="doclist"></div>`;
   loadRuns(src); loadRunDocs(src, "", 1);
@@ -1589,11 +1596,14 @@ async function loadRuns(src) {
       const r2 = await fetch(`/admin/sources/${encodeURIComponent(src)}/structure?run_id=${rid}`, {method: "POST"});
       const j = await r2.json().catch(() => ({}));
       smsg(r2.ok ? `▶ ${j.note}` : `실패 — ${j.detail || r2.status}`, r2.ok); }));
-  bar.appendChild(mkb("✚ 새 조합 run 만들기", "도메인 버전·모델·설정을 골라 새 버전 생성 (비활성)", () => renderRunForm(src)));
-  bar.appendChild(mkb("⧉ 복제해 새 run", "선택(라디오)한 run의 조합을 폼에 채워서 시작 — 바꿀 차원만 고치고 생성 (ClearML 방식)",
+  bar.appendChild(mkb("✚ 새 조합 run (파이프라인으로)", "run 생성은 [🔀 파이프라인] 런처 한 곳에서 합니다 — 이 소스를 고른 상태로 이동",
+    () => { PL.src = src; PL.sel = {}; PL.view = null; showTab("pipe"); }));
+  bar.appendChild(mkb("⧉ 복제해 새 run (파이프라인으로)", "선택(라디오)한 run의 조합을 런처 노드에 채워서 이동 — 바꿀 차원만 고치고 [▶ 생성]",
     () => { const rid = picked(); if (!rid) return;
       const x = runs.find(r => r.run_id === rid);
-      $("runform").innerHTML = ""; renderRunForm(src, x); }));
+      PL.src = src; showTab("pipe");
+      setTimeout(() => plCloneRun(x), 400);   // 런처 로드가 끝난 뒤 채운다
+    }));
   bar.appendChild(mkb("🏷 라벨 지정", "선택(라디오)한 run에 라벨 부여 (예: staging) — 같은 라벨을 가진 다른 run에서 자동으로 옮겨옵니다. 제거는 배지 클릭",
     async () => { const rid = picked(); if (!rid) return;
       const lb = prompt("라벨 이름 (영소문자·숫자·-_. / 'active'는 시스템 전용):");
@@ -1761,91 +1771,6 @@ async function renderDocCompare(src, runIds, heads, mount, page, onlyDiff) {
     if (page < j.pages) pg.appendChild(_verBtn("▶", () => renderDocCompare(src, runIds, heads, mount, page + 1, onlyDiff)));
     mount.appendChild(pg);
   }
-}
-async function renderRunForm(src, prefill) {
-  const f = $("runform");
-  if (f.innerHTML && !prefill) { f.innerHTML = ""; return; }
-  f.innerHTML = "";
-  const models = (await fetch("/models").then(r => r.json()).catch(() => ({llm: []}))).llm || [];
-  const allm = (await fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))).models || [];
-  const embeds = allm.filter(m => m.kind === "embedding");
-  const entV = (await fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
-  const clsV = (await fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []}))).versions || [];
-  const joinV = (await fetch(`/admin/sources/${encodeURIComponent(src)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []}))).versions || [];
-  const dataV = (await fetch(`/admin/sources/${encodeURIComponent(src)}/data-versions`).then(r => r.json()).catch(() => ({versions: []}))).versions || [];
-  const vopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
-  const vlopt = v => `<option value="${esc(v.name)}\t${v.version}">${esc(v.name)}·v${v.version}${v.is_default ? " ★" : ""}${v.note ? " — " + esc(v.note) : ""}</option>`;
-  const dopt = v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""} (${v.watermark || "-"}·${v.doc_count}건)</option>`;
-  f.innerHTML = `
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0">
-      <b style="font-size:.78rem">버전 조합:</b>
-      <input id="rfVer" type="number" min="1" placeholder="도메인 버전(기본)" style="width:120px" title="도메인 시드 탭의 버전 번호">
-      <span id="rfEntWrap" style="display:inline-flex;gap:4px;align-items:center">
-        <select class="rfEnt" id="rfEntVer" title="① 추출(엔티티) 라인·버전"><option value="">①추출(활성)</option>${entV.map(vlopt).join("")}</select>
-        <button type="button" class="ghost" id="rfEntAdd" title="라인 후보 추가 — 2개 이상이면 문서마다 맞는 라인을 LLM이 골라 추출(장르 라우터)">＋라인</button>
-      </span>
-      <select id="rfClsVer" title="② 병합(클러스터) 라인·버전"><option value="">②병합(활성)</option>${clsV.map(vlopt).join("")}</select>
-      <select id="rfJoinVer" title="매핑 버전(id·시간·필드)"><option value="">매핑(기본)</option>${joinV.map(vopt).join("")}</select>
-      <select id="rfDataVer" title="데이터 신선도 버전(적재 시점)"><option value="">데이터(기본)</option>${dataV.map(dopt).join("")}</select>
-      <select id="rfModel" title="판정 LLM"><option value="">LLM(기본)</option>
-        ${models.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
-      <select id="rfEmbed" title="임베딩 모델"><option value="">임베딩(기본)</option>
-        ${embeds.map(m => `<option>${esc(m.name)}</option>`).join("")}</select>
-      <input id="rfChars" type="number" min="0" placeholder="본문길이" style="width:90px">
-      <input id="rfPack" type="number" min="0" placeholder="묶음토큰" style="width:90px">
-      <button type="button" id="rfGo">생성</button>
-    </div>
-    <span class="hint" style="margin:0">엔티티·클러스터는 각 버전 탭에서 만든 버전을 선택합니다 (빈값=각 기본 버전). 자주 쓰는 조합은 [조합 프리셋] 탭에 이름 붙여 저장해 두고 적용하세요.</span>`;
-  // [＋라인] — 라우터 후보 select 복제 추가 (2개 이상 = 장르 라우터 run)
-  const addEntSel = () => {
-    const el = $("rfEntVer").cloneNode(true);
-    el.id = ""; el.value = ""; el.title = "라우터 라인 후보 (빈값=무시)";
-    $("rfEntWrap").insertBefore(el, $("rfEntAdd"));
-    return el;
-  };
-  $("rfEntAdd").onclick = addEntSel;
-  if (prefill) {   // ⧉ 복제 — 선택 run의 조합으로 폼을 채움 (바꿀 차원만 고치면 됨)
-    const setSel = (id, val) => { const el = $(id);
-      if (val && [...el.options].some(o => o.value === val)) el.value = val; };
-    if (prefill.domain_version) $("rfVer").value = prefill.domain_version;
-    if ((prefill.entity_lines || []).length) {   // 라우터 run 복제 — 후보 전부 채움
-      prefill.entity_lines.forEach((l, i) => {
-        const el = i === 0 ? $("rfEntVer") : addEntSel();
-        const v = `${l.line}\t${l.version}`;
-        if ([...el.options].some(o => o.value === v)) el.value = v;
-      });
-    }
-    else if (prefill.entity_version != null) setSel("rfEntVer", `${prefill.entity_line}\t${prefill.entity_version}`);
-    if (prefill.cluster_version != null) setSel("rfClsVer", `${prefill.cluster_line}\t${prefill.cluster_version}`);
-    if (prefill.join_version != null) setSel("rfJoinVer", String(prefill.join_version));
-    if (prefill.data_version != null) setSel("rfDataVer", String(prefill.data_version));
-    setSel("rfModel", prefill.chat_model); setSel("rfEmbed", prefill.embed_model);
-    const p = prefill.params || {};
-    if (p["본문 길이"]) $("rfChars").value = p["본문 길이"];
-    if (p["묶음 토큰"]) $("rfPack").value = p["묶음 토큰"];
-    smsg(`⧉ ${prefill.started} run의 조합을 폼에 채웠습니다 — 바꿀 차원만 고치고 [생성]`, true);
-  }
-  $("rfGo").onclick = async () => {
-    const body = {};
-    const iI = (id, k) => { if ($(id).value !== "") body[k] = parseInt($(id).value); };
-    iI("rfVer", "domain_version");
-    const vl = (id, lk, vk) => { const s = $(id).value; if (s) { const [n, v] = s.split("\t"); body[lk] = n; body[vk] = parseInt(v); } };
-    // 엔티티: #rfEntWrap의 select 전체 수집 — 1개=기존 단일, 2개 이상=라우터(entity_lines)
-    const ents = [...f.querySelectorAll("#rfEntWrap select")].map(el => el.value).filter(Boolean);
-    if (ents.length >= 2)
-      body.entity_lines = ents.map(s => { const [n, v] = s.split("\t"); return {line: n, version: parseInt(v)}; });
-    else if (ents.length === 1) { const [n, v] = ents[0].split("\t"); body.entity_line = n; body.entity_version = parseInt(v); }
-    vl("rfClsVer", "cluster_line", "cluster_version");
-    iI("rfJoinVer", "join_version"); iI("rfDataVer", "data_version");
-    if ($("rfModel").value) body.chat_model = $("rfModel").value;
-    if ($("rfEmbed").value) body.embed_model = $("rfEmbed").value;
-    iI("rfChars", "body_chars"); iI("rfPack", "pack_tokens");
-    const r = await fetch(`/admin/sources/${encodeURIComponent(src)}/runs`, {
-      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-    const j = await r.json().catch(() => ({}));
-    smsg(r.ok ? `✓ ${j.note}` : `생성 실패 — ${j.detail || r.status}`, r.ok);
-    if (r.ok) { f.innerHTML = ""; loadRuns(src); }
-  };
 }
 async function loadRunDocs(src, status, page) {
   const fbox = $("docfilter");
@@ -3206,128 +3131,66 @@ async function loadMappingVer() {
   }
 }
 
-// ── 조합 프리셋 — 차원별 버전 선택을 이름 있는 세트로 (적용=run 생성) ──────────
-async function loadPresets() {
-  // 폼 셀렉트 채우기 (도메인·엔티티·클러스터·모델)
-  const [doms, entV, clsV, models, allm] = await Promise.all([
-    fetch("/admin/domains").then(r => r.json()).catch(() => ({domains: []})),
-    fetch("/admin/entity-versions").then(r => r.json()).catch(() => ({versions: []})),
-    fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []})),
-    fetch("/models").then(r => r.json()).catch(() => ({llm: []})),
-    fetch("/admin/models/all").then(r => r.json()).catch(() => ({models: []}))]);
-  const lv = v => `${esc(v.name)}\t${v.version}`;   // 라인·버전을 value에 인코딩 (run 폼과 동일)
-  const lvLabel = v => `${esc(v.name)}·v${v.version}${v.is_default ? " ★" : ""}`;
-  $("ppDomain").innerHTML = `<option value="">도메인(소스 기본)</option>` +
-    (doms.domains || []).filter(d => d.scope !== "chat")
-      .map(d => `<option>${esc(d.name)}</option>`).join("");
-  $("ppEntity").innerHTML = `<option value="">①추출(활성)</option>` +
-    (entV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
-  $("ppCluster").innerHTML = `<option value="">②병합(활성)</option>` +
-    (clsV.versions || []).map(v => `<option value="${lv(v)}">${lvLabel(v)}</option>`).join("");
-  $("ppModel").innerHTML = `<option value="">LLM(기본)</option>` +
-    (models.llm || []).map(m => `<option>${esc(m.name)}</option>`).join("");
-  $("ppEmbed").innerHTML = `<option value="">임베딩(기본)</option>` +
-    (allm.models || []).filter(m => m.kind === "embedding")
-      .map(m => `<option>${esc(m.name)}</option>`).join("");
-  // 목록
-  const box = $("presetList"); box.innerHTML = "⏳";
+// ── 조합 프리셋 — 파이프라인 런처에서 불러오고 저장한다 (별도 탭 없음) ──────────
+// 프리셋은 "차원 선택 세트"일 뿐이라 적용 화면을 따로 두면 런처와 두 벌이 된다.
+// 여기서는 노드에 불러오고(=PL.sel), 노드 상태를 그대로 저장한다.
+let _presets = [];
+async function plPresetsLoad() {
   const j = await fetch("/admin/presets").then(r => r.json()).catch(() => ({presets: []}));
-  box.innerHTML = "";
-  if (!(j.presets || []).length) {
-    box.innerHTML = `<span class="hint">아직 프리셋이 없습니다 — 아래 폼에서 만들고 저장하세요</span>`; return;
-  }
-  const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th>이름</th><th>도메인</th><th>①추출</th><th>②병합</th>" +
-                "<th>LLM</th><th>임베딩</th><th>메모</th><th>수정</th><th><span class='sronly'>동작</span></th></tr></thead>";
-  const tb = document.createElement("tbody");
-  j.presets.forEach(p => {
-    const tr = document.createElement("tr"); tr.style.cursor = "pointer";
-    const lvTxt = (ln, v) => v != null ? `${ln || "?"}·v${v}` : "(활성)";
-    [p.name, p.domain ? `${p.domain}${p.domain_version ? " v" + p.domain_version : ""}` : "(소스 기본)",
-     lvTxt(p.entity_line, p.entity_version), lvTxt(p.cluster_line, p.cluster_version),
-     p.chat_model || "(기본)", p.embed_model || "(기본)", p.note, p.updated]
-      .forEach(x => { const c = document.createElement("td"); c.textContent = x ?? ""; tr.appendChild(c); });
-    tr.onclick = () => {   // 행 클릭 = 폼 로드 (같은 이름 저장=수정)
-      $("ppName").value = p.name; $("ppDomain").value = p.domain || "";
-      $("ppDomainVer").value = p.domain_version ?? "";
-      $("ppEntity").value = p.entity_version != null ? `${p.entity_line}\t${p.entity_version}` : "";
-      $("ppCluster").value = p.cluster_version != null ? `${p.cluster_line}\t${p.cluster_version}` : "";
-      $("ppModel").value = p.chat_model || ""; $("ppEmbed").value = p.embed_model || "";
-      $("ppNote").value = p.note || "";
-      $("ppMsg").textContent = `'${p.name}' 값을 폼에 불러왔습니다 — 수정 후 [저장]`;
-    };
-    const act = document.createElement("td");
-    act.appendChild(_verBtn("▶ 적용", ev => { ev.stopPropagation(); presetApplyPanel(p, tr); }));
-    act.appendChild(_verBtn("🗑", async ev => { ev.stopPropagation();
-      const r = await fetch(`/admin/presets/${encodeURIComponent(p.name)}`, {method: "DELETE"});
-      const jj = await r.json().catch(() => ({}));
-      $("ppMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `삭제 실패 ${r.status}`);
-      if (r.ok) loadPresets();
-    }));
-    tr.appendChild(act); tb.appendChild(tr);
-  });
-  t.appendChild(tb); box.appendChild(t);
+  _presets = j.presets || [];
+  const cur = $("plPreset").value;
+  $("plPreset").innerHTML = `<option value="">— 직접 고르기 —</option>` +
+    _presets.map(p => `<option value="${esc(p.name)}">${esc(p.name)}${p.note ? " — " + esc(p.note) : ""}</option>`).join("");
+  if (_presets.some(p => p.name === cur)) $("plPreset").value = cur;
 }
-async function presetApplyPanel(p, tr) {
-  // 행 아래 인라인 패널 — 소스 + 소스별 매핑·데이터 버전 선택 후 run 생성
-  const nx = tr.nextElementSibling;
-  const open = nx && nx.classList.contains("verrow");
-  $("presetList").querySelectorAll(".verrow").forEach(x => x.remove());
-  if (open) return;
-  const row = document.createElement("tr"); row.className = "verrow";
-  const td = document.createElement("td"); td.colSpan = 9; row.appendChild(td); tr.after(row);
-  td.innerHTML = "⏳";
-  const srcs = (await fetch("/admin/sources").then(r => r.json()).catch(() => ({sources: []}))).sources || [];
-  td.innerHTML = "";
-  const bar = document.createElement("div");
-  bar.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap";
-  const srcSel = document.createElement("select");
-  srcSel.innerHTML = `<option value="">소스 선택…</option>` +
-    srcs.map(s => `<option>${esc(s.source_name)}</option>`).join("");
-  const mapSel = document.createElement("select");
-  const dataSel = document.createElement("select");
-  mapSel.innerHTML = `<option value="">매핑(기본)</option>`;
-  dataSel.innerHTML = `<option value="">데이터(기본)</option>`;
-  srcSel.onchange = async () => {   // 소스별 매핑·데이터 버전 로드
-    const s = srcSel.value;
-    if (!s) return;
-    const [mv, dv] = await Promise.all([
-      fetch(`/admin/sources/${encodeURIComponent(s)}/mapping-versions`).then(r => r.json()).catch(() => ({versions: []})),
-      fetch(`/admin/sources/${encodeURIComponent(s)}/data-versions`).then(r => r.json()).catch(() => ({versions: []}))]);
-    mapSel.innerHTML = `<option value="">매핑(기본)</option>` + (mv.versions || [])
-      .map(v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""}</option>`).join("");
-    dataSel.innerHTML = `<option value="">데이터(기본)</option>` + (dv.versions || [])
-      .map(v => `<option value="${v.version}">v${v.version}${v.is_default ? " ★" : ""} (${v.watermark || "-"}·${v.doc_count}건)</option>`).join("");
+function plPresetApply(p) {
+  PL.view = null;
+  const lv = (ln, v) => v != null ? `${ln}\t${v}` : undefined;
+  PL.sel = {domain_version: p.domain_version ?? undefined,
+            entity: lv(p.entity_line, p.entity_version),
+            cluster: lv(p.cluster_line, p.cluster_version)};
+  $("plModel").value = p.chat_model || "";
+  $("plEmbed").value = p.embed_model || "";
+  // 프리셋의 도메인은 소스 등록 도메인을 대신할 수 없다 (run은 소스 도메인으로 생성)
+  const srcDom = (PL.d.sinfo || {}).domain || "";
+  $("plMsg").textContent = `✓ '${p.name}' 불러옴 — 확인 후 [▶ run 생성]` +
+    (p.domain && p.domain !== srcDom
+      ? ` ⚠ 프리셋 도메인 '${p.domain}'은 이 소스(${srcDom || "미지정"})와 달라 무시됩니다`
+      : "");
+  plRender();
+}
+$("plPreset").onchange = () => {
+  const p = _presets.find(x => x.name === $("plPreset").value);
+  if (p) plPresetApply(p);
+};
+$("plPpSave").onclick = async () => {
+  const name = (prompt("프리셋 이름 (같은 이름으로 저장하면 수정)", $("plPreset").value || "") || "").trim();
+  if (!name) return;
+  const sel = PL.sel || {}, body = {name, chat_model: $("plModel").value, embed_model: $("plEmbed").value};
+  if (sel.domain_version != null) body.domain_version = sel.domain_version;
+  const split = (v, lk, vk) => {   // 라우터(배열)는 프리셋으로 저장하지 않는다 — 스키마에 칸이 없다
+    if (typeof v === "string" && v.includes("\t")) {
+      const [n, ver] = v.split("\t"); body[lk] = n; body[vk] = parseInt(ver);
+    }
   };
-  const msg = document.createElement("span"); msg.className = "hint"; msg.style.margin = "0";
-  bar.append(srcSel, mapSel, dataSel,
-    _verBtn("▶ 이 조합으로 run 생성", async () => {
-      if (!srcSel.value) { msg.textContent = "소스를 먼저 선택하세요"; return; }
-      const body = {source_name: srcSel.value};
-      if (mapSel.value) body.join_version = parseInt(mapSel.value);
-      if (dataSel.value) body.data_version = parseInt(dataSel.value);
-      const r = await fetch(`/admin/presets/${encodeURIComponent(p.name)}/apply`, {
-        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
-      const jj = await r.json().catch(() => ({}));
-      msg.textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `실패 ${r.status}`);
-    }), msg);
-  td.appendChild(bar);
-}
-$("ppSave").onclick = async () => {
-  const name = $("ppName").value.trim();
-  if (!name) { $("ppMsg").textContent = "프리셋 이름을 입력하세요"; return; }
-  const body = {name, domain: $("ppDomain").value, chat_model: $("ppModel").value,
-                embed_model: $("ppEmbed").value, note: $("ppNote").value};
-  if ($("ppDomainVer").value !== "") body.domain_version = parseInt($("ppDomainVer").value);
-  const lv = (id, lk, vk) => { const s = $(id).value; if (s) { const [n, v] = s.split("\t");
-    body[lk] = n; body[vk] = parseInt(v); } };
-  lv("ppEntity", "entity_line", "entity_version");
-  lv("ppCluster", "cluster_line", "cluster_version");
+  split(sel.entity, "entity_line", "entity_version");
+  split(sel.cluster, "cluster_line", "cluster_version");
   const r = await fetch("/admin/presets", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const jj = await r.json().catch(() => ({}));
-  $("ppMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `저장 실패 ${r.status}`);
-  if (r.ok) loadPresets();
+  $("plMsg").textContent = r.ok
+    ? `✓ ${jj.note}` + (Array.isArray(sel.entity) ? " (라우터 후보는 프리셋에 담기지 않습니다)" : "")
+    : (jj.detail || `저장 실패 ${r.status}`);
+  if (r.ok) { await plPresetsLoad(); $("plPreset").value = name; }
+};
+$("plPpDel").onclick = async () => {
+  const name = $("plPreset").value;
+  if (!name) { $("plMsg").textContent = "삭제할 프리셋을 먼저 고르세요"; return; }
+  if (!confirm(`프리셋 '${name}'을 삭제할까요? (run·그래프는 영향 없음)`)) return;
+  const r = await fetch(`/admin/presets/${encodeURIComponent(name)}`, {method: "DELETE"});
+  const jj = await r.json().catch(() => ({}));
+  $("plMsg").textContent = r.ok ? `✓ ${jj.note}` : (jj.detail || `삭제 실패 ${r.status}`);
+  if (r.ok) plPresetsLoad();
 };
 
 // ── 🔀 파이프라인 캔버스 — 고정 DAG(원천→매핑→데이터→도메인→①추출→②병합→그래프) ──
@@ -3360,6 +3223,7 @@ async function loadPipeline() {
     (models.llm || []).map(m => `<option>${esc(m.name)}</option>`).join("");
   $("plEmbed").innerHTML = `<option value="">임베딩(기본)</option>` +
     (allm.models || []).filter(m => m.kind === "embedding").map(m => `<option>${esc(m.name)}</option>`).join("");
+  await plPresetsLoad();
   await plRefresh();
 }
 
@@ -3387,14 +3251,24 @@ async function plRefresh() {
 
 function _plDefault(list) { return list.find(v => v.is_default) || list[0] || null; }
 
-function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop, onDbl}) {
+function plNode(canvas, {title, value, sub, warn, custom, fixed, onClick, pop, onDbl, star, edit}) {
   const n = document.createElement("div");
   n.className = "plnode" + (custom ? " custom" : "") + (fixed ? " fixed" : "");
   const t = document.createElement("div"); t.className = "t"; t.textContent = title;
+  // 지금 고른 값이 그 차원의 활성(★ 기본) 버전인지 노드에서 바로 보인다
+  if (star) { const b = document.createElement("span"); b.className = "plstar";
+    b.textContent = "★ 활성"; b.title = "이 차원의 기본(활성) 버전"; t.appendChild(b); }
   const v = document.createElement("div"); v.className = "v"; v.textContent = value;
   n.append(t, v);
   if (sub) { const s = document.createElement("div"); s.className = "s"; s.textContent = sub; n.appendChild(s); }
   if (warn) { const w = document.createElement("span"); w.className = "warn"; w.textContent = warn.text; w.title = warn.title || ""; n.appendChild(w); }
+  if (edit) {   // 정의를 고치러 가는 딥링크 — 런처는 고르기만 한다
+    const e = document.createElement("button");
+    e.type = "button"; e.className = "pledit"; e.textContent = "편집 →";
+    e.title = `[${edit.label}] 탭에서 이 차원의 버전을 만들거나 고칩니다`;
+    e.onclick = ev => { ev.stopPropagation(); showTab(edit.tab); };
+    n.appendChild(e);
+  }
   if (pop) n.onclick = ev => { ev.stopPropagation(); plOpenPop(n, pop); };
   else if (onClick) n.onclick = onClick;
   if (onDbl) n.ondblclick = ev => { ev.stopPropagation();
@@ -3465,7 +3339,7 @@ function plRail() {
   if (pend) { sep(); add(`대기 run ${pend}개`); }
   const nx = !runs.length ? "노드에서 버전을 골라 [▶ 이 조합으로 run 생성]"
     : !active ? "run 목록에서 [▶ 구조화] 후 [★ 활성]"
-    : (active.stale_dims || []).length ? "구성이 최신 기본과 다릅니다 — [⧉ 복제해 새 run]으로 갱신"
+    : (active.stale_dims || []).length ? "구성이 최신 기본과 다릅니다 — run 목록 [⧉ 이 조합 편집] 후 [▶ 생성]"
     : "바꿀 게 있으면 노드를 클릭해 새 조합을 만드세요";
   add("다음 → " + nx, "next");
 }
@@ -3503,6 +3377,8 @@ function plRender() {
   plNode(wrap, {title: "매핑 (id·시간·필드)", value: mSel != null ? `v${mSel}` : "—",
     sub: mRow.id_column ? `id=${mRow.id_column}${mRow.ts_column ? " · ts=" + mRow.ts_column : ""}` : "",
     custom: !viewing && sel.mapping != null && sel.mapping !== (mDef && mDef.version),
+    star: !viewing && mSel != null && mSel === (mDef && mDef.version),
+    edit: {tab: "mapping", label: "매핑 버전"},
     pop: viewing ? null : {title: "매핑 버전 선택", current: mSel,
       items: (D.maps || []).map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
         sub: `id=${v.id_column || "-"} · ts=${v.ts_column || "-"}`, value: v.version})),
@@ -3515,6 +3391,8 @@ function plRender() {
   plNode(wrap, {title: "데이터 (신선도)", value: dSel != null ? `v${dSel}` : "—",
     sub: dRow.watermark ? `${dRow.watermark} · ${dRow.doc_count}건` : "스냅샷 없음 (데이터 버전 탭)",
     custom: !viewing && sel.data != null && sel.data !== (dDef && dDef.version),
+    star: !viewing && dSel != null && dSel === (dDef && dDef.version),
+    edit: {tab: "data", label: "데이터 버전"},
     pop: viewing ? null : {title: "데이터 버전 선택", current: dSel,
       items: (D.datas || []).map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
         sub: `${v.watermark || "-"} · ${v.doc_count}건`, value: v.version})),
@@ -3527,6 +3405,8 @@ function plRender() {
     sub: D.dom ? ((D.domv.find(v => v.version === dmSel) || {}).extract_hint || "").slice(0, 48)
                : "소스 등록에서 도메인을 지정해야 구조화됩니다",
     custom: !viewing && sel.domain_version != null && sel.domain_version !== (dmDef && dmDef.version),
+    star: !viewing && dmSel != null && dmSel === (dmDef && dmDef.version),
+    edit: {tab: "domains", label: "도메인 시드"},
     pop: (viewing || !D.dom) ? null : {title: "도메인 버전 선택", current: dmSel,
       items: D.domv.map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
         sub: (v.extract_hint || "").slice(0, 60), value: v.version})),
@@ -3544,12 +3424,14 @@ function plRender() {
   plNode(wrap, {title: "① 추출 (엔티티)",
     value: eMulti ? `라우터·${eMulti.length}` : eVr ? `${eLn}·v${eVr}` : "코드 기본",
     sub: eMulti ? eMulti.map(s => s.replace("\t", "·v")).join(" + ") + " — 문서마다 분류"
-      : ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🎨더블클릭=설계",
+      : ((D.ents.find(v => `${v.name}\t${v.version}` === eSelKey) || {}).note || "") + " 🔍더블클릭=구조 보기",
     custom: !viewing && (Array.isArray(sel.entity) ? sel.entity.length > 0
       : !!sel.entity && sel.entity !== (eDef ? `${eDef.name}\t${eDef.version}` : "")),
     onDbl: () => { const k = eMulti ? eMulti[0] : eSelKey;
       const [ln, vr] = (k || "\t").split("\t");
       scOpen(vr ? ln : "", vr ? parseInt(vr) : null); },
+    star: !viewing && !eMulti && !!eSelKey && eSelKey === (eDef ? `${eDef.name}\t${eDef.version}` : ""),
+    edit: {tab: "entity", label: "① 추출 (엔티티)"},
     pop: viewing ? null : {title: "추출 스키마 선택 — 2개 이상 체크=라우터", multi: true,
       current: eMulti || eSelKey,
       items: D.ents.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
@@ -3565,6 +3447,8 @@ function plRender() {
   plNode(wrap, {title: "② 병합 (클러스터)", value: cVr ? `${cLn}·v${cVr}` : "코드 기본",
     sub: (D.clus.find(v => `${v.name}\t${v.version}` === cSelKey) || {}).note || "",
     custom: !viewing && !!sel.cluster && sel.cluster !== (cDef ? `${cDef.name}\t${cDef.version}` : ""),
+    star: !viewing && !!cSelKey && cSelKey === (cDef ? `${cDef.name}\t${cDef.version}` : ""),
+    edit: {tab: "cluster", label: "② 병합 (클러스터)"},
     pop: viewing ? null : {title: "병합 설정 버전 선택", current: cSelKey,
       items: D.clus.map(v => ({label: `${v.name}·v${v.version}${v.is_default ? " ★" : ""}`,
         sub: v.note || "", value: `${v.name}\t${v.version}`})),
@@ -3607,6 +3491,7 @@ function plRunsStrip() {
     const act = document.createElement("td");
     act.appendChild(_verBtn(PL.view && PL.view.run_id === x.run_id ? "✏ 편집으로" : "👁 조합",
       () => { PL.view = (PL.view && PL.view.run_id === x.run_id) ? null : x; plRender(); }));
+    act.appendChild(_verBtn("⧉ 이 조합 편집", () => plCloneRun(x)));
     act.appendChild(_verBtn("▶ 구조화", async () => {
       const r = await fetch(`/admin/sources/${encodeURIComponent(PL.src)}/structure?run_id=${x.run_id}`, {method: "POST"});
       const j = await r.json().catch(() => ({}));
@@ -3635,6 +3520,24 @@ function plRunsStrip() {
   box.appendChild(more);
 }
 
+function plCloneRun(x) {   // run 스냅샷을 노드 선택으로 되돌린다 — 바꿀 차원만 고치고 [▶ 생성]
+  PL.view = null;
+  PL.sel = {domain_version: x.domain_version ?? undefined,
+            mapping: x.join_version ?? undefined,
+            data: x.data_version ?? undefined,
+            entity: (x.entity_lines || []).length
+              ? x.entity_lines.map(l => `${l.line}\t${l.version}`)
+              : (x.entity_version != null ? `${x.entity_line}\t${x.entity_version}` : undefined),
+            cluster: x.cluster_version != null ? `${x.cluster_line}\t${x.cluster_version}` : undefined};
+  $("plModel").value = x.chat_model || "";
+  $("plEmbed").value = x.embed_model || "";
+  const pm = x.params || {};
+  $("plChars").value = pm["본문 길이"] || "";
+  $("plPack").value = pm["묶음 토큰"] || "";
+  $("plMsg").textContent = `⧉ run ${x.started} 조합을 폼에 채웠습니다 — 바꿀 차원만 고치고 [▶ run 생성]`;
+  plRender();
+}
+
 async function plCreateRun() {
   if (!PL.src) return;
   if (!(PL.d.dom)) { $("plMsg").textContent = "도메인 미지정 소스 — 소스 등록에서 도메인을 먼저 지정하세요"; return; }
@@ -3650,6 +3553,8 @@ async function plCreateRun() {
   if (PL.sel.data != null) body.data_version = PL.sel.data;
   if ($("plModel").value) body.chat_model = $("plModel").value;
   if ($("plEmbed").value) body.embed_model = $("plEmbed").value;
+  if ($("plChars").value !== "") body.body_chars = parseInt($("plChars").value);
+  if ($("plPack").value !== "") body.pack_tokens = parseInt($("plPack").value);
   const r = await fetch(`/admin/sources/${encodeURIComponent(PL.src)}/runs`, {
     method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json().catch(() => ({}));
@@ -3804,7 +3709,6 @@ const TABS = {
   entity:  {secs: ["sec-entity"], load: () => renderVersionManager(ENTITY_VM)},
   cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
-  presets: {secs: ["sec-presets"], load: () => loadPresets()},
   domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources();

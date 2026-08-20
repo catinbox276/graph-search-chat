@@ -936,7 +936,7 @@ def admin_preset_save(inp: PresetIn):
                             (name, domain, domain_version, entity_line, entity_version,
                              cluster_line, cluster_version, chat_model, embed_model, note)
                        VALUES (:n, :d, :dv, :el, :ev, :cl, :cv, :cm, :em, :nt)""", b)
-    return {"ok": True, "note": f"프리셋 '{inp.name}' 저장됨 — [▶ 적용]으로 소스에 run 생성"}
+    return {"ok": True, "note": f"프리셋 '{inp.name}' 저장됨 — 파이프라인에서 불러와 run 생성"}
 
 
 @router.delete("/admin/presets/{name}")
