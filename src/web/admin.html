@@ -96,6 +96,8 @@
   .toolgrp[open] > summary::before { content: "▾ "; }
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
+  .diffrow td { background: rgba(255, 196, 60, .16); }
+  .diffrow td:first-child { font-weight: 600; }
   .fgroup { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
   .fgroup-t { font-weight: 600; font-size: .8rem; margin-bottom: 6px; }
   .fgroup-t small { font-weight: 400; color: var(--mut); }
@@ -1208,7 +1210,7 @@ async function loadRuns(src) {
   box.innerHTML = "";
   const t = document.createElement("table");
   t.className = "vertable";
-  t.innerHTML = "<thead><tr><th></th><th>시작</th><th>도메인</th><th>①추출</th><th>②병합</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
+  t.innerHTML = "<thead><tr><th></th><th title='비교할 run 체크 (2개 이상)'>🔍</th><th>시작</th><th>도메인</th><th>①추출</th><th>②병합</th><th>매핑</th><th>데이터</th><th>LLM</th>" +
                 "<th>임베딩</th><th>설정</th><th>반영</th><th>제외</th><th>오류</th><th>상태</th></tr></thead>";
   const tb = document.createElement("tbody");
   runs.forEach(x => {
@@ -1216,6 +1218,9 @@ async function loadRuns(src) {
     const pick = document.createElement("input");
     pick.type = "radio"; pick.name = "runpick"; pick.value = x.run_id;
     const c0 = document.createElement("td"); c0.appendChild(pick); tr.appendChild(c0);
+    const cmp = document.createElement("input");   // 비교 대상 다중 선택
+    cmp.type = "checkbox"; cmp.name = "runcmp"; cmp.value = x.run_id;
+    const cC = document.createElement("td"); cC.appendChild(cmp); tr.appendChild(cC);
     [x.started, `${x.domain || "-"} v${x.domain_version || "?"}`,
      x.entity_version != null ? `${x.entity_line || "?"}·v${x.entity_version}` : "-",
      x.cluster_version != null ? `${x.cluster_line || "?"}·v${x.cluster_version}` : "-",
@@ -1248,7 +1253,67 @@ async function loadRuns(src) {
       const j = await r2.json().catch(() => ({}));
       smsg(r2.ok ? `▶ ${j.note}` : `실패 — ${j.detail || r2.status}`, r2.ok); }));
   bar.appendChild(mkb("✚ 새 조합 run 만들기", "도메인 버전·모델·설정을 골라 새 버전 생성 (비활성)", () => renderRunForm(src)));
+  bar.appendChild(mkb("🔍 선택 run 비교", "🔍 열에서 2개 이상 체크한 run의 조합·설정·결과를 나란히 비교 — 차이 나는 행이 강조됩니다",
+    () => {
+      const ids = [...box.querySelectorAll("input[name=runcmp]:checked")].map(c => c.value);
+      if (ids.length < 2) { smsg("비교할 run을 2개 이상 체크(🔍)하세요"); return; }
+      renderRunCompare(runs.filter(r => ids.includes(r.run_id)), cmpBox);
+    }));
   box.appendChild(bar);
+  const cmpBox = document.createElement("div"); cmpBox.style.marginTop = "8px";
+  box.appendChild(cmpBox);
+}
+
+// ── run 비교 — 행=설정 키(합집합), 열=run. 첫 run과 다른 행 강조 (MLflow 방식) ──
+function renderRunCompare(sel, mount) {
+  mount.innerHTML = "";
+  const head = sel.map(r => `${r.started || "?"}${r.active ? " ★" : ""}`);
+  // 설정 행: 고정 차원 + params 합집합. 결과 행은 별도(항상 표시, 강조 없음 — 결과는 다른 게 당연)
+  const dim = [
+    ["도메인", r => `${r.domain || "-"} v${r.domain_version || "?"}`],
+    ["① 추출(엔티티)", r => r.entity_version != null ? `${r.entity_line || "?"}·v${r.entity_version}` : "-"],
+    ["② 병합(클러스터)", r => r.cluster_version != null ? `${r.cluster_line || "?"}·v${r.cluster_version}` : "-"],
+    ["매핑", r => r.join_version != null ? `v${r.join_version}` : "-"],
+    ["데이터", r => r.data_version != null ? `v${r.data_version}` : "-"],
+    ["LLM", r => r.chat_model || "-"],
+    ["임베딩", r => r.embed_model || "-"],
+  ];
+  const pkeys = [...new Set(sel.flatMap(r => Object.keys(r.params || {})))];   // 키 합집합
+  const cfgRows = [
+    ...dim.map(([k, f]) => ({key: k, values: sel.map(f)})),
+    ...pkeys.map(k => ({key: k, values: sel.map(r => (r.params || {})[k] ?? "—")})),
+  ].map(row => ({...row, diff: row.values.some(v => v !== row.values[0])}));   // 첫값비교
+  const resRows = [["반영", "done"], ["제외", "excluded"], ["오류", "error"]]
+    .map(([k, f]) => ({key: `결과: ${k}`, values: sel.map(r => String(r[f] ?? 0)), diff: false}));
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;gap:10px;align-items:center;margin:4px 0";
+  const ttl = document.createElement("b"); ttl.style.fontSize = ".8rem";
+  ttl.textContent = `🔍 run 비교 (${sel.length}개)`;
+  const lb = document.createElement("label"); lb.className = "hint"; lb.style.margin = "0";
+  const dONLY = document.createElement("input"); dONLY.type = "checkbox";
+  lb.append(dONLY, " 차이만 보기");
+  const close = document.createElement("button"); close.type = "button"; close.className = "ghost";
+  close.textContent = "✕ 닫기"; close.onclick = () => { mount.innerHTML = ""; };
+  bar.append(ttl, lb, close); mount.appendChild(bar);
+  const t = document.createElement("table"); t.className = "vertable";
+  t.style.cssText = "border:1px solid var(--line);border-radius:8px;border-collapse:separate;border-spacing:0";
+  const thead = document.createElement("thead"); const hr = document.createElement("tr");
+  ["설정", ...head].forEach(x => { const th = document.createElement("th"); th.textContent = x; hr.appendChild(th); });
+  thead.appendChild(hr); t.appendChild(thead);
+  const tb = document.createElement("tbody");
+  const draw = () => {
+    tb.innerHTML = "";
+    [...cfgRows.filter(r => !dONLY.checked || r.diff), ...resRows].forEach(row => {
+      const tr = document.createElement("tr");
+      if (row.diff) tr.className = "diffrow";   // 색은 CSS — JS는 클래스만
+      [row.key, ...row.values].forEach(v => {
+        const td = document.createElement("td"); td.textContent = v; tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+  };
+  dONLY.onchange = draw; draw();
+  t.appendChild(tb); mount.appendChild(t);
+  mount.scrollIntoView({behavior: "smooth", block: "nearest"});
 }
 async function renderRunForm(src) {
   const f = $("runform");

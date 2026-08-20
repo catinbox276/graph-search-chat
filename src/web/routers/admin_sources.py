@@ -1333,6 +1333,42 @@ def admin_reset_all_docs():
 
 # ── 구조화 실행(run) 버저닝 — B-full ──────────────────────────
 
+def _run_compare_params(sj) -> dict:
+    """run settings(JSON CLOB) → 비교 뷰용 평면 dict (한글 키 = 표의 행).
+    프롬프트 전문은 안 실음('커스텀/기본' 여부만) — 비교 표는 설정 차이 파악용."""
+    import json
+    if hasattr(sj, "read"):
+        sj = sj.read()
+    try:
+        d = json.loads(sj or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    p = {}
+    if d.get("body_chars") is not None:
+        p["본문 길이"] = str(d["body_chars"])
+    if d.get("pack_tokens") is not None:
+        p["묶음 토큰"] = str(d["pack_tokens"])
+    p["생각 끄기"] = "켬" if d.get("no_think") else "끔"
+    p["추출 프롬프트"] = "원문 커스텀" if (d.get("doc_prompt") or "").strip() and not d.get("schema") \
+        else ("스키마 조립" if d.get("schema") else "코드 기본")
+    sc = d.get("schema")
+    if isinstance(sc, dict):
+        e, s = sc.get("entry") or {}, sc.get("solution") or {}
+        p["스키마 진입점"] = f"{e.get('key', 'goal')} ({e.get('label') or ''})".strip()
+        p["스키마 추천단위"] = f"{s.get('key', 'approach')} ({s.get('label') or ''})".strip()
+        attrs = sc.get("attrs") or []
+        p["스키마 속성"] = ", ".join(a.get("key", "") for a in attrs) or "(없음)"
+    dd = d.get("dedup")
+    if isinstance(dd, dict):
+        for k, lbl in (("sim_high", "자동병합≥"), ("sim_threshold", "후보하한≥"),
+                       ("short_name_chars", "짧은이름<"), ("char_ratio", "문자비율≥"),
+                       ("select_max", "후보수")):
+            if dd.get(k) is not None:
+                p[f"클러스터 {lbl}"] = str(dd[k])
+        p["클러스터 선택프롬프트"] = "커스텀" if (dd.get("select_prompt") or "").strip() else "코드 기본"
+    return p
+
+
 def _run_settings_display(sj) -> str:
     """run settings(JSON, 이제 CLOB)를 표에 넣을 짧은 요약으로 — 긴 엔티티 프롬프트는
     '엔티티:커스텀'으로만 표기(전문은 안 펼침)."""
@@ -1364,34 +1400,37 @@ def admin_source_runs(sname: str):
     from graph.doc_pipeline.runs import ensure_runs
     with db_cursor() as cur:
         ensure_runs(cur)
+        # settings가 CLOB이라 GROUP BY 불가(ORA-22848) — 카운트는 스칼라 서브쿼리로
         cur.execute("""
             SELECT r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
                    r.settings, r.active,
                    TO_CHAR(r.started, 'MM-DD HH24:MI'), TO_CHAR(r.finished, 'MM-DD HH24:MI'),
-                   SUM(CASE WHEN d.status = 'done' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN d.status = 'excluded' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN d.status = 'error' THEN 1 ELSE 0 END),
+                   (SELECT COUNT(*) FROM doc_results d
+                    WHERE d.run_id = r.run_id AND d.status = 'done'),
+                   (SELECT COUNT(*) FROM doc_results d
+                    WHERE d.run_id = r.run_id AND d.status = 'excluded'),
+                   (SELECT COUNT(*) FROM doc_results d
+                    WHERE d.run_id = r.run_id AND d.status = 'error'),
                    r.entity_version, r.cluster_version, r.join_version, r.data_version,
                    r.entity_line, r.cluster_line
-            FROM doc_runs r LEFT JOIN doc_results d ON d.run_id = r.run_id
+            FROM doc_runs r
             WHERE r.source_name = :1
-            GROUP BY r.run_id, r.domain, r.domain_version, r.chat_model, r.embed_model,
-                     r.settings, r.active, r.started, r.finished,
-                     r.entity_version, r.cluster_version, r.join_version, r.data_version,
-                     r.entity_line, r.cluster_line
-            ORDER BY MAX(r.started) DESC""", [sname])
-        rows = [{"run_id": r[0], "domain": r[1], "domain_version": r[2],
-                 "chat_model": r[3], "embed_model": r[4],
-                 "settings": _run_settings_display(r[5]),
-                 "active": r[6] == "Y", "started": r[7], "finished": r[8],
-                 "done": int(r[9] or 0), "excluded": int(r[10] or 0),
-                 "error": int(r[11] or 0),
-                 "entity_version": int(r[12]) if r[12] is not None else None,
-                 "cluster_version": int(r[13]) if r[13] is not None else None,
-                 "join_version": int(r[14]) if r[14] is not None else None,
-                 "data_version": int(r[15]) if r[15] is not None else None,
-                 "entity_line": r[16] or "", "cluster_line": r[17] or ""}
-                for r in cur.fetchall()]
+            ORDER BY r.started DESC""", [sname])
+        rows = []
+        for r in cur.fetchall():
+            sj = _lob_str(r[5])   # CLOB 1회 읽기 — 요약·비교 파라미터 둘 다 여기서
+            rows.append({"run_id": r[0], "domain": r[1], "domain_version": r[2],
+                         "chat_model": r[3], "embed_model": r[4],
+                         "settings": _run_settings_display(sj),
+                         "params": _run_compare_params(sj),
+                         "active": r[6] == "Y", "started": r[7], "finished": r[8],
+                         "done": int(r[9] or 0), "excluded": int(r[10] or 0),
+                         "error": int(r[11] or 0),
+                         "entity_version": int(r[12]) if r[12] is not None else None,
+                         "cluster_version": int(r[13]) if r[13] is not None else None,
+                         "join_version": int(r[14]) if r[14] is not None else None,
+                         "data_version": int(r[15]) if r[15] is not None else None,
+                         "entity_line": r[16] or "", "cluster_line": r[17] or ""})
     return {"runs": rows}
 
 
