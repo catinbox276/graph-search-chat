@@ -74,23 +74,15 @@ fetch("/me").then(r => r.json()).then(m => {
   <input type="search" id="find" placeholder="노드 검색 (Enter)">
   <select id="domSel"><option value="">도메인: 전체</option></select>
   <select id="layerSel">
-    <option value="base">계층: 기본 (도구 제외)</option>
+    <option value="base">계층: 기본 (도구·엔티티 제외)</option>
     <option value="all">계층: 전체</option>
-    <option value="1">도메인만</option>
-    <option value="2">목표만</option>
-    <option value="3">접근법만</option>
-    <option value="4">행동(도구)만</option>
-    <option value="5">엔티티(타입)만</option>
   </select>
   <label>최대 <input type="number" id="maxN" value="100" min="10" max="2000" step="10"
                      style="width:64px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"> 노드</label>
   <label><input type="checkbox" id="failOnly"> 실패 이력만</label>
   <button class="ghost" id="spreadBtn" title="얽힌 배치를 다시 정렬">펼치기</button>
   <span class="spacer"></span>
-  <span><i class="dot" style="background:#1e40af"></i>도메인</span>
-  <span><i class="dot" style="background:#0891b2"></i>목표</span>
-  <span><i class="dot" style="background:var(--ok)"></i>접근법</span>
-  <span><i class="dot" style="background:#9ca3af"></i>도구</span>
+  <span id="legend"></span>
   <span><i class="dot" style="background:var(--fail)"></i>실패 우세</span>
   <span style="color:var(--mut)">크기·선 굵기 = 사용 횟수</span>
 </div>
@@ -104,8 +96,12 @@ fetch("/me").then(r => r.json()).then(m => {
 <script>
 const OK = getComputedStyle(document.documentElement).getPropertyValue("--ok").trim();
 const FAIL = getComputedStyle(document.documentElement).getPropertyValue("--fail").trim();
-const COLORS = {1: "#1e40af", 2: "#0891b2", 3: OK, 4: "#9ca3af", 5: "#c084fc"};
-const LAYER_NAME = {1: "도메인", 2: "목표", 3: "접근법", 4: "행동/도구", 5: "엔티티(타입)"};
+// v2 층 배치: 1 도메인 · 2..7 계층 체인 (2=진입/목표) · 8 도구 · 9 속성 엔티티
+const COLORS = {1: "#1e40af", 2: "#0891b2", 3: OK, 8: "#9ca3af", 9: "#c084fc"};
+const CHAIN_PAL = ["#0891b2", OK, "#7c5cd6", "#d97706", "#db2777", "#0d9488"];  // 체인층 순환
+const colorOf = l => COLORS[l] || CHAIN_PAL[(l - 2) % CHAIN_PAL.length];
+const LAYER_NAME = {1: "도메인", 2: "목표", 3: "접근법", 8: "행동/도구", 9: "엔티티(타입)"};
+const layerName = l => LAYER_NAME[l] || `체인 ${l - 1}단계`;
 let NODES = [], EDGES = [], net, vnodes, vedges;
 let PARENTS = {}, CHILDREN = {};  // 인접 맵 (조상 연결·도메인 서브트리용)
 
@@ -125,6 +121,20 @@ fetch("/graph/data" + (_RUNQ ? "?relations_run=" + encodeURIComponent(_RUNQ) : "
     o.value = n.id; o.textContent = "도메인: " + n.name;
     sel.appendChild(o);
   });
+  // 층 셀렉트·범례 — 데이터에 실제 있는 층으로 동적 생성 (체인 길이가 스키마마다 다름)
+  const lays = [...new Set(nodes.map(n => n.layer))].sort((a, b) => a - b);
+  const lsel = document.getElementById("layerSel");
+  lays.forEach(l => {
+    const o = document.createElement("option");
+    o.value = l; o.textContent = layerName(l) + "만";
+    lsel.appendChild(o);
+  });
+  const lg = document.getElementById("legend");
+  lays.forEach(l => {
+    const s = document.createElement("span");
+    s.innerHTML = `<i class="dot" style="background:${colorOf(l)}"></i>${layerName(l)} `;
+    lg.appendChild(s);
+  });
   build();
 });
 
@@ -141,7 +151,7 @@ function domainSubtree() {
 
 function visible(n, sub) {
   const lay = document.getElementById("layerSel").value;
-  if (lay === "base" ? n.layer >= 4 : lay !== "all" && n.layer !== +lay) return false;  // 기본 뷰 = 1~3층 (도구·엔티티 제외)
+  if (lay === "base" ? n.layer >= 8 : lay !== "all" && n.layer !== +lay) return false;  // 기본 뷰 = 도메인+체인(2..7), 도구8·엔티티9 제외
   if (sub && !sub.has(n.id)) return false;
   if (document.getElementById("failOnly").checked && !(n.fail || n.layer <= 2)) return false;
   return true;
@@ -176,11 +186,11 @@ function nodeSpec(n) {
   const nm = n.etype ? `${n.etype}: ${n.name}` : n.name;  // 엔티티(5층)는 타입 접두사
   return {
     id: n.id,
-    title: `${LAYER_NAME[n.layer] || n.layer}${n.etype ? " · " + n.etype : ""}\n${n.name}\n사용 ${n.uses}회`
+    title: `${layerName(n.layer)}${n.etype ? " · " + n.etype : ""}\n${n.name}\n사용 ${n.uses}회`
            + (n.docs ? ` · 문서 ${n.docs}` : "") + (n.success ? ` · 성공 ${n.success}` : ""),
     label: nm.length > 24 ? nm.slice(0, 24) + "…" : nm,
-    color: {background: n.fail ? FAIL : COLORS[n.layer],
-            border: n.fail ? FAIL : COLORS[n.layer],
+    color: {background: n.fail ? FAIL : colorOf(n.layer),
+            border: n.fail ? FAIL : colorOf(n.layer),
             highlight: {background: "#f59e0b", border: "#b45309"}},
     font: {color: n.layer === 1 ? "#fff" : "#1f2430", size: n.layer === 1 ? 18 : 13},
     shape: n.layer === 1 ? "box" : "dot",
@@ -252,7 +262,7 @@ function showPanel(id) {
   });
   const p = document.getElementById("panel");
   p.innerHTML = `<button class="close" onclick="hidePanel()">✕</button>
-    <div style="color:var(--mut);font-size:.75rem">${LAYER_NAME[n.layer]}</div>
+    <div style="color:var(--mut);font-size:.75rem">${layerName(n.layer)}</div>
     <h3>${n.name}</h3>
     <div class="kv">사용 <b>${n.uses}</b>회 (문서 ${n.docs} · 대화 ${n.uses - n.docs}) · 성공 <b>${n.success}</b> · 실패 <b>${n.fail_cnt}</b></div>
     ${n.fail_reason ? `<div class="warnbox">⚠ ${n.fail_reason}</div>` : ""}

@@ -70,10 +70,10 @@ def merge_into(cur, src, dst, parent):
 
 def pass1_sibling_merge(cur):
     merged = 0
-    cur.execute("SELECT DISTINCT src FROM edges e JOIN nodes n ON n.id=e.dst WHERE n.layer IN (2,3)")
+    cur.execute("SELECT DISTINCT src FROM edges e JOIN nodes n ON n.id=e.dst WHERE n.layer BETWEEN 2 AND 7")
     for (parent,) in cur.fetchall():
         cur.execute("""SELECT n.id, n.name, n.layer, n.embedding FROM edges e
-                       JOIN nodes n ON n.id=e.dst WHERE e.src=:1 AND n.layer IN (2,3)""",
+                       JOIN nodes n ON n.id=e.dst WHERE e.src=:1 AND n.layer BETWEEN 2 AND 7""",
                     [parent])
         sibs = [(nid, name, layer,
                  np.asarray(json.loads(emb.read() if hasattr(emb, "read") else emb),
@@ -105,7 +105,7 @@ def pass1_sibling_merge(cur):
 def pass2_leaf_absorb(cur, age_days):
     absorbed = 0
     cur.execute("""SELECT e.src, n.id, n.name FROM edges e JOIN nodes n ON n.id=e.dst
-                   WHERE n.layer = 3
+                   WHERE n.role_tag = 'solution'
                    AND n.valid_from < SYSTIMESTAMP - NUMTODSINTERVAL(:1, 'DAY')""",
                 [age_days])
     for parent, nid, name in cur.fetchall():
@@ -144,7 +144,7 @@ def pass3_decay(cur):
                                WHERE ev.node_id = n.id AND ev.kind = 'session'),
                               n.valid_from) AS last_use
                    FROM edges e JOIN nodes n ON n.id = e.dst
-                   WHERE n.layer = 3""")
+                   WHERE n.role_tag = 'solution'""")
     for src, dst, raw, w, name, last in cur.fetchall():
         idle = (now - last).total_seconds() / 86400 if last else 0.0
         if idle <= grace:

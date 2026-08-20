@@ -532,35 +532,52 @@ class EntityVersionIn(BaseModel):        # 버전 업 (라인 이름은 경로)
     @field_validator("etypes")
     @classmethod
     def _etypes(cls, v: list) -> list:
-        out, seen, role_cnt = [], set(), {"entry": 0, "solution": 0}
+        """v2: role="chain" 행(배열 순서=체인 순서, 2~5칸) + tags=["solution"] ≤1 +
+        attr 행. v1(role entry/solution 각 1행)도 수용 — 단 chain과 혼용은 모호라 금지."""
+        out, seen, role_cnt, chain_cnt, sol_cnt = [], set(), {"entry": 0, "solution": 0}, 0, 0
         for t in (v or [])[:30]:   # 상한 30종 — 프롬프트 길이 보호
             key = str(t.get("key", "")).strip()
             if not key:
                 continue
-            if key in ("fits", "reason", "id"):
+            if key in ("fits", "reason", "id", "relations", "verdict", "grounded"):
                 raise ValueError(f"'{key}'는 판정 예약 필드라 키로 쓸 수 없습니다")
             if key in seen:
                 raise ValueError(f"키 중복: {key}")
             seen.add(key)
             role = str(t.get("role", "")).strip()
-            if role in ("entry", "solution"):
+            row = {"key": key, "label": str(t.get("label", "")).strip(),
+                   "desc": str(t.get("desc", "")).strip()}
+            if role == "chain":
+                chain_cnt += 1
+                tags = [s for s in (t.get("tags") or []) if s == "solution"]
+                if tags:
+                    sol_cnt += 1
+                    if sol_cnt > 1:
+                        raise ValueError("검증귀속(solution) 태그는 체인 칸 1개에만 가능합니다")
+                row["role"], row["tags"] = "chain", tags   # tags 보존 — 스트립 금지
+            elif role in ("entry", "solution"):
                 role_cnt[role] += 1
                 if role_cnt[role] > 1:
                     nm = "진입점" if role == "entry" else "추천단위"
                     raise ValueError(f"{nm} 역할은 스키마당 1개만 가능합니다")
+                row["role"] = role
             else:
-                role = "attr"
-            out.append({"key": key, "label": str(t.get("label", "")).strip(),
-                        "desc": str(t.get("desc", "")).strip(), "role": role})
+                row["role"] = "attr"
+            out.append(row)
+        if chain_cnt and (role_cnt["entry"] or role_cnt["solution"]):
+            raise ValueError("체인(chain) 행과 구식 진입점/추천단위 행은 혼용할 수 없습니다")
+        if chain_cnt == 1 or chain_cnt > 5:
+            raise ValueError("계층 체인은 2~5칸이어야 합니다")
         return out
 
     @model_validator(mode="after")
     def _rtypes(self):
-        # 관계 타입 검증 — source/target이 스키마 타입 키에 실존해야 함
+        # 관계 타입 검증 — source/target이 스키마 타입 키(체인 전 키+속성 키)에 실존해야 함
         keys = {t["key"] for t in self.etypes}
-        if not any(t.get("role") == "entry" for t in self.etypes):
-            keys.add("goal")       # entry 미정의 = 기본 goal
-        if not any(t.get("role") == "solution" for t in self.etypes):
+        has_chain = any(t.get("role") == "chain" for t in self.etypes)
+        if not has_chain and not any(t.get("role") == "entry" for t in self.etypes):
+            keys.add("goal")       # 체인·entry 둘 다 미정의 = 기본 goal
+        if not has_chain and not any(t.get("role") == "solution" for t in self.etypes):
             keys.add("approach")   # solution 미정의 = 기본 approach
         out, seen = [], set()
         for r in (self.rtypes or [])[:20]:   # 상한 20종 — 프롬프트 길이 보호
@@ -712,6 +729,7 @@ def admin_entity_preview(inp: EntityPreviewIn):
     out = {"doc_prompt": d, "pack_prompt": p,
            "session_prompt": se, "session_judge_prompt": sj,
            "keys": {"entry": schema["entry"]["key"], "solution": schema["solution"]["key"],
+                    "chain": [c["key"] for c in schema["chain"]],
                     "attrs": [a["key"] for a in schema["attrs"]],
                     "relations": [r["key"] for r in schema["relations"]]}}
     if inp.fill_sample:
@@ -1436,6 +1454,9 @@ def _run_compare_params(sj) -> dict:
         sc = d.get("schema")
     if isinstance(sc, dict):
         e, s = sc.get("entry") or {}, sc.get("solution") or {}
+        ch = sc.get("chain") or []
+        if len(ch) > 2:   # v2 계층 체인 — 2칸 초과일 때만 별도 행
+            p["스키마 체인"] = " → ".join(c.get("key", "") for c in ch)
         p["스키마 진입점"] = f"{e.get('key', 'goal')} ({e.get('label') or ''})".strip()
         p["스키마 추천단위"] = f"{s.get('key', 'approach')} ({s.get('label') or ''})".strip()
         attrs = sc.get("attrs") or []
@@ -1912,9 +1933,7 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
     model = (st.get("doc_extract_model") or "").strip()
     if not doc_prompt:   # 활성 버전이 비었으면 앱설정 원문 override → 코드 기본
         doc_prompt = (st.get("struct_doc_prompt") or "").strip()
-    ek, sk = schema["entry"]["key"], schema["solution"]["key"]
-    keys = [(ek, schema["entry"].get("label") or ek),
-            (sk, schema["solution"].get("label") or sk)] + \
+    keys = [(c["key"], c.get("label") or c["key"]) for c in _judge.chain_view(schema)[0]] + \
            [(a["key"], a.get("label") or a["key"]) for a in schema["attrs"]]
     out = []
     for src_id, title, kind, body in docs:

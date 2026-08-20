@@ -97,7 +97,7 @@
   .toolgrp label.treechild { margin-left: 22px; border-left: 2px solid var(--line); padding-left: 8px; }
   .verrow > td { background: color-mix(in srgb, var(--line) 18%, transparent); padding: 8px 10px; }
   /* 스키마 캔버스 — 엔티티 노드 드래그 배치 + 포트 드래그로 관계 선 긋기 (n8n식) */
-  .scWrap { position: relative; height: 430px; border: 1.5px solid var(--line); border-radius: 12px;
+  .scWrap { position: relative; height: 520px; border: 1.5px solid var(--line); border-radius: 12px;
             overflow: hidden; margin: 8px 0;
             background-image: radial-gradient(circle, rgba(120,130,160,.18) 1px, transparent 1px);
             background-size: 22px 22px; }
@@ -107,6 +107,7 @@
             border: 2px solid #c084fc; border-radius: 10px; background: #fff;
             cursor: grab; user-select: none; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
   .scNode:active { cursor: grabbing; }
+  .scNode.chain { border-color: #7ba7d9; }
   .scNode.entry { border-color: #0891b2; } .scNode.solution { border-color: #12b886; }
   .scNode .r { font-size: .66rem; color: var(--mut); }
   .scNode .k { font-weight: 700; font-size: .82rem; word-break: break-all; }
@@ -265,30 +266,22 @@
   <h3>① 추출 (엔티티) <small>파이프라인 1단계: 문서 → 목표·접근법 뽑기 · 라인마다 독립 버전 — 라인 클릭=버전 목록, 아래 폼으로 새 라인/버전 업</small></h3>
   <p class="hint" style="margin:4px 0 8px"><b>엔티티 = 문서·대화에서 뽑아내는 지식의 단위</b>입니다.
      이 스키마는 <b>문서 구조화와 대화(세션) 추출 양쪽</b>에 적용됩니다 — 대화는 활성(★) 라인을 씁니다.
-     <b>키·표시명·설명은 전부 변경 가능</b>하고, <b>역할</b>이 그래프에서의 자리를 정합니다 —
-     진입점(2층, 경로 추천의 시작)·추천단위(3층, 검증·가중치가 붙는 곳)는 각 1개, 속성(5층)은 자유.
-     goal·approach는 기본 스키마의 이름일 뿐 바꿔도 됩니다. (행동/도구는 대화에서만 나옴)</p>
+     <b>계층 체인(2~5칸)</b>이 그래프 2층부터 순서대로 저장층이 됩니다 — 첫 칸=진입점 🔗(검색 시작),
+     ⭐ 검증귀속(성공/실패·추천이 붙는 칸)은 체인 중 한 칸(기본 마지막). 속성(9층)·관계는 자유.
+     키·표시명·설명 전부 변경 가능. (행동/도구는 대화에서만 자동 — 8층)</p>
   <div id="entLines"><span class="hint">불러오는 중…</span></div>
   <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
     <div class="fgroup">
-      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 문서 하나를 읽고 무엇을 추출할지. 설명이 곧 추출 기준이고, 키·표시명·설명 모두 편집 가능합니다</small></div>
+      <div class="fgroup-t">1️⃣ 뽑아낼 엔티티 <small>— 계층 체인(순서대로 저장) + 속성. 설명이 곧 추출 기준이고, 키·표시명·설명 모두 편집 가능합니다</small></div>
       <table class="vertable">
-        <thead><tr><th style="width:86px">역할</th><th style="width:130px">키 (영문 권장)</th><th style="width:120px">표시명</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:36px"></th></tr></thead>
-        <tbody>
-          <tr><td title="경로 추천의 시작점 — 그래프 2층. 스키마당 1개">진입점 🔗</td>
-            <td><input id="veEkey" value="goal" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
-            <td><input id="veElabel" value="목표" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
-            <td><input id="veEdesc" value="문서가 다루는 문제/목표" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td><td></td></tr>
-          <tr><td title="검증·가중치·추천이 붙는 단위 — 그래프 3층. 스키마당 1개">추천단위 ⭐</td>
-            <td><input id="veSkey" value="approach" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
-            <td><input id="veSlabel" value="접근법" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td>
-            <td><input id="veSdesc" value="핵심 해법/접근법" style="width:100%;box-sizing:border-box;padding:4px 8px;border:1px solid var(--line);border-radius:6px"></td><td></td></tr>
-        </tbody>
+        <thead><tr><th style="width:120px">역할</th><th style="width:130px">키 (영문 권장)</th><th style="width:120px">표시명</th><th>설명 — 무엇을 뽑을지의 기준</th><th style="width:90px"></th></tr></thead>
+        <tbody id="veChain"></tbody>
         <tbody id="veTypes"></tbody>
       </table>
       <div class="schedrow" style="margin:6px 0 0">
+        <button type="button" class="ghost" id="veChainAdd" title="계층 체인 칸 추가 (최대 5칸) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
         <button type="button" class="ghost" id="veTypeAdd">＋ 속성 추가</button>
-        <span class="hint" style="margin:0">속성(예: time·company)은 그래프 5층 노드로 진입점에 연결되고, run별 문서 결과에도 저장됩니다</span>
+        <span class="hint" style="margin:0">⭐ 라디오 = 검증귀속 칸 선택. 속성(예: time·company)은 그래프 9층 노드로 진입점에 연결됩니다</span>
       </div>
       <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
         <div class="fgroup-t" style="margin-bottom:4px">관계 <small>— 위 엔티티들 사이의 타입드 관계. 문서에서 함께 추출되어 그래프에 점선으로 연결됩니다 (선택)</small></div>
@@ -2280,38 +2273,117 @@ function veTypeRow(key, label, desc) {
   c3.appendChild(x); tr.appendChild(c3);
   $("veTypes").appendChild(tr);
 }
-function veTypesRead() {   // 폼 → etypes (역할 포함)
-  const out = [];
-  if ($("veEkey").value.trim())
-    out.push({role: "entry", key: $("veEkey").value.trim(),
-              label: $("veElabel").value.trim(), desc: $("veEdesc").value.trim()});
-  if ($("veSkey").value.trim())
-    out.push({role: "solution", key: $("veSkey").value.trim(),
-              label: $("veSlabel").value.trim(), desc: $("veSdesc").value.trim()});
-  [...$("veTypes").querySelectorAll(".etyperow")].forEach(r => {
-    const [k, l, d] = r.querySelectorAll("input");
-    if (k.value.trim()) out.push({role: "attr", key: k.value.trim(),
-                                  label: l.value.trim(), desc: d.value.trim()});
+// ── 스키마 정규화 헬퍼 — 캔버스·표·요약 공용. v1(role entry/solution)→체인 2칸 변환 ──
+const _DEF_CHAIN = () => [
+  {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표", tags: []},
+  {key: "approach", label: "접근법", desc: "핵심 해법/접근법", tags: ["solution"]}];
+function normEtypes(arr) {
+  const chain = [], attrs = []; let le = null, ls = null;
+  (arr || []).forEach(t => {
+    if (!t || !String(t.key || "").trim()) return;
+    const row = {key: String(t.key).trim(), label: String(t.label || "").trim(),
+                 desc: String(t.desc || "").trim(),
+                 tags: (t.tags || []).filter(s => s === "solution")};
+    if (t.role === "chain") chain.push(row);
+    else if (t.role === "entry") le = row;
+    else if (t.role === "solution") { row.tags = ["solution"]; ls = row; }
+    else attrs.push(row);
   });
-  return out;
+  if (le || ls) {   // v1 행 — 기본값 보충 포함 체인 2칸으로
+    chain.unshift(le || _DEF_CHAIN()[0]);
+    chain.push(ls || _DEF_CHAIN()[1]);
+  }
+  if (!chain.length) chain.push(..._DEF_CHAIN());
+  else if (chain.length === 1) chain.push(_DEF_CHAIN()[1]);
+  let spos = chain.findIndex(c => (c.tags || []).includes("solution"));
+  if (spos <= 0) spos = chain.length - 1;   // 불변식: 첫 칸은 solution 불가, 없으면 마지막
+  chain.forEach((c, i) => { c.tags = i === spos ? ["solution"] : []; });
+  return {chain, attrs, spos};
 }
-function veTypesSet(arr) {   // etypes → 폼 (entry/solution 없으면 기본값)
-  const rows = arr || [];
-  const pick = role => rows.find(t => t.role === role);
-  const e = pick("entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
-  const s = pick("solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
-  $("veEkey").value = e.key; $("veElabel").value = e.label || ""; $("veEdesc").value = e.desc || "";
-  $("veSkey").value = s.key; $("veSlabel").value = s.label || ""; $("veSdesc").value = s.desc || "";
+function chainToEtypes(chain, attrs) {   // 직렬화 — 배열 순서 = 체인 순서 (pos 필드 없음)
+  return chain.map(c => ({key: c.key, label: c.label, desc: c.desc, role: "chain",
+                          tags: (c.tags || []).includes("solution") ? ["solution"] : []}))
+    .concat(attrs.map(a => ({key: a.key, label: a.label, desc: a.desc, role: "attr"})));
+}
+function chainBadge(c, i) {
+  return i === 0 ? "진입점 🔗" : ((c.tags || []).includes("solution") ? "검증귀속 ⭐"
+                                  : `체인 ${i + 1}단계`);
+}
+// ── 계층 체인 행 편집기 ──
+function veChainRead() {
+  return [...$("veChain").querySelectorAll(".chainrow")].map((r, i) => {
+    const [k, l, d] = r.querySelectorAll("input:not(.vesol)");
+    const sol = r.querySelector(".vesol").checked;
+    return {key: k.value.trim(), label: l.value.trim(), desc: d.value.trim(),
+            tags: sol && i > 0 ? ["solution"] : []};
+  }).filter(c => c.key);
+}
+function _veChainNorm(ch) {   // ⭐ 1개 보장 (첫 칸 제외, 없으면 마지막)
+  let spos = ch.findIndex(c => (c.tags || []).includes("solution"));
+  if (spos <= 0) spos = ch.length - 1;
+  ch.forEach((c, i) => { c.tags = i === spos ? ["solution"] : []; });
+  return ch;
+}
+function veChainSet(chain) {
+  const tb = $("veChain"); tb.innerHTML = "";
+  const ch = _veChainNorm(chain.length ? chain : _DEF_CHAIN());
+  ch.forEach((c, i) => {
+    const tr = document.createElement("tr"); tr.className = "chainrow";
+    const role = document.createElement("td");
+    const sol = document.createElement("input");
+    sol.type = "radio"; sol.name = "veSol"; sol.className = "vesol";
+    sol.checked = (c.tags || []).includes("solution");
+    sol.disabled = i === 0;
+    sol.title = "⭐ 검증귀속 — 성공/실패 카운트·추천이 붙는 칸 (첫 칸=진입점은 불가)";
+    sol.onchange = () => veChainSet(veChainRead());
+    const b = document.createElement("span"); b.textContent = " " + chainBadge(c, i);
+    b.title = `그래프 ${2 + i}층에 저장`;
+    role.append(sol, b); tr.appendChild(role);
+    [["키 (영문 권장)", c.key], ["표시명", c.label], ["설명 — 추출 기준", c.desc]].forEach(([ph, v]) => {
+      const td = document.createElement("td");
+      const inp = document.createElement("input"); inp.placeholder = ph; inp.value = v || "";
+      inp.style.cssText = _VE_IN; td.appendChild(inp); tr.appendChild(td);
+    });
+    const act = document.createElement("td");
+    const mkb = (t, fn, dis) => { const x = document.createElement("button");
+      x.type = "button"; x.className = "ghost"; x.textContent = t; x.disabled = !!dis;
+      x.style.padding = "0 5px"; x.onclick = fn; act.appendChild(x); };
+    // 순서 변경은 2번째 칸부터 서로 스왑 (첫 칸=진입점은 자리 고정)
+    mkb("▲", () => { const a = veChainRead(); if (i < 2) return;
+      [a[i - 1], a[i]] = [a[i], a[i - 1]]; veChainSet(a); }, i < 2);
+    mkb("▼", () => { const a = veChainRead(); if (i < 1 || i >= a.length - 1) return;
+      [a[i + 1], a[i]] = [a[i], a[i + 1]]; veChainSet(a); }, i < 1 || i >= ch.length - 1);
+    mkb("✕", () => { const a = veChainRead(); if (a.length <= 2 || i === 0) return;
+      a.splice(i, 1); veChainSet(a); }, ch.length <= 2 || i === 0);
+    tr.appendChild(act);
+    tb.appendChild(tr);
+  });
+}
+$("veChainAdd").onclick = () => {
+  const ch = veChainRead();
+  if (ch.length >= 5) { $("veMsg").textContent = "계층 체인은 최대 5칸입니다"; return; }
+  let n = 1; while (ch.some(c => c.key === "step" + n)) n++;
+  ch.push({key: "step" + n, label: "", desc: "", tags: []});
+  veChainSet(ch);
+};
+veChainSet(_DEF_CHAIN());   // 초기 표시 — 라인 선택 전 기본 2칸
+function veTypesRead() {   // 폼 → etypes (체인 순서 + 속성)
+  const attrs = [...$("veTypes").querySelectorAll(".etyperow")].map(r => {
+    const [k, l, d] = r.querySelectorAll("input");
+    return {key: k.value.trim(), label: l.value.trim(), desc: d.value.trim()};
+  }).filter(a => a.key);
+  return chainToEtypes(_veChainNorm(veChainRead()), attrs);
+}
+function veTypesSet(arr) {   // etypes → 폼 (v1 스키마도 normEtypes가 체인으로 변환)
+  const {chain, attrs} = normEtypes(arr);
+  veChainSet(chain);
   $("veTypes").innerHTML = "";
-  rows.filter(t => t.role !== "entry" && t.role !== "solution")
-      .forEach(t => veTypeRow(t.key, t.label, t.desc));
+  attrs.forEach(t => veTypeRow(t.key, t.label, t.desc));
 }
 $("veTypeAdd").onclick = () => veTypeRow("", "", "");
 // ── 관계 행 편집기 — 출발/도착 select는 현재 폼의 엔티티 키로 (focus 시 재구성) ──
 function veSchemaKeys() {
-  const out = [];
-  if ($("veEkey").value.trim()) out.push([$("veEkey").value.trim(), $("veElabel").value.trim()]);
-  if ($("veSkey").value.trim()) out.push([$("veSkey").value.trim(), $("veSlabel").value.trim()]);
+  const out = veChainRead().map(c => [c.key, c.label]);
   [...$("veTypes").querySelectorAll(".etyperow")].forEach(r => {
     const [k, l] = r.querySelectorAll("input");
     if (k.value.trim()) out.push([k.value.trim(), l.value.trim()]);
@@ -2408,26 +2480,23 @@ const ENTITY_VM = {
     veTypesSet(parseEtypes(v.etypes)); veRelsSet(parseEtypes(v.rtypes));
     $("veDoc").value = v.doc_prompt || ""; $("vePack").value = v.pack_prompt || ""; $("veNote").value = v.note || ""; },
   summary: v => {
-    const et = parseEtypes(v.etypes);
-    const e = et.find(t => t.role === "entry"), s = et.find(t => t.role === "solution");
-    const nAttr = et.filter(t => t.role !== "entry" && t.role !== "solution").length;
+    const {chain, attrs} = normEtypes(parseEtypes(v.etypes));
     const nRel = parseEtypes(v.rtypes).length;
     return (v.doc_prompt ? "원문:커스텀(고급)"
-            : `${(e && (e.label || e.key)) || "목표"}→${(s && (s.label || s.key)) || "접근법"}`) +
-           (nAttr ? `·속성${nAttr}종` : "") + (nRel ? `·관계${nRel}종` : "") +
+            : chain.map(c => c.label || c.key).join("→")) +
+           (attrs.length ? `·속성${attrs.length}종` : "") + (nRel ? `·관계${nRel}종` : "") +
            (v.criteria ? "·지침" : "");
   },
   viewSections: async v => {   // 서버 조립 결과 = 실제 LLM에 가는 프롬프트
     const et = parseEtypes(v.etypes), rt = parseEtypes(v.rtypes);
-    const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
-    const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
-    const attrs = et.filter(t => t.role !== "entry" && t.role !== "solution");
+    const {chain, attrs} = normEtypes(et);
     const secs = [{label: "설명 (이 엔티티가 뭔지)", text: v.descr, empty: "(설명 없음)"},
-                  {label: `스키마 — 뽑아낼 엔티티 (${2 + attrs.length}종)`,
+                  {label: `스키마 — 계층 체인 ${chain.length}칸 + 속성 ${attrs.length}종`,
                    table: {head: ["역할", "키", "표시명", "설명 (추출 기준)", "저장"], badge0: true,
-                           rows: [["진입점 🔗", e.key, e.label || "", e.desc || "", "그래프 2층"],
-                                  ["추천단위 ⭐", s.key, s.label || "", s.desc || "", "그래프 3층"],
-                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 5층"])]}}];
+                           rows: [...chain.map((c, i) =>
+                                    [chainBadge(c, i), c.key, c.label || "", c.desc || "",
+                                     `그래프 ${2 + i}층`]),
+                                  ...attrs.map(t => ["속성 ✏", t.key, t.label || "", t.desc || "", "그래프 9층"])]}}];
     if (rt.length)
       secs.push({label: `관계 (${rt.length}종)`,
                  table: {head: ["키", "표시명", "설명", "시그니처"], badge0: true,
@@ -2951,7 +3020,19 @@ async function plCreateRun() {
 // ── 스키마 캔버스 — ①추출 노드 더블클릭: 엔티티·관계를 노드와 선으로 직접 설계 (n8n식) ──
 // 노드 드래그=이동 · 노드 클릭=편집 · 파란 포트를 끌어 다른 노드에 놓기=관계 생성 · 선 라벨 클릭=관계 편집
 const SC = {line: "", ver: null, base: null, nodes: [], rels: [], els: {}};
-const _SC_ROLE = {entry: "진입점 🔗 · 그래프 2층", solution: "추천단위 ⭐ · 그래프 3층", attr: "속성 ✏ · 그래프 5층"};
+function scRoleText(n) {
+  if (n.role === "attr") return "속성 ✏ · 그래프 9층";
+  const i = n.pos || 0;
+  return chainBadge(n, i) + ` · 그래프 ${2 + i}층`;
+}
+function scChainNodes() {   // 체인 노드를 pos 순으로
+  return SC.nodes.filter(n => n.role === "chain").sort((a, b) => a.pos - b.pos);
+}
+function scLayoutChain() {   // 체인 세로열 자동 배치 (속성은 사용자가 끈 자리 유지)
+  const ch = scChainNodes();
+  const gap = Math.min(115, 380 / Math.max(1, ch.length - 1));
+  ch.forEach((n, i) => { n.pos = i; n.x = 30; n.y = 28 + i * gap; });
+}
 
 async function scOpen(line, ver) {
   let base = {criteria: "", descr: "", note: "", doc_prompt: "", pack_prompt: "", etypes: "[]", rtypes: "[]"};
@@ -2959,14 +3040,13 @@ async function scOpen(line, ver) {
     base = await fetch(`/admin/entity-lines/${encodeURIComponent(line)}/versions/${ver}`)
       .then(r => r.ok ? r.json() : base).catch(() => base);
   SC.line = line || ""; SC.ver = ver; SC.base = base;
-  const et = parseEtypes(base.etypes);
-  const e = et.find(t => t.role === "entry") || {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표"};
-  const s = et.find(t => t.role === "solution") || {key: "approach", label: "접근법", desc: "핵심 해법/접근법"};
-  SC.nodes = [{key: e.key, label: e.label || "", desc: e.desc || "", role: "entry", x: 30, y: 60},
-              {key: s.key, label: s.label || "", desc: s.desc || "", role: "solution", x: 60, y: 250}];
-  et.filter(t => t.role !== "entry" && t.role !== "solution").forEach((t, i) =>
+  const {chain, attrs} = normEtypes(parseEtypes(base.etypes));   // v1도 체인 2칸으로
+  SC.nodes = chain.map((c, i) => ({key: c.key, label: c.label || "", desc: c.desc || "",
+                                   role: "chain", pos: i, tags: c.tags || [], x: 0, y: 0}));
+  attrs.forEach((t, i) =>
     SC.nodes.push({key: t.key, label: t.label || "", desc: t.desc || "", role: "attr",
                    x: 340 + (i % 3) * 205, y: 50 + Math.floor(i / 3) * 130}));
+  scLayoutChain();
   SC.rels = parseEtypes(base.rtypes);
   scBuild(); scRender();
   $("plSchema").scrollIntoView({behavior: "smooth", block: "nearest"});
@@ -2977,8 +3057,18 @@ function scBuild() {
   const head = document.createElement("div"); head.className = "schedrow"; head.style.marginTop = "10px";
   const t = document.createElement("b");
   t.textContent = `🎨 스키마 설계 — ${SC.line ? `${SC.line}·v${SC.ver} 기반` : "코드 기본 기반 (새 라인으로 저장)"}`;
-  const add = document.createElement("button"); add.type = "button"; add.textContent = "＋ 엔티티";
-  add.title = "속성(5층) 엔티티 노드 추가";
+  const chAdd = document.createElement("button"); chAdd.type = "button"; chAdd.textContent = "＋ 계층 칸";
+  chAdd.title = "계층 체인 칸 추가 (최대 5칸) — 그래프의 다음 층이 됩니다";
+  chAdd.onclick = () => {
+    const ch = scChainNodes();
+    if (ch.length >= 5) { $("scvMsg").textContent = "계층 체인은 최대 5칸입니다"; return; }
+    let i = 1; while (SC.nodes.some(n => n.key === "step" + i)) i++;
+    SC.nodes.push({key: "step" + i, label: "", desc: "", role: "chain",
+                   pos: ch.length, tags: [], x: 0, y: 0});
+    scLayoutChain(); scRender();
+  };
+  const add = document.createElement("button"); add.type = "button"; add.textContent = "＋ 속성";
+  add.title = "속성(9층) 엔티티 노드 추가";
   add.onclick = () => {
     let i = 1; while (SC.nodes.some(n => n.key === "type" + i)) i++;
     SC.nodes.push({key: "type" + i, label: "", desc: "", role: "attr",
@@ -2988,7 +3078,7 @@ function scBuild() {
   const close = document.createElement("button"); close.type = "button"; close.className = "ghost"; close.textContent = "✕ 닫기";
   close.onclick = () => { box.style.display = "none"; box.innerHTML = ""; };
   const msg = document.createElement("span"); msg.className = "hint"; msg.id = "scvMsg"; msg.style.margin = "0";
-  head.append(t, add, close, msg); box.appendChild(head);
+  head.append(t, chAdd, add, close, msg); box.appendChild(head);
   const h = document.createElement("p"); h.className = "hint"; h.style.margin = "2px 0";
   h.textContent = "노드 드래그=이동 · 노드 클릭=편집 · 파란 ● 포트를 끌어 다른 노드에 놓기=관계 만들기 · 보라 선 라벨 클릭=관계 편집";
   box.appendChild(h);
@@ -3037,9 +3127,12 @@ function scRender() {
 
 function scNodeEl(n) {
   const el = document.createElement("div");
-  el.className = "scNode " + n.role; el.dataset.key = n.key;
+  el.className = "scNode " + n.role
+    + (n.role === "chain" && n.pos === 0 ? " entry" : "")
+    + (n.role === "chain" && (n.tags || []).includes("solution") ? " solution" : "");
+  el.dataset.key = n.key;
   el.style.left = n.x + "px"; el.style.top = n.y + "px";
-  const r = document.createElement("div"); r.className = "r"; r.textContent = _SC_ROLE[n.role];
+  const r = document.createElement("div"); r.className = "r"; r.textContent = scRoleText(n);
   const k = document.createElement("div"); k.className = "k"; k.textContent = n.key;
   const l = document.createElement("div"); l.className = "l"; l.textContent = n.label || "(표시명 없음)";
   el.append(r, k, l); el.title = n.desc || "";
@@ -3126,7 +3219,7 @@ function _scBtnRow(pop, btns) {
 
 function scNodePop(n) {
   const pop = _scPopShell(n.x + 20, n.y + 30);
-  const t = document.createElement("div"); t.className = "t"; t.textContent = `${_SC_ROLE[n.role]} 편집`;
+  const t = document.createElement("div"); t.className = "t"; t.textContent = `${scRoleText(n)} 편집`;
   pop.appendChild(t);
   const ik = _scIn(pop, "키 (영문 권장)", n.key);
   const il = _scIn(pop, "표시명", n.label);
@@ -3142,6 +3235,35 @@ function scNodePop(n) {
     n.key = key; n.label = il.value.trim(); n.desc = id.value.trim();
     $("scvMsg").textContent = ""; scRender();
   }]];
+  if (n.role === "chain") {
+    const ch = scChainNodes();
+    if (n.pos > 0 && !(n.tags || []).includes("solution"))
+      btns.push(["⭐ 검증귀속을 이 칸으로", () => {
+        ch.forEach(q => { q.tags = q === n ? ["solution"] : []; });
+        scRender();
+      }, true]);
+    if (n.pos >= 2)   // 순서 변경 — 첫 칸(진입점)은 자리 고정, 2번째부터 서로 스왑
+      btns.push(["▲", () => {
+        const other = ch[n.pos - 1];
+        [other.pos, n.pos] = [n.pos, other.pos];
+        scLayoutChain(); scRender();
+      }, true]);
+    if (n.pos >= 1 && n.pos < ch.length - 1)
+      btns.push(["▼", () => {
+        const other = ch[n.pos + 1];
+        [other.pos, n.pos] = [n.pos, other.pos];
+        scLayoutChain(); scRender();
+      }, true]);
+    if (ch.length > 2 && n.pos > 0)
+      btns.push(["🗑 삭제", () => {
+        SC.nodes = SC.nodes.filter(q => q !== n);
+        SC.rels = SC.rels.filter(r => r.source !== n.key && r.target !== n.key);
+        const ch2 = scChainNodes();   // ⭐가 지워졌으면 마지막 칸으로 재부여
+        if (!ch2.some(q => (q.tags || []).includes("solution")))
+          ch2[ch2.length - 1].tags = ["solution"];
+        scLayoutChain(); scRender();
+      }, true]);
+  }
   if (n.role === "attr") btns.push(["🗑 삭제", () => {
     SC.nodes = SC.nodes.filter(q => q !== n);
     SC.rels = SC.rels.filter(r => r.source !== n.key && r.target !== n.key);
@@ -3206,14 +3328,18 @@ function scDrawEdges() {
     if (rel) tx.onclick = () => scRelPop(rel.source, rel.target, (x1 + x2) / 2, (y1 + y2) / 2, rel);
     svg.appendChild(tx);
   };
-  const e = SC.nodes.find(q => q.role === "entry"), s = SC.nodes.find(q => q.role === "solution");
-  if (e && s) draw(e.key, s.key, "(계층 2층→3층 — 고정)", null);
+  const ch = scChainNodes();
+  for (let i = 0; i < ch.length - 1; i++)   // 계층 체인 구조 간선 — 칸 사이 자동
+    draw(ch[i].key, ch[i + 1].key, `(계층 ${2 + i}층→${3 + i}층)`, null);
+  if (ch.length)   // 속성 부착선 — 진입점 칸에 자동 연결 (실제 그래프 모양 미리보기)
+    SC.nodes.filter(n => n.role === "attr")
+      .forEach(a => draw(ch[0].key, a.key, "속성", null));
   SC.rels.forEach(r => draw(r.source, r.target, r.key, r));
 }
 
 async function scSave(url, newName) {
   const body = {criteria: $("scCrit").value, descr: SC.base.descr || "",
-    etypes: SC.nodes.map(n => ({role: n.role, key: n.key, label: n.label, desc: n.desc})),
+    etypes: chainToEtypes(scChainNodes(), SC.nodes.filter(n => n.role === "attr")),
     rtypes: SC.rels, doc_prompt: SC.base.doc_prompt || "", pack_prompt: SC.base.pack_prompt || "",
     note: $("scNote").value};
   if (newName) body.name = newName;

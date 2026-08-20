@@ -15,7 +15,7 @@ from graph.graph_pipeline import CHAT_MODEL, ddl, get_or_create
 from graph.graph_pipeline.merge import apply_extras, default_merge_cfg
 
 from . import runs
-from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, classify_doc, judge_pack
+from .judge import DEFAULT_SCHEMA, PACK_MAX_DOCS, chain_view, classify_doc, judge_pack
 
 
 def doc_ddl(cur):
@@ -202,10 +202,9 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
     # 청크 락스텝(최장 응답이 전체를 잡고, 병합 동안 요청 0건)을 피하는 구조.
     mc = {**s.dedup, "embed_model": s.embed_model}  # run별 클러스터(dedup)·임베딩 설정
     sc = schema if isinstance(schema, dict) else DEFAULT_SCHEMA
-    ek, sk = sc["entry"]["key"], sc["solution"]["key"]   # 스키마의 진입점·추천단위 키
+    chain, spos = chain_view(sc)   # 계층 체인 + 검증귀속 위치 (v1 스냅샷 폴백 포함)
     # 병합 LLM의 종류 라벨도 스키마 표시명을 따르게 (미지정 시 merge의 기본 LAYER_KIND)
-    mc["layer_kind"] = {2: sc["entry"].get("label") or ek,
-                        3: sc["solution"].get("label") or sk}
+    mc["layer_kind"] = {2 + i: (c.get("label") or c["key"]) for i, c in enumerate(chain)}
     ex = ThreadPoolExecutor(max_workers=s.conc)
     it = iter(packs)
     pending = set()
@@ -228,28 +227,37 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
                 if not j or j.get("_error"):
                     status, note = "error", (j.get("_error") if j
                                              else "LLM 응답 파싱 실패")
-                elif j.get("fits") and j.get(ek) and j.get(sk):
+                elif j.get("fits") and all(j.get(c["key"]) for c in chain):
+                    # 계층 체인 사다리 — 도메인(1) 밑으로 체인 칸을 순서대로 (layer 2+i).
+                    # 태그: 첫 칸=entry(검색진입·속성 부착), spos 칸=solution(검증귀속)
                     d = get_or_create(cur, 1, domain, None, "doc", ref,
                                       use_embedding=False, run_id=run_id, count=count, mc=mc)
-                    g = get_or_create(cur, 2, str(j[ek])[:400], d, "doc", ref,
-                                      run_id=run_id, count=count, mc=mc)
-                    a3 = get_or_create(cur, 3, str(j[sk])[:400], g, "doc", ref,
-                                       run_id=run_id, count=count, mc=mc)
-                    # 속성(attr, 5층)·관계(rtypes) — 세션 파이프라인과 공용 apply_extras.
+                    parent, val2node, entry_node = d, {}, None
+                    for i, c in enumerate(chain):
+                        cv_ = str(j[c["key"]]).strip()[:400]
+                        rt = "entry" if i == 0 else ("solution" if i == spos else None)
+                        parent = get_or_create(cur, 2 + i, cv_, parent, "doc", ref,
+                                               run_id=run_id, count=count, mc=mc,
+                                               role_tag=rt)
+                        val2node[(c["key"], cv_)] = parent
+                        if i == 0:
+                            entry_node = parent
+                    # 속성(attr, 9층)·관계(rtypes) — 세션 파이프라인과 공용 apply_extras.
                     # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
                     ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
                     legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
                     if not any(v for v in ej.values()) and isinstance(legacy, dict):
                         ej = legacy
-                    val2node = {(ek, str(j[ek]).strip()[:400]): g,
-                                (sk, str(j[sk]).strip()[:400]): a3}
                     ats, rels_out = apply_extras(cur, sc, ej, j.get("relations"),
-                                                 g, val2node, "doc", ref,
+                                                 entry_node, val2node, "doc", ref,
                                                  run_id=run_id, count=count)
                     attrs_out.update(ats)
                     if rels_out:
                         attrs_out["_relations"] = rels_out   # run별 결과에 함께 기록
                     status, note = "done", str(j.get("reason") or "")[:1000]
+                elif j.get("fits"):   # fits인데 체인 값 일부 누락 — 우회 연결 금지
+                    missing = ", ".join(c["key"] for c in chain if not j.get(c["key"]))
+                    status, note = "excluded", f"체인 값 누락: {missing}"[:1000]
                 else:
                     status, note = "excluded", str(j.get("reason") or "기준 미달")[:1000]
                 if count:  # 활성 run만 corpus_docs 캐시 갱신 (비활성은 결과만 기록)

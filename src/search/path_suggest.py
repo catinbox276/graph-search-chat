@@ -72,8 +72,12 @@ def suggest_paths(problem: str) -> str:
                    else "의미 유사" if gid in sem_set else "키워드 일치")
             out.append(f"\n[유사 목표] {gname} ({tag})")
             # 성공/실패는 불리언 플래그가 아니라 세션 판정 카운트로 (poc-results 이슈2 해법)
+            # v2 계층 체인: 진입점(2층)에서 체인 층(3..7)을 따라 내려가 검증귀속
+            # (role_tag='solution') 노드를 찾는다 — chain=2면 1홉(v1과 동일 결과).
+            # SYS_CONNECT_BY_PATH = 중간 단계 경로 표기용 (1홉이면 이름 그대로).
             cur.execute("""
-                SELECT n.id, n.name, e.raw_count, n.fail_reason,
+                SELECT n.id, SUBSTR(SYS_CONNECT_BY_PATH(n.name, ' → '), 4) AS pname,
+                       e.raw_count, n.fail_reason,
                        (SELECT COUNT(*) FROM node_evidence ev
                         JOIN sessions s ON s.id = ev.ref AND s.turn = 1
                         WHERE ev.node_id = n.id AND ev.kind = 'session'
@@ -86,16 +90,22 @@ def suggest_paths(problem: str) -> str:
                         WHERE ev.node_id = n.id AND ev.kind = 'doc'
                           AND ev.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y')) AS dc,
                        e.weight
-                FROM edges e JOIN nodes n ON n.id = e.dst
-                WHERE e.src = :1 AND n.layer = 3""", [gid])
+                FROM edges e JOIN nodes n ON n.id = e.dst AND n.layer BETWEEN 3 AND 7
+                WHERE n.role_tag = 'solution'
+                START WITH e.src = :1
+                CONNECT BY PRIOR e.dst = e.src AND LEVEL <= 6""", [gid])
+            # DAG라 같은 귀속 노드에 경로가 여럿일 수 있음 — 첫 행만 (표기 차이일 뿐)
+            uniq = {}
+            for r in cur.fetchall():
+                uniq.setdefault(r[0], r)
             # 서열: 실전 검증(세션 성공) > 문서 근거만 > 실패 우세. 같은 단계 안에서는 보정 가중치 순
-            rows = sorted(cur.fetchall(),
+            rows = sorted(uniq.values(),
                           key=lambda r: (0 if r[4] > 0 and r[4] >= r[5]
                                          else 2 if r[5] > r[4] else 1, -r[7]))
             for aid, aname, cnt, reason, sc, fc, dc, _w in rows:
                 cur.execute("""SELECT n4.name FROM edges e4
                                JOIN nodes n4 ON n4.id = e4.dst
-                               WHERE e4.src = :1 AND n4.layer = 4""", [aid])
+                               WHERE e4.src = :1 AND n4.layer = 8""", [aid])
                 tools = ", ".join(t[0].replace("tool:", "") for t in cur.fetchall())
                 docs = f", 참고 문서 {dc}건" if dc else ""
                 # 근거 문서 id 노출 — 답변 인용·footer 수집·read_doc 열람이 가능해진다
@@ -130,10 +140,13 @@ def suggest_paths(problem: str) -> str:
         if len(goals) > 3:
             xgid = goals[3]
             xgname = gnames.get(xgid, "?")
-            cur.execute("""SELECT n.id, n.name, e.raw_count FROM edges e
-                           JOIN nodes n ON n.id = e.dst
-                           WHERE e.src = :1 AND n.layer = 3
-                             AND NVL(n.fail_flag, 'N') = 'N'
+            cur.execute("""SELECT n.id, SUBSTR(SYS_CONNECT_BY_PATH(n.name, ' → '), 4),
+                                  e.raw_count
+                           FROM edges e
+                           JOIN nodes n ON n.id = e.dst AND n.layer BETWEEN 3 AND 7
+                           WHERE n.role_tag = 'solution' AND NVL(n.fail_flag, 'N') = 'N'
+                           START WITH e.src = :1
+                           CONNECT BY PRIOR e.dst = e.src AND LEVEL <= 6
                            ORDER BY e.weight DESC FETCH FIRST 1 ROWS ONLY""", [xgid])
             r = cur.fetchone()
             if r:

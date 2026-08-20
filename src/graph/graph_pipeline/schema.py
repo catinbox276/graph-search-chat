@@ -68,12 +68,24 @@ def ddl(cur):
                    WHERE table_name = 'SESSIONS' AND column_name = 'JUDGED_WITH'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE sessions ADD (judged_with VARCHAR2(200))")
-    # entity_type — 관리자 정의 타입 엔티티(layer 5)의 타입 라벨 (코어 1~4층은 NULL).
+    # entity_type — 관리자 정의 타입 엔티티(속성층)의 타입 라벨 (그 외 층은 NULL).
     # 범용 노드 + 타입 라벨 패턴 (Graphiti/GraphRAG 방식 — DDL 반복 없이 타입 확장)
     cur.execute("""SELECT COUNT(*) FROM user_tab_columns
                    WHERE table_name = 'NODES' AND column_name = 'ENTITY_TYPE'""")
     if not cur.fetchone()[0]:
         cur.execute("ALTER TABLE nodes ADD (entity_type VARCHAR2(100))")
+    # ⚠ v2 one-shot 마이그레이션 — 이 저장소의 '멱등 ALTER' 관례와 다른 지점.
+    # layer 이동 UPDATE는 절대 게이트 밖에 두면 안 됨: v2 이후 계층 체인이 layer 4·5를
+    # 쓰므로(체인 3·4칸째) 재실행 시 체인 노드를 도구(8)·속성(9)층으로 밀어버린다.
+    # ROLE_TAG 컬럼 부재를 게이트로 컬럼 추가·태그 백필·층 재배정을 한 번에 수행.
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'NODES' AND column_name = 'ROLE_TAG'""")
+    if not cur.fetchone()[0]:
+        cur.execute("ALTER TABLE nodes ADD (role_tag VARCHAR2(10))")
+        cur.execute("UPDATE nodes SET role_tag = 'entry' WHERE layer = 2")     # 구 목표층
+        cur.execute("UPDATE nodes SET role_tag = 'solution' WHERE layer = 3")  # 구 접근법층
+        cur.execute("UPDATE nodes SET layer = 9 WHERE layer = 5")              # 속성 5→9
+        cur.execute("UPDATE nodes SET layer = 8 WHERE layer = 4")              # 도구 4→8
     # entity_relations — 타입드 관계 (Graphiti edge_type_map 포팅). 카운트 없는 존재 기반:
     # 활성 여부는 조회 시 run 스코핑(doc_runs.active), 회수는 ref 단위 DELETE — ±1 기계 불필요.
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'ENTITY_RELATIONS'")

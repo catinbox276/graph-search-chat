@@ -70,9 +70,9 @@ def _active_snapshots(cur):
                       "select_max": int(r[4]), "select_prompt": _lob(r[5]) or ""}
     except Exception as e:   # 버전 테이블 미생성 등 — 코드 기본으로 동작 (기존과 동일)
         print(f"[경고] 활성 라인 조회 실패 — 코드 기본 스키마 사용: {e}", flush=True)
+    chain, _spos = _j.chain_view(schema)
     mc = {**default_merge_cfg(), **(mc or {}), "embed_model": "",
-          "layer_kind": {2: schema["entry"].get("label") or schema["entry"]["key"],
-                         3: schema["solution"].get("label") or schema["solution"]["key"]}}
+          "layer_kind": {2 + i: (c.get("label") or c["key"]) for i, c in enumerate(chain)}}
     judged_with = (f"엔티티 {en}·v{ev}" if en and ev is not None else "엔티티 코드기본") + \
                   (f" · 클러스터 {cn}·v{cv}" if cn and cv is not None else "")
     return schema, crit, mc, judged_with
@@ -87,15 +87,15 @@ def main():
     from core import settings
     from graph.doc_pipeline import judge as _j   # lazy — 순환 import 회피
     schema, crit, mc, judged_with = _active_snapshots(cur)
-    ek, sk = schema["entry"]["key"], schema["solution"]["key"]
+    chain, spos = _j.chain_view(schema)
     _st = settings.get_all()
     judge_tmpl = (_st.get("entity_judge_prompt") or "").strip() \
         or _j.build_session_judge_prompt(schema, crit)
     extract_tmpl = (_st.get("entity_extract_prompt") or "").strip() \
         or _j.build_session_extract_prompt(schema, crit)
-    print(f"세션 추출 구성: {judged_with} · 키 {ek}/{sk}"
-          f"{' · 속성 ' + str(len(schema['attrs'])) + '종' if schema['attrs'] else ''}"
-          f"{' · 관계 ' + str(len(schema['relations'])) + '종' if schema['relations'] else ''}",
+    print(f"세션 추출 구성: {judged_with} · 체인 {'→'.join(c['key'] for c in chain)}"
+          f"{' · 속성 ' + str(len(schema.get('attrs') or [])) + '종' if schema.get('attrs') else ''}"
+          f"{' · 관계 ' + str(len(schema.get('relations') or [])) + '종' if schema.get('relations') else ''}",
           flush=True)
     cur.execute("""SELECT id, question, tool_calls, answer FROM sessions
                    WHERE turn = 1 AND verdict IS NULL ORDER BY id""")
@@ -174,23 +174,32 @@ def main():
                     "WHERE id = :3 AND turn = 1",
                     [verdict, judged_with[:200], sid])
         for domain, j, v, tool_names in contribs:
-            if not (j.get(ek) and j.get(sk)):   # 스키마 키 — 커스텀 키(예: situation)도 동작
+            if not all(j.get(c["key"]) for c in chain):   # 체인 전 키 필수 (커스텀 키 동작)
                 continue
-            gv, sv = str(j[ek]).strip()[:400], str(j[sk]).strip()[:400]
+            # 계층 체인 사다리 — 도메인(1) 밑으로 체인 칸을 순서대로 (layer 2+i).
+            # 역할 태그: 첫 칸=entry(검색진입), spos 칸=solution(검증귀속·실패표식·도구 부모)
             d = get_or_create(cur, 1, domain, None, "session", sid,
                               use_embedding=False, mc=mc)
-            g = get_or_create(cur, 2, gv, d, "session", sid, mc=mc)
-            a = get_or_create(cur, 3, sv, g, "session", sid, mc=mc)
+            parent, val2node, entry_node, sol = d, {}, None, None
+            for i, c in enumerate(chain):
+                cv_ = str(j[c["key"]]).strip()[:400]
+                rt = "entry" if i == 0 else ("solution" if i == spos else None)
+                parent = get_or_create(cur, 2 + i, cv_, parent, "session", sid,
+                                       mc=mc, role_tag=rt)
+                val2node[(c["key"], cv_)] = parent
+                if i == 0:
+                    entry_node = parent
+                if i == spos:
+                    sol = parent
             if v == "fail":
                 cur.execute("""UPDATE nodes SET fail_flag='Y', fail_reason=:1
-                               WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], a])
+                               WHERE id=:2""", [(j.get("fail_reason") or "")[:1000], sol])
             for tool in sorted(tool_names):
-                get_or_create(cur, 4, f"tool:{tool}", a, "session", sid,
+                get_or_create(cur, 8, f"tool:{tool}", sol, "session", sid,
                               use_embedding=False, mc=mc)
-            # 속성(5층)·관계 — 문서 파이프라인과 대칭 (apply_extras 공용, ref=세션id)
+            # 속성(9층)·관계 — 문서 파이프라인과 대칭 (apply_extras 공용, ref=세션id)
             ej = {t["key"]: j.get(t["key"]) for t in schema["attrs"]}
-            val2node = {(ek, gv): g, (sk, sv): a}
-            apply_extras(cur, schema, ej, j.get("relations"), g, val2node,
+            apply_extras(cur, schema, ej, j.get("relations"), entry_node, val2node,
                          "session", sid)
         # 채택 판정: 이 세션에 노출된 제안 노드를 실제로 사용했는가 (유도 vs 자발 구분의 기초)
         cur.execute("""UPDATE suggestions s SET adopted =

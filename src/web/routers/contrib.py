@@ -35,7 +35,7 @@ def my_contributions(request: Request, q: str = "", verdict: str = "",
     # 그래프 기여가 있는 turn=1 세션만, verdict/검색어(질문 또는 노드 이름) 조건.
     binds = {"u": uid}
     filt = ["""EXISTS (SELECT 1 FROM node_evidence ev
-                       JOIN nodes n ON n.id = ev.node_id AND n.layer IN (2,3)
+                       JOIN nodes n ON n.id = ev.node_id AND n.role_tag IS NOT NULL
                        WHERE ev.kind = 'session' AND ev.ref = s.id)"""]
     if verdict in ("success", "fail", "retracted", "unknown"):
         filt.append("s.verdict = :vd")
@@ -43,7 +43,7 @@ def my_contributions(request: Request, q: str = "", verdict: str = "",
     if q.strip():
         filt.append("""(LOWER(DBMS_LOB.SUBSTR(s.question, 2000, 1)) LIKE :kw
                         OR EXISTS (SELECT 1 FROM node_evidence e3
-                                   JOIN nodes n3 ON n3.id = e3.node_id AND n3.layer IN (2,3)
+                                   JOIN nodes n3 ON n3.id = e3.node_id AND n3.role_tag IS NOT NULL
                                    WHERE e3.kind = 'session' AND e3.ref = s.id
                                      AND LOWER(n3.name) LIKE :kw))""")
         binds["kw"] = f"%{q.strip().lower()}%"
@@ -91,9 +91,9 @@ def my_contributions(request: Request, q: str = "", verdict: str = "",
                    (SELECT MAX(p.name) FROM edges e JOIN nodes p
                      ON p.id = e.src AND p.layer = 2 WHERE e.dst = n.id),
                    (SELECT COUNT(*) FROM edges e4 JOIN nodes t4
-                     ON t4.id = e4.dst AND t4.layer = 4 WHERE e4.src = n.id)
+                     ON t4.id = e4.dst AND t4.layer = 8 WHERE e4.src = n.id)
             FROM node_evidence ev
-            JOIN nodes n ON n.id = ev.node_id AND n.layer IN (2, 3)
+            JOIN nodes n ON n.id = ev.node_id AND n.role_tag IS NOT NULL
             WHERE ev.kind = 'session' AND ev.ref IN ({inlist})
             ORDER BY n.layer""", binds2)
         for r in cur.fetchall():

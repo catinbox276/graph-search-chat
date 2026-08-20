@@ -9,55 +9,86 @@ import re
 from core import config
 from graph.graph_pipeline import CHAT_MODEL, llm
 
-# ── 추출 스키마 — 관리자가 역할·키·표시명·설명을 정의, 프롬프트는 여기서 생성 ──
-# 역할→저장층 매핑: entry(진입점)→그래프 2층, solution(추천단위)→3층, attr(속성)→5층.
-# 관리자는 이름·키·설명을 자유로 바꾸고(버전 관리), 출력 형식은 코드가 생성해 잠근다.
-DEFAULT_SCHEMA = {
-    "entry":    {"key": "goal", "label": "목표", "desc": "문서가 다루는 문제/목표"},
-    "solution": {"key": "approach", "label": "접근법", "desc": "핵심 해법/접근법"},
-    "attrs": [],
-}
+# ── 추출 스키마 — 관리자가 계층 체인·태그·속성·관계를 정의, 프롬프트는 여기서 생성 ──
+# v2 계층 체인: chain 행(배열 순서=체인 순서)이 그래프 2층부터 순서대로 저장층이 된다.
+# 역할 태그: entry(검색진입)=체인 첫 칸 고정, solution(검증귀속)=tags로 지정(기본 마지막 칸).
+# attr(속성)→그래프 9층, 도구→8층. v1(role entry/solution 각 1행)은 체인 2칸으로 정규화.
+_DEF_ENTRY = {"key": "goal", "label": "목표", "desc": "문서가 다루는 문제/목표"}
+_DEF_SOLUTION = {"key": "approach", "label": "접근법", "desc": "핵심 해법/접근법"}
 
 
 def norm_schema(etypes, rtypes=None) -> dict:
-    """etypes 행([{key,label,desc,role}]) + rtypes 행([{key,label,desc,source,target}])
-    → {entry, solution, attrs[], relations[]} 정규화.
-    role 없는 행=attr(하위호환), entry/solution 미정의=기본 goal/approach.
-    관계의 source/target은 스키마 타입 키에 실존해야 하며 아니면 그 행은 버린다."""
-    out = {"entry": dict(DEFAULT_SCHEMA["entry"]),
-           "solution": dict(DEFAULT_SCHEMA["solution"]), "attrs": [], "relations": []}
+    """etypes 행 + rtypes 행 → {chain, entry, solution, solution_pos, attrs, relations}.
+    entry/solution 접근자는 항상 채워짐(체인의 태그 칸 참조) — 2슬롯 리더 하위호환.
+    관계의 source/target은 스키마 타입 키(체인 전 키+속성 키)에 실존해야 하며 아니면 버린다."""
+    chain, attrs, legacy_e, legacy_s = [], [], None, None
     for t in (etypes or []):
         if not (isinstance(t, dict) and str(t.get("key", "")).strip()):
             continue
         row = {"key": str(t["key"]).strip(),
                "label": str(t.get("label", "")).strip() or str(t["key"]).strip(),
-               "desc": str(t.get("desc", "")).strip()}
+               "desc": str(t.get("desc", "")).strip(),
+               "tags": [s for s in (t.get("tags") or []) if s in ("entry", "solution")]}
         role = str(t.get("role", "")).strip()
-        if role in ("entry", "solution"):
-            out[role] = row
+        if role == "chain":
+            chain.append(row)
+        elif role == "entry":       # v1 하위호환 — 체인 선두
+            legacy_e = row
+        elif role == "solution":    # v1 하위호환 — 체인 말미 + 검증귀속 태그
+            row["tags"] = ["solution"]
+            legacy_s = row
         else:
-            out["attrs"].append(row)
-    keys = {out["entry"]["key"], out["solution"]["key"], *(a["key"] for a in out["attrs"])}
+            attrs.append({k: row[k] for k in ("key", "label", "desc")})
+    if legacy_e or legacy_s:   # v1 행 발견 — 기본값 보충 포함해 체인 2칸+로 조립
+        chain = [legacy_e or dict(_DEF_ENTRY, tags=[])] + chain \
+            + [legacy_s or dict(_DEF_SOLUTION, tags=["solution"])]
+    if not chain:
+        chain = [dict(_DEF_ENTRY, tags=[]), dict(_DEF_SOLUTION, tags=["solution"])]
+    elif len(chain) == 1:      # 체인은 최소 2칸 (진입과 귀속이 같으면 추천이 무의미)
+        chain.append(dict(_DEF_SOLUTION, tags=["solution"]))
+    # 불변식: 첫 칸 = entry(검색진입, 그래프 2층), solution 태그는 정확히 1개(없으면 마지막)
+    spos = next((i for i, c in enumerate(chain) if "solution" in c["tags"]), len(chain) - 1)
+    if spos == 0:
+        spos = len(chain) - 1
+    for i, c in enumerate(chain):
+        c["tags"] = (["entry"] if i == 0 else []) + (["solution"] if i == spos else [])
+    keys = {c["key"] for c in chain} | {a["key"] for a in attrs}
+    relations = []
     for r in (rtypes or []):
         if not (isinstance(r, dict) and str(r.get("key", "")).strip()):
             continue
         src, tgt = str(r.get("source", "")).strip(), str(r.get("target", "")).strip()
         if src not in keys or tgt not in keys:
             continue   # 시그니처가 스키마 밖 — 무효 행 폐기
-        out["relations"].append({"key": str(r["key"]).strip(),
-                                 "label": str(r.get("label", "")).strip() or str(r["key"]).strip(),
-                                 "desc": str(r.get("desc", "")).strip(),
-                                 "source": src, "target": tgt})
-    return out
+        relations.append({"key": str(r["key"]).strip(),
+                          "label": str(r.get("label", "")).strip() or str(r["key"]).strip(),
+                          "desc": str(r.get("desc", "")).strip(),
+                          "source": src, "target": tgt})
+    return {"chain": chain, "entry": chain[0], "solution": chain[spos],
+            "solution_pos": spos, "attrs": attrs, "relations": relations}
+
+
+DEFAULT_SCHEMA = norm_schema([])   # 리터럴과 정규화 결과가 절대 어긋나지 않게
+
+
+def chain_view(sc: dict) -> tuple:
+    """(체인 행 목록, solution 인덱스) — v1 스냅샷({entry,solution,...}, chain 없음)도 수용.
+    모든 리더(병합 사다리·드라이런·표시)의 단일 하위호환 관용구."""
+    chain = sc.get("chain") or [sc["entry"], sc["solution"]]
+    spos = sc.get("solution_pos")
+    if spos is None:
+        spos = next((i for i, c in enumerate(chain)
+                     if "solution" in (c.get("tags") or [])), len(chain) - 1)
+    return chain, spos
 
 
 def _out_fields(schema: dict, brief: bool = False, src: str = "문서") -> str:
     """출력 형식 JSON의 스키마 필드 부분 — desc가 추출 기준으로 들어간다.
+    체인 칸은 순서대로 전부 필수 필드 (chain=2면 v1과 바이트 동일).
     src: 추출 원천 표기 ("문서" 또는 "대화" — 세션 스캐폴드 공용)."""
-    e, s = schema["entry"], schema["solution"]
+    chain, _ = chain_view(schema)
     suffix = "" if brief else " (한 문장, fits=true일 때만)"
-    lines = [f' "{e["key"]}": "{e["desc"] or e["label"]}{suffix}"',
-             f' "{s["key"]}": "{s["desc"] or s["label"]}{suffix}"']
+    lines = [f' "{c["key"]}": "{c["desc"] or c["label"]}{suffix}"' for c in chain]
     for a in schema["attrs"]:
         lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
                      f' ({src}에서 확인될 때만 — 없으면 이 키를 생략)"')
@@ -74,7 +105,7 @@ def _rel_block(schema: dict, src: str = "문서") -> str:
     if not rels:
         return ""
     tl = {t["key"]: (t.get("label") or t["key"])
-          for t in [schema["entry"], schema["solution"], *schema["attrs"]]}
+          for t in [*chain_view(schema)[0], *schema["attrs"]]}
     lines = "\n".join(
         f'- {r["key"]} ({r["label"]}): {r["desc"] or "(설명 없음)"}'
         f' [시그니처: {tl.get(r["source"], r["source"])} → {tl.get(r["target"], r["target"])}]'
@@ -96,7 +127,7 @@ def _crit_block(criteria: str) -> str:
 def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
     """단건 판정 프롬프트를 스키마에서 생성 — 출력 형식·placeholder 배선은 코드 잠금."""
     sc = schema or DEFAULT_SCHEMA
-    e, s = sc["entry"], sc["solution"]
+    labels = "도 ".join(c["label"] for c in chain_view(sc)[0])
     return f"""문서가 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
 
 도메인: {{domain}}
@@ -111,14 +142,14 @@ def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
 
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
-- {e["label"]}도 {s["label"]}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
+- {labels}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
 - 내용이 너무 빈약해 지식으로 일반화할 수 없는 글{_rel_block(sc)}"""
 
 
 def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
     """묶음 판정 프롬프트 — 단건과 같은 스키마, 배열 포장만 다름."""
     sc = schema or DEFAULT_SCHEMA
-    e, s = sc["entry"], sc["solution"]
+    labels = "도 ".join(c["label"] for c in chain_view(sc)[0])
     return f"""여러 문서 각각이 도메인 기준에 맞는지 판정하고, 맞으면 지식을 추출하라. JSON 배열만 출력.
 
 도메인: {{domain}}
@@ -131,7 +162,7 @@ def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
 [{{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
 {_out_fields(sc, brief=True)}}}, ...]
 
-fits=false로 판정할 것: 도메인과 무관 / {e["label"]}도 {s["label"]}도 없음 / 결말·결론 없음 / 내용이 빈약함.
+fits=false로 판정할 것: 도메인과 무관 / {labels}도 없음 / 결말·결론 없음 / 내용이 빈약함.
 각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다.{_rel_block(sc)}"""
 
 
@@ -143,11 +174,19 @@ def build_prompts(schema: dict | None = None, criteria: str = "") -> tuple:
 # 자리표시자 치환은 graph_pipeline.llm.fill_prompt ({domain}{hint}{question}{tools}{answer}{expect}).
 # graph_pipeline.run이 lazy import로 사용 (모듈 상단 import는 순환 — judge가 graph_pipeline을 import).
 
+def _brevity_line(sc: dict) -> str:
+    """값 간결성 가이드 — 체인 첫 칸(검색 진입 매칭 대상)은 10단어, 나머지 단계는 15단어.
+    chain=2면 v1 문구와 바이트 동일."""
+    chain, _ = chain_view(sc)
+    rest = ", ".join(c["label"] for c in chain[1:])
+    return (f"값은 간결하게 — {chain[0]['label']}은(는) 10단어 이내(일반화된 표현), "
+            f"{rest}은(는) 15단어 이내(도구+방법")
+
+
 def build_session_extract_prompt(schema: dict | None = None, criteria: str = "") -> str:
     """UI 세션 추출 프롬프트 — fits/grounded 게이트 문구는 원문 유지, 추출 키만 스키마에서.
     fits: 도메인 게이트(잡담·일반 상식 차단), grounded: 공로 귀속(도구 기여 없는 답변 보류)."""
     sc = schema or DEFAULT_SCHEMA
-    e, s = sc["entry"], sc["solution"]
     return f"""대화가 도메인 범위의 업무 지식인지 판정하고, 맞으면 지식을 추출하라. JSON만 출력.
 
 도메인: {{domain}}
@@ -162,7 +201,7 @@ def build_session_extract_prompt(schema: dict | None = None, criteria: str = "")
   "grounded": true|false,
 {_out_fields(sc, src="대화")}}}
 
-값은 간결하게 — {e["label"]}은(는) 10단어 이내(일반화된 표현), {s["label"]}은(는) 15단어 이내(도구+방법.
+{_brevity_line(sc)}.
 예: 'DataHub 검색으로 테이블 탐색 후 스키마 조인 키 확인').
 
 fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
@@ -174,7 +213,6 @@ grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서
 def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -> str:
     """태스크 세션(selfplay) 판정+추출 프롬프트 — verdict 규칙 원문 유지, 추출 키만 스키마에서."""
     sc = schema or DEFAULT_SCHEMA
-    e, s = sc["entry"], sc["solution"]
     return f"""세션을 판정하고 지식을 추출하라. JSON만 출력.
 
 도메인: {{domain}}
@@ -190,7 +228,7 @@ def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -
 {_out_fields(sc, brief=True, src="대화")},
   "fail_reason": "실패 시 이유 한 줄, 성공이면 null"}}
 
-값은 간결하게 — {e["label"]}은(는) 10단어 이내(일반화된 표현), {s["label"]}은(는) 15단어 이내(도구+방법).
+{_brevity_line(sc)}).
 
 판정 규칙:
 - success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
@@ -320,10 +358,12 @@ def build_router_prompt(cands: list) -> str:
     rows = []
     for c in cands:
         sc = c.get("schema") or {}
-        e, s = sc.get("entry") or {}, sc.get("solution") or {}
+        try:
+            labels = " → ".join(x.get("label") or x.get("key", "") for x in chain_view(sc)[0])
+        except KeyError:   # 스키마 없는 후보 — 설명만으로 분류
+            labels = ""
         rows.append(f"- {c['line']}: {(c.get('descr') or '').strip() or '(설명 없음)'}"
-                    f" [진입점: {e.get('label') or e.get('key', '')}"
-                    f" · 추천단위: {s.get('label') or s.get('key', '')}]")
+                    + (f" [체인: {labels}]" if labels else ""))
     return f"""당신은 문서 분류기다. "{{domain}}" 도메인의 문서를 아래 추출 스키마 유형 중
 가장 잘 맞는 하나로 분류하라. 어느 유형에도 맞지 않으면 none (그 문서는 제외된다).
 

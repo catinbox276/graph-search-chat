@@ -31,7 +31,7 @@ def default_merge_cfg() -> dict:
             "embed_model": ""}   # ""=기본 임베딩 (model_registry)
 
 
-ENTITY_LAYER = 5   # 관리자 정의 타입 엔티티 (time·company 등 — 코어 1~4층과 분리)
+ENTITY_LAYER = 9   # 관리자 정의 타입 엔티티(time·company 등) — 계층 체인(2..7)·도구(8)와 분리
 
 
 def upsert_entity(cur, etype: str, value: str, parent_id: str,
@@ -81,7 +81,7 @@ def upsert_relation(cur, rtype: str, src_id: str, dst_id: str,
 
 def apply_extras(cur, sc, ej, rj, anchor, val2node, ev_kind, ref,
                  run_id: str = "-", count: bool = True) -> tuple:
-    """스키마의 속성(5층)·관계(rtypes)를 판정 결과에서 병합 — (attrs_out, rels_out) 반환.
+    """스키마의 속성(9층)·관계(rtypes)를 판정 결과에서 병합 — (attrs_out, rels_out) 반환.
     문서·세션 파이프라인 공용. ej: {속성키: 값}(호출자가 legacy 폴백 처리),
     rj: LLM의 relations 리스트(검증 전), anchor: 속성이 붙는 진입점 노드,
     val2node: (타입키, 값)→노드id — 진입점·추천단위를 담아 오면 속성이 여기 추가됨.
@@ -125,13 +125,15 @@ def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:
 
 
 def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=True,
-                  run_id="-", count=True, mc=None):
+                  run_id="-", count=True, mc=None, role_tag=None):
     """같은 부모 밑 형제와 2단계(임베딩→LLM) 비교 -> 병합 또는 신규. 엣지 raw_count 증가.
 
     ev_kind/ev_ref: 출처 증거 — 'session'+세션id 또는 'doc'+'소스명:원천id'.
     run_id: 문서 증거의 구조화 실행 귀속 (세션은 '-') — B-full 버저닝.
     count: False면 엣지 가중치를 올리지 않는다 (비활성 run 구조화 — 구조·증거만
-           만들어 두고, 가중치는 활성 전환 시 증거 기반 델타로 가산)."""
+           만들어 두고, 가중치는 활성 전환 시 증거 기반 델타로 가산).
+    role_tag: 'entry'(검색진입)·'solution'(검증귀속)·None — 노드에 새기고, 형제
+    dedup 후보도 같은 태그로 한정 (체인 길이 다른 스키마 혼재 시 역할 간 오병합 차단)."""
     # 임베딩 엔드포인트가 죽어도 구조화는 계속 — 벡터 없으면(vec=None) dedup은 이름/LLM만
     # 사용(과병합만 줄고 진행은 됨). 무한 대기·전체 실패보다 낫다.
     mc = mc or default_merge_cfg()
@@ -143,9 +145,12 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
             print(f"[embed 실패→벡터없이 진행] {type(e).__name__}: {str(e)[:120]}", flush=True)
     node_id = None
     if parent_id:
+        # ponytail: role_tag 조건은 풀스캔 아님(부모 조인 스코프) — 노드 수만 건 넘으면 인덱스
         cur.execute("""SELECT n.id, n.name, n.embedding FROM nodes n
                        JOIN edges e ON e.dst = n.id
-                       WHERE e.src = :1 AND n.layer = :2""", [parent_id, layer])
+                       WHERE e.src = :1 AND n.layer = :2
+                         AND NVL(n.role_tag, '-') = NVL(:3, '-')""",
+                    [parent_id, layer, role_tag])
         cands = []
         for nid, nname, nemb in cur.fetchall():
             if nname == name:
@@ -177,9 +182,10 @@ def get_or_create(cur, layer, name, parent_id, ev_kind, ev_ref, use_embedding=Tr
     if node_id is None:
         node_id = uuid.uuid4().hex[:32]
         cur.execute(
-            "INSERT INTO nodes (id, layer, name, embedding) VALUES (:1,:2,:3,:4)",
+            "INSERT INTO nodes (id, layer, name, embedding, role_tag) "
+            "VALUES (:1,:2,:3,:4,:5)",
             [node_id, layer, name,
-             json.dumps(vec).encode() if vec is not None else None])
+             json.dumps(vec).encode() if vec is not None else None, role_tag])
     if parent_id:
         cur.execute("""MERGE INTO edges e USING dual ON (e.src=:src AND e.dst=:dst)
                        WHEN MATCHED THEN UPDATE SET raw_count = raw_count+:inc,

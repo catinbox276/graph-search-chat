@@ -109,7 +109,10 @@ class Session_(Base):
 class Node(Base):
     __tablename__ = "nodes"
     id = Column(String(36), primary_key=True)
-    layer = Column(Numeric(1), nullable=False)   # 1도메인 2목표 3접근법 4행동
+    layer = Column(Numeric(1), nullable=False)   # 1도메인 2..7계층체인 8행동(도구) 9속성
+    # 역할 태그 — entry(검색진입, 체인 첫 칸=2층 불변), solution(검증귀속: 카운트·실패·추천).
+    # 체인 길이가 다른 스키마가 섞여도 의미 조회가 층 번호에 안 묶이게 노드에 새긴다.
+    role_tag = Column(String(10))
     name = Column(String(400))
     embedding = Column(BLOB)                     # dedup·경로 진입점 매칭용
     fail_flag = Column(CHAR(1), server_default=text("'N'"))

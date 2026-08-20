@@ -9,11 +9,21 @@ from search import path_suggest as _ps  # 같은 도메인 풀 재사용 (4번�
 
 # 활성 run 스코핑 — 그래프 뷰(web/routers/graph.py)와 같은 규칙
 _ACTIVE = "(er.run_id = '-' OR er.run_id IN (SELECT run_id FROM doc_runs WHERE active = 'Y'))"
-_LAYER_KO = {2: "목표", 3: "접근법", 5: "엔티티"}
 
 
-def _fmt_node(name, layer, etype):
-    kind = etype or _LAYER_KO.get(layer, "")
+def _kind(layer, role_tag, etype):
+    """노드 종류 라벨 — 타입 라벨 > 역할 태그 > 층 폴백 (v2 체인: 2..7층·속성 9층)."""
+    if etype:
+        return etype
+    if role_tag == "entry":
+        return "목표"
+    if role_tag == "solution":
+        return "접근법"
+    return "엔티티" if layer == 9 else "중간단계"
+
+
+def _fmt_node(name, layer, etype, role_tag=None):
+    kind = _kind(layer, role_tag, etype)
     return f"{name}({kind})" if kind else name
 
 
@@ -31,35 +41,40 @@ def explore_entity(name: str) -> str:
     with _ps._pool.acquire() as con:
         cur = con.cursor()
         # 1) 이름 매칭 — 정확 일치 우선, 없으면 부분 일치 (렉시컬로 충분: 엔티티명은 고유명사)
-        cur.execute("""SELECT id, name, layer, entity_type FROM nodes
-                       WHERE UPPER(name) = UPPER(:1) AND layer IN (2, 3, 5)
+        cur.execute("""SELECT id, name, layer, entity_type, role_tag FROM nodes
+                       WHERE UPPER(name) = UPPER(:1)
+                         AND (layer BETWEEN 2 AND 7 OR layer = 9)
                        FETCH FIRST 3 ROWS ONLY""", [q])
         hits = cur.fetchall()
         if not hits:
-            cur.execute("""SELECT id, name, layer, entity_type FROM nodes
-                           WHERE UPPER(name) LIKE '%' || UPPER(:1) || '%' AND layer IN (2, 3, 5)
+            cur.execute("""SELECT id, name, layer, entity_type, role_tag FROM nodes
+                           WHERE UPPER(name) LIKE '%' || UPPER(:1) || '%'
+                             AND (layer BETWEEN 2 AND 7 OR layer = 9)
                            ORDER BY LENGTH(name) FETCH FIRST 3 ROWS ONLY""", [q])
             hits = cur.fetchall()
         if not hits:
             return (f"'{q}'와 일치하는 노드가 지식그래프에 없습니다. "
                     "search_docs로 문서를 직접 검색하세요.")
         out = [f"🕸 '{q}' 관계망 탐색 결과:"]
-        for nid, nname, layer, etype in hits:
-            out.append(f"\n[{_LAYER_KO.get(layer, '?')}] {_fmt_node(nname, layer, etype)}")
+        for nid, nname, layer, etype, rtag in hits:
+            out.append(f"\n[{_kind(layer, rtag, None) if not etype else '엔티티'}]"
+                       f" {_fmt_node(nname, layer, etype, rtag)}")
             # 2) 타입드 관계 — 나가는/들어오는 양방향, 활성 run 스코핑, 근거 문서 수 집계
-            cur.execute(f"""SELECT er.rtype, n2.name, n2.layer, n2.entity_type,
+            cur.execute(f"""SELECT er.rtype, n2.name, n2.layer, n2.entity_type, n2.role_tag,
                                    COUNT(DISTINCT er.ref)
                             FROM entity_relations er JOIN nodes n2 ON n2.id = er.dst
                             WHERE er.src = :1 AND {_ACTIVE}
-                            GROUP BY er.rtype, n2.name, n2.layer, n2.entity_type""", [nid])
-            rels = [f"  - {nname} —{r[0]}→ {_fmt_node(r[1], r[2], r[3])} (문서 {r[4]}건)"
+                            GROUP BY er.rtype, n2.name, n2.layer, n2.entity_type,
+                                     n2.role_tag""", [nid])
+            rels = [f"  - {nname} —{r[0]}→ {_fmt_node(r[1], r[2], r[3], r[4])} (문서 {r[5]}건)"
                     for r in cur.fetchall()]
-            cur.execute(f"""SELECT er.rtype, n2.name, n2.layer, n2.entity_type,
+            cur.execute(f"""SELECT er.rtype, n2.name, n2.layer, n2.entity_type, n2.role_tag,
                                    COUNT(DISTINCT er.ref)
                             FROM entity_relations er JOIN nodes n2 ON n2.id = er.src
                             WHERE er.dst = :1 AND {_ACTIVE}
-                            GROUP BY er.rtype, n2.name, n2.layer, n2.entity_type""", [nid])
-            rels += [f"  - {_fmt_node(r[1], r[2], r[3])} —{r[0]}→ {nname} (문서 {r[4]}건)"
+                            GROUP BY er.rtype, n2.name, n2.layer, n2.entity_type,
+                                     n2.role_tag""", [nid])
+            rels += [f"  - {_fmt_node(r[1], r[2], r[3], r[4])} —{r[0]}→ {nname} (문서 {r[5]}건)"
                      for r in cur.fetchall()]
             out += rels if rels else ["  (연결된 관계 없음)"]
             # 3) 이 노드의 근거 문서 id — read_doc 열람·답변 인용 가능

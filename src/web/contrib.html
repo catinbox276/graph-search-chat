@@ -122,7 +122,7 @@ fetch("/me").then(r => r.json()).then(m => {
   w.style.display = "inline-flex";
 });
 
-const LAYER = {2: "목표", 3: "접근법"};
+
 const VERDICT = {success: "✅ 성공", fail: "❌ 실패", retracted: "↩ 취소됨"};
 const note = (t, ok) => { const m = $("msg"); m.textContent = t; m.className = ok ? "ok" : "err"; };
 
@@ -209,7 +209,7 @@ async function load() {
       name.className = "name"; name.textContent = n.name;
       const meta = document.createElement("span");
       meta.className = "meta";
-      meta.textContent = (n.layer === 3 && n.tool_cnt ? `도구 ${n.tool_cnt}개 · ` : "")
+      meta.textContent = (n.layer >= 3 && n.layer < 8 && n.tool_cnt ? `도구 ${n.tool_cnt}개 · ` : "")
         + `제안 ${n.exposures}회`;
       row.append(tag, name, meta);
       const mk = (label, fn, danger, disabled, tip) => {
@@ -241,7 +241,7 @@ async function load() {
 
     // 트리 조립: 질문 → 목표(들) → 그 밑 접근법(들) — 목표가 여럿이면 분기점
     const goals = s.nodes.filter(n => n.layer === 2);
-    const apprs = s.nodes.filter(n => n.layer === 3);
+    const apprs = s.nodes.filter(n => n.layer >= 3 && n.layer < 8);
     const tree = document.createElement("div");
     tree.className = "tree";
     if (goals.length > 1) {
