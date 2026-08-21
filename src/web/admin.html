@@ -89,7 +89,6 @@
                  word-break: break-word; font-size: .72rem; line-height: 1.5;
                  color: var(--mut); }
   #dform #dname { width: 130px; } #dform #dtools { flex: 1; } #dform #dprio { width: 70px; }
-  #dform #dhint { flex-basis: 100%; }
   /* ── 스키마 편집: 목록 + 상세 2단 (콘텐츠 모델링 도구 공통 패턴) ──
      계층은 들여쓰기로 보이고, 프로세는 오른쪽 패널에서 넓게 쓴다 ── */
   .ve2 { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1fr);
@@ -357,9 +356,7 @@
   <button data-tab="pipe">🔀 파이프라인</button>
   <button data-tab="sources">원천 테이블·구조화</button>
   <span class="tgrp">정의</span>
-  <button data-tab="domains">도메인 시드</button>
-  <button data-tab="entity">① 추출 (엔티티)</button>
-  <button data-tab="cluster">② 병합 (클러스터)</button>
+  <button data-tab="entity">판정 설정</button>
   <button data-tab="mapping">매핑 버전</button>
   <button data-tab="data">데이터 버전</button>
   <span class="tgrp">모델·연결</span>
@@ -425,7 +422,7 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 run 생성</b>은 [🔀 파이프라인] 탭에서 — 노드에서 이 버전을 고르고 [▶ run 생성].</p>
 </section>
 <section class="card" id="sec-entity">
-  <h2>① 추출 (엔티티) <small>문서·대화에서 뽑아낼 엔티티 한 벌 — 노드를 클릭해 오른쪽에서 채웁니다</small></h2>
+  <h2>판정 설정 <small>도메인 지침 · 뽑아낼 엔티티 · 포함/제외 기준 · 병합 — 한 벌로 저장, 이력은 run 스냅샷</small></h2>
   <div class="rail" id="entRail"><span class="step">불러오는 중</span></div>
   <details class="explain">
     <summary>엔티티가 무엇인지 — 이 화면 읽는 법</summary>
@@ -447,6 +444,20 @@
       (행동/도구 노드는 대화에서 자동 생성)
     </div>
   </details>
+  <div class="fgroup">
+    <div class="fgroup-t">1️⃣ 도메인 지침 <small>— 어떤 문서를 이 도메인의 지식으로 인정할지. 여기가 비면 LLM이 도메인 이름만 보고 판단합니다</small></div>
+    <div class="schedrow" style="margin:0 0 6px">
+      <label class="fld"><span>도메인</span>
+        <select id="jcDomain" title="지침은 도메인마다 따로입니다 — 소스가 이 도메인에 물려 판정 기준이 됩니다"></select></label>
+      <span class="hint" id="jcMeta" style="margin:0"></span>
+    </div>
+    <textarea id="jcHint" class="psta" spellcheck="false" placeholder="예: 이 도메인은 조직이 참고하는 기술 문제해결 지식을 모은다. 출처가 사내 문서인지 외부 기술 Q&A인지는 따지지 않는다 — 재현 가능한 조치가 있으면 인정한다.&#10;인정: 문제 증상과 해법(설정·명령·코드·절차)이 함께 있는 글&#10;제외: 결론 없이 끝나는 글, 의견·추천만 있는 글"></textarea>
+    <div class="schedrow" style="margin:6px 0 0">
+      <button type="button" id="jcSave">💾 지침 저장</button>
+      <span class="hint" id="jcMsg" style="margin:0"></span>
+    </div>
+  </div>
+  <div class="fgroup-t" style="margin:10px 0 0">2️⃣ 뽑아낼 엔티티 <small>— 노드를 클릭해 오른쪽에서 채웁니다. 끌어서 자리를 옮길 수 있습니다</small></div>
   <div class="schedrow" style="margin:6px 0 0">
     <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5개) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
     <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 노드 바로 아래에 붙는 부가 정보">＋ 속성</button>
@@ -458,7 +469,7 @@
     <div class="vedetail" id="veDetail"></div>
   </div>
   <div class="fgroup">
-    <div class="fgroup-t">문서 포함/제외 기준 <small>— 어떤 문서를 지식으로 인정할지 + 뽑는 방식 지침 (선택, 빈값=코드 기본)</small></div>
+    <div class="fgroup-t">3️⃣ 뽑는 방식 지침 <small>— 값을 어떻게 일반화할지 (선택, 빈값=코드 기본). 인정/제외 기준은 위 도메인 지침에</small></div>
     <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
   </div>
   <div class="schedrow" style="margin:8px 0 0">
@@ -469,6 +480,52 @@
   </div>
   <div id="veGate" class="vegate" style="margin:6px 0 0"></div>
   <details style="margin:8px 0 0">
+    <summary class="hint" style="cursor:pointer;margin:0">4️⃣ 병합(dedup) 설정 — 같은 뜻의 문구를 한 노드로 합치는 기준 (기본값 권장)</summary>
+    <div style="font-size:.78rem;color:var(--mut);margin:6px 0">
+      임계값을 낮추면 더 많이 합쳐지고(과병합 위험), 높이면 비슷한 노드가 갈라집니다.
+      애매한 구간에서만 LLM에 "같은 의도의 후보 번호를 골라라"고 1회 묻습니다.
+    </div>
+    <div class="schedrow" style="margin:0">
+      <label class="fld"><span>자동병합 ≥</span>
+        <input id="vcHigh" type="number" step="0.01" min="0" max="1" style="width:90px"></label>
+      <label class="fld"><span>후보하한 ≥</span>
+        <input id="vcThr" type="number" step="0.01" min="0" max="1" style="width:90px"></label>
+      <label class="fld"><span>짧은이름 &lt;</span>
+        <input id="vcShort" type="number" style="width:80px"></label>
+      <label class="fld"><span>문자비율 ≥</span>
+        <input id="vcRatio" type="number" step="0.01" style="width:90px"></label>
+      <label class="fld"><span>후보 수</span>
+        <input id="vcSel" type="number" style="width:80px"></label>
+      <button type="button" id="vcSave">💾 병합 설정 저장</button>
+      <span class="hint" id="vcMsg" style="margin:0"></span>
+    </div>
+    <label class="k2" style="margin-top:8px">후보선택 프롬프트 <small>{kind} {name} {cands} — 빈값=코드 기본</small></label>
+    <textarea id="vcSelPrompt" class="psta" spellcheck="false"></textarea>
+  </details>
+  <details style="margin:8px 0 0">
+    <summary class="hint" style="cursor:pointer;margin:0">⚙ 도메인 등록·삭제 (고급) — 1층 닫힌 목록, 사람 전용</summary>
+    <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>지침</th><th><span class="sronly">동작</span></th></tr></thead>
+      <tbody></tbody></table>
+    <form id="dform">
+      <input id="dname" placeholder="도메인 이름" required>
+      <select id="dscope" title="이 도메인을 어디에 쓸지 — 문서 전용은 대화 분류·폴백에 끼지 않음">
+        <option value="both">대화+문서</option>
+        <option value="chat">대화 전용</option>
+        <option value="doc">문서 전용</option>
+      </select>
+      <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
+      <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
+      <button id="dsave">추가/수정</button>
+      <button type="button" class="warn" id="dreset"
+              title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
+      <button type="button" class="warn" id="ddelete"
+              title="도메인 삭제 — 처리된 데이터가 없으면 즉시, 있으면 연결 데이터 전부 삭제 경고 후 delete 입력 확인">⚠ 도메인 삭제</button>
+    </form>
+    <p class="hint">같은 이름으로 저장하면 수정(upsert). 지침은 위 1️⃣에서 편집합니다.
+       <b>문서 전용</b>은 대화 분류·폴백에 끼지 않고 소스 구조화에만 쓰입니다. 변경은 다음 run부터 반영 — 소급 재분류 없음.</p>
+    <p class="hint err" id="derr"></p>
+  </details>
+  <details style="margin:8px 0 0">
     <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 이 스키마·지침으로 만들어지는 실제 프롬프트</summary>
     <div class="schedrow" style="margin:4px 0 0">
       <button type="button" class="ghost" id="entPvBtn">🔄 현재 화면으로 미리보기</button>
@@ -477,42 +534,6 @@
     </div>
     <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">[🔄 현재 화면으로 미리보기]를 누르면 조립 결과가 보입니다</pre>
   </details>
-</section>
-<section class="card" id="sec-cluster">
-  <h2>② 병합 (클러스터) <small>①에서 뽑은 문구를 그래프에 합치기(dedup)</small></h2>
-  <div class="rail" id="clsRail"><span class="step">불러오는 중</span></div>
-  <details class="explain">
-    <summary>병합이 무엇을 하는지 — 이 화면 읽는 법</summary>
-    <div class="body">
-      같은 뜻인데 표현이 다른 문구(예: "도커 인터넷 연결 문제" / "컨테이너 네트워크 불통")를
-      <b>한 노드로 합치는 판정</b>입니다. 두 단계로 동작합니다.
-      <ul>
-        <li><b>룰 임계값</b> — 임베딩 유사도가 자동병합 기준을 넘고 이름 가드를 통과하면 LLM 없이 즉시 병합</li>
-        <li><b>LLM 후보선택</b> — 애매한 구간에서만 "같은 의도의 후보 번호를 골라라"고 물어 1회 판정</li>
-      </ul>
-      도메인 지침은 병합에 쓰이지 않습니다(추출 단계 전용). 프롬프트를 비우면 코드 기본 문구를 씁니다.
-      임계값을 낮추면 더 많이 합쳐지고(과병합 위험), 높이면 비슷한 노드가 갈라집니다.
-    </div>
-  </details>
-  <div id="clsLines"><span class="hint">불러오는 중…</span></div>
-  <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
-    <div class="schedrow" style="margin:6px 0">
-      <input id="vcName" placeholder="라인 이름 (새 라인)" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <label>자동병합≥ <input id="vcHigh" type="number" step="0.01" min="0" max="1" value="0.92" style="width:80px"></label>
-      <label>후보하한≥ <input id="vcThr" type="number" step="0.01" min="0" max="1" value="0.70" style="width:80px"></label>
-      <label>짧은이름< <input id="vcShort" type="number" value="12" style="width:60px"></label>
-      <label>문자비율≥ <input id="vcRatio" type="number" step="0.01" value="0.40" style="width:70px"></label>
-      <label>후보수 <input id="vcSel" type="number" value="8" style="width:60px"></label>
-      <input id="vcNote" placeholder="메모(선택)" style="padding:5px 8px;border:1px solid var(--line);border-radius:6px">
-      <button type="button" class="ghost" id="clsNew">＋ 새 라인 만들기</button>
-      <span class="hint" id="vcMsg" style="margin:0"></span>
-    </div>
-    <label class="k2">LLM 후보선택 프롬프트 <small>{kind} {name} {cands} — <b>{name}·{cands} 필수</b>, 빈값=코드 기본</small></label>
-    <textarea id="vcSelPrompt" class="psta" spellcheck="false" placeholder='예: 기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. JSON만 출력: {"pick": 번호}
-기준: {name}
-후보:
-{cands}'></textarea>
-  </div>
 </section>
 <section class="card" id="sec-mapping">
   <h2>매핑 버전 <small>원천 테이블·id·시간·역할 매핑을 여기서 정의 — 저장하면 새 버전. [원천 테이블] 탭은 등록된 버전을 골라 씁니다</small></h2>
@@ -559,35 +580,6 @@
   <p class="hint">가입 직후는 <b>승인 대기</b> — 승인해야 로그인할 수 있습니다.
      관리자 권한은 재로그인 시부터 반영됩니다.</p>
   <p class="hint err" id="uerr"></p>
-</section>
-
-<section class="card" id="sec-domains">
-  <h2>도메인 시드 관리 <small>1층 닫힌 목록 — 사람 전용, LLM은 못 씀</small></h2>
-  <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>추출 지침</th><th><span class="sronly">동작</span></th></tr></thead>
-    <tbody></tbody></table>
-  <form id="dform">
-    <input id="dname" placeholder="도메인 이름" required>
-    <select id="dscope" title="이 도메인을 어디에 쓸지 — 문서 전용은 대화 분류·폴백에 끼지 않음">
-      <option value="both">대화+문서</option>
-      <option value="chat">대화 전용</option>
-      <option value="doc">문서 전용</option>
-    </select>
-    <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
-    <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
-    <textarea id="dhint" rows="3" style="flex-basis:100%;resize:vertical"
-      placeholder="추출 지침 (선택) — 이 도메인 세션에서 목표·접근법을 어떻게 일반화할지. 야간 추출 프롬프트에 주입됨"></textarea>
-    <button id="dsave">추가/수정</button>
-    <button type="button" class="warn" id="dreset"
-            title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
-    <button type="button" class="warn" id="ddelete"
-            title="도메인 삭제 — 처리된 데이터가 없으면 즉시, 있으면 연결 데이터 전부 삭제 경고 후 delete 입력 확인. 이 도메인을 쓰던 소스는 검색 전용(도메인 없음)으로 전환">⚠ 도메인 삭제</button>
-  </form>
-  <p class="hint">같은 이름으로 저장하면 수정(upsert). <b>용도</b>를 등록 때 선택합니다 —
-     <b>문서 전용</b>은 대화 분류·폴백에 끼지 않고 소스에 지정해 문서 구조화에만,
-     <b>대화 전용</b>은 세션 분류에만, <b>대화+문서</b>는 양쪽에 쓰입니다. 대화 용도 도메인 중
-     어떤 도구와도 매칭 안 되는 세션은 그중 최하순위 도메인으로 분류됩니다. 변경은 다음 파이프라인
-     실행(야간)부터 신규분에 반영 — 소급 재분류 없음. 삭제는 의도적으로 UI에 없습니다.</p>
-  <p class="hint err" id="derr"></p>
 </section>
 
 <section class="card" id="sec-sources">
@@ -954,107 +946,12 @@ async function loadDomains(selName) {
       dmsg("");
       $("dname").value = d.name; $("dscope").value = d.scope || "both";
       $("dtools").value = d.tools; $("dprio").value = d.priority;
-      $("dhint").value = d.extract_hint || "";
-      toggleDomainVersions(d.name, tr);  // 행 바로 아래 버전 패널 펼침/접힘
+      if ([...$("jcDomain").options].some(o => o.value === d.name)) {
+        $("jcDomain").value = d.name; jcFill();   // 지침 편집은 위 1️⃣ 한 곳에서
+      }
     };
     tb.appendChild(tr);
   });
-}
-// ── 도메인 버전 패널 — 행 아래 토글, 10개 페이지네이션, 버전 업/기본 지정 ──
-function toggleDomainVersions(dname, tr) {
-  const next = tr.nextElementSibling;
-  const wasOpen = next && next.classList.contains("verrow");
-  document.querySelectorAll("#dlist .verrow").forEach(x => x.remove());
-  if (wasOpen) return;  // 같은 행 재클릭 = 접기
-  const row = document.createElement("tr");
-  row.className = "verrow";
-  const td = document.createElement("td");
-  td.colSpan = 6;
-  row.appendChild(td);
-  tr.after(row);
-  renderDomainVersions(dname, 1, td);
-}
-async function renderDomainVersions(dname, page, td) {
-  td.innerHTML = "⏳ 버전 조회 중…";
-  const r = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions?page=${page}`);
-  if (!r.ok) { td.textContent = `버전 조회 실패 (${r.status})`; return; }
-  const j = await r.json();
-  td.innerHTML = "";
-  const t = document.createElement("table");
-  t.className = "vertable";
-  t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th>버전</th><th>생성일</th><th>용도</th>" +
-                "<th>도구</th><th>우선순위</th><th>추출 지침 (시스템 프롬프트)</th><th>기본</th><th><span class='sronly'>동작</span></th></tr></thead>";
-  const tb = document.createElement("tbody");
-  const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
-  j.versions.forEach(v => {
-    const vr = document.createElement("tr");
-    const sel = document.createElement("input");
-    sel.type = "radio"; sel.name = "verpick"; sel.value = v.version;
-    sel.onclick = () => {  // 버전 선택 = 그 버전 값으로 폼 로드 (편집 기반)
-      $("dname").value = dname; $("dscope").value = v.scope;
-      $("dtools").value = v.tools; $("dprio").value = v.priority;
-      $("dhint").value = v.extract_hint;
-      dmsg(`v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [새 버전 만들기] 또는 [등록/수정(=기본 반영)]`);
-    };
-    const c0 = document.createElement("td"); c0.appendChild(sel); vr.appendChild(c0);
-    [`v${v.version}`, v.created, SCOPE_LABEL[v.scope] || v.scope, v.tools,
-     v.priority, v.extract_hint, v.is_default ? "★ 기본" : ""].forEach(x => {
-      const c = document.createElement("td"); c.textContent = x ?? ""; vr.appendChild(c);
-    });
-    const cvw = document.createElement("td");   // 👁 상세 — 이 버전의 정의 전문
-    const vwb = document.createElement("button"); vwb.type = "button"; vwb.className = "ghost";
-    vwb.textContent = "👁";
-    vwb.onclick = () => openVerModal(`🏷 도메인 · ${dname} v${v.version}`, [
-      {label: "정의",
-       table: {head: ["항목", "값"], badge0: true, rows: [
-         ["용도", SCOPE_LABEL[v.scope] || v.scope],
-         ["우선순위", `${v.priority} (낮을수록 먼저 대조)`],
-         ["도구", v.tools || "(없음)"]]}},
-      {label: "추출 지침 (시스템 프롬프트에 주입)", text: v.extract_hint,
-       empty: "(없음 — 도메인명 기준으로 판정)"}]);
-    cvw.appendChild(vwb); vr.appendChild(cvw);
-    if (v.is_default) vr.classList.add("sel");
-    tb.appendChild(vr);
-  });
-  t.appendChild(tb);
-  td.appendChild(t);
-  const bar = document.createElement("div");
-  bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
-  const mkBtn = (label, title, fn, cls) => { const b = document.createElement("button");
-    b.type = "button"; b.textContent = label; b.title = title; b.className = cls || "ghost";
-    b.onclick = fn; return b; };
-  bar.appendChild(mkBtn("✚ 새 버전 만들기 (현재 폼 값)",
-    "위 폼의 도구·우선순위·지침으로 새 버전을 생성합니다 — 생성만 하고 기본으로 지정하지 않음",
-    async () => {
-      const r2 = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions`, {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({name: dname, tools: $("dtools").value.trim(),
-                              priority: parseInt($("dprio").value) || 100,
-                              extract_hint: $("dhint").value.trim(),
-                              scope: $("dscope").value})});
-      const j2 = await r2.json().catch(() => ({}));
-      dmsg(r2.ok ? `✓ ${j2.note}` : `버전 생성 실패 — ${j2.detail || r2.status}`, r2.ok);
-      if (r2.ok) renderDomainVersions(dname, 1, td);
-    }));
-  bar.appendChild(mkBtn("★ 선택 버전을 기본으로", "체크(라디오)한 버전을 기본으로 지정 — 다음 분류·구조화부터 적용",
-    async () => {
-      const pick = td.querySelector("input[name=verpick]:checked");
-      if (!pick) { dmsg("기본으로 지정할 버전을 먼저 선택하세요"); return; }
-      const r2 = await fetch(`/admin/domains/${encodeURIComponent(dname)}/versions/${pick.value}/default`,
-                             {method: "POST"});
-      const j2 = await r2.json().catch(() => ({}));
-      dmsg(r2.ok ? `✓ ${j2.note}` : `기본 지정 실패 — ${j2.detail || r2.status}`, r2.ok);
-      if (r2.ok) { renderDomainVersions(dname, page, td); loadDomains(dname); loadDomainOptions(true); }
-    }));
-  if (j.pages > 1) {
-    if (page > 1) bar.appendChild(mkBtn("◀", "이전", () => renderDomainVersions(dname, page - 1, td)));
-    const info = document.createElement("span");
-    info.className = "hint"; info.style.margin = "0";
-    info.textContent = `${page} / ${j.pages} (총 ${j.total}버전)`;
-    bar.appendChild(info);
-    if (page < j.pages) bar.appendChild(mkBtn("▶", "다음", () => renderDomainVersions(dname, page + 1, td)));
-  }
-  td.appendChild(bar);
 }
 $("dform").onsubmit = async (e) => {
   e.preventDefault();
@@ -1065,7 +962,7 @@ $("dform").onsubmit = async (e) => {
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name, tools: $("dtools").value.trim(),
                           priority: parseInt($("dprio").value) || 100,
-                          extract_hint: $("dhint").value.trim(),
+                          extract_hint: (_DOMS[name] || {}).extract_hint || "",
                           scope: $("dscope").value}),
   });
   if (!r.ok) {
@@ -1076,7 +973,7 @@ $("dform").onsubmit = async (e) => {
   }
   await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
   loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
-  dmsg(`✓ 저장 완료 — "${name}" 새 버전 생성 + 기본 반영 (다음 파이프라인부터)`, true);
+  dmsg(`✓ "${name}" 저장됨 — 다음 run부터 반영`, true);
 };
 $("dreset").onclick = async () => {
   const name = $("dname").value.trim();
@@ -2450,131 +2347,6 @@ function _verPager(bar, j, page, reload) {
   }
 }
 // ── 버전 관리 공통 컴포넌트 — 이름별 라인 목록 → 행 클릭=버전 패널 펼침. 엔티티·클러스터 공용 ──
-function renderVersionManager(cfg) {
-  $(cfg.newBtn).onclick = () => vmNewLine(cfg);
-  vmLoadLines(cfg);
-}
-// 라인 화면의 상태 레일 — 지금 활성(★) 라인·버전이 무엇이고 그게 어디에 쓰이는지
-function vmRail(cfg, lines) {
-  const rail = document.getElementById(cfg.rail || "");
-  if (!rail) return;
-  rail.innerHTML = "";
-  const add = (txt, cls) => { const s = document.createElement("span");
-    if (cls) s.className = cls; s.textContent = txt; rail.appendChild(s); };
-  const act = (lines || []).find(l => l.active && l.default_version != null);
-  add(cfg.step || "", "step");
-  if (act) {
-    add(`활성 ${act.name}·v${act.default_version}`, "live");
-    add("·", "sep");
-    add(cfg.usedFor || "");
-  } else {
-    add("활성 라인 없음 — 코드 기본값으로 동작합니다");
-  }
-  add("·", "sep");
-  add(`라인 ${(lines || []).length}개`);
-  add("다음 → " + (act ? "고칠 게 있으면 라인을 클릭해 버전을 폼으로 불러오세요"
-                       : "아래 폼에서 라인을 만들고 [기본으로 지정]"), "next");
-}
-
-async function vmLoadLines(cfg) {
-  const box = $(cfg.lines); box.innerHTML = "⏳";
-  const j = await fetch(cfg.linesEndpoint).then(r => r.json()).catch(() => ({lines: []}));
-  vmRail(cfg, j.lines);
-  if (j.defaults) cfg.defaults = j.defaults;   // 코드 기본 프롬프트 — 빈 버전 뷰어에 전문 표시용
-  if (j.defaults && cfg.scaffold && $(cfg.scaffold))   // 스캐폴드 읽기 전용 표시 (한글 주석)
-    $(cfg.scaffold).textContent =
-      "── 문서 판정 스캐폴드 (기본) ──\n" + annotatePh(j.defaults.doc_prompt || "") +
-      "\n\n── 묶음 판정 스캐폴드 (기본) ──\n" + annotatePh(j.defaults.pack_prompt || "");
-  box.innerHTML = "";
-  if (!(j.lines || []).length) {
-    box.innerHTML = "<span class='hint'>아직 라인이 없습니다 — 아래 폼에서 이름을 넣고 [＋ 새 라인 만들기]</span>"; return;
-  }
-  const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = cfg.hasDescr
-    ? "<thead><tr><th>이름</th><th>설명</th><th>버전 수</th><th>활성 버전</th></tr></thead>"
-    : "<thead><tr><th>라인</th><th>버전 수</th><th>활성 버전</th></tr></thead>";
-  const tb = document.createElement("tbody");
-  j.lines.forEach(ln => {
-    const tr = document.createElement("tr"); tr.style.cursor = "pointer";
-    const cells = cfg.hasDescr
-      ? [ln.name, ln.descr || "", `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"]
-      : [ln.name, `${ln.versions}개`, ln.default_version != null ? `v${ln.default_version} ★` : "-"];
-    cells.forEach(x => { const td = document.createElement("td"); td.textContent = x; tr.appendChild(td); });
-    if (ln.default_version != null) tr.classList.add("sel");
-    tr.onclick = () => { $(cfg.name).value = ln.name; vmToggle(cfg, ln.name, tr); };
-    tb.appendChild(tr);
-  });
-  t.appendChild(tb); box.appendChild(t);
-}
-function vmToggle(cfg, name, tr) {
-  const nx = tr.nextElementSibling;
-  const open = nx && nx.classList.contains("verrow");
-  $(cfg.lines).querySelectorAll(".verrow").forEach(x => x.remove());
-  if (open) return;                         // 같은 라인 재클릭 = 접기
-  const row = document.createElement("tr"); row.className = "verrow";
-  const td = document.createElement("td"); td.colSpan = cfg.hasDescr ? 4 : 3;
-  row.appendChild(td); tr.after(row);
-  vmVersions(cfg, name, 1, td);
-}
-async function vmVersions(cfg, name, page, td) {
-  td.innerHTML = "⏳";
-  const j = await fetch(`${cfg.versions(name)}?page=${page}`).then(r => r.json()).catch(() => ({versions: [], pages: 1, total: 0}));
-  td.innerHTML = "";
-  const t = document.createElement("table"); t.className = "vertable";
-  t.innerHTML = "<thead><tr><th><span class='sronly'>선택</span></th><th>버전</th><th>생성</th><th>내용</th><th>메모</th><th>기본</th><th><span class='sronly'>동작</span></th></tr></thead>";
-  const tb = document.createElement("tbody");
-  (j.versions || []).forEach(v => {
-    const vr = document.createElement("tr");
-    const sel = document.createElement("input"); sel.type = "radio"; sel.name = cfg.radio; sel.value = v.version;
-    sel.onclick = () => { cfg.setForm(v); $(cfg.name).value = name;
-      $(cfg.msg).textContent = `${name} v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [버전 업]`; };
-    const c0 = document.createElement("td"); c0.appendChild(sel); vr.appendChild(c0);
-    [`v${v.version}`, v.created || "", cfg.summary(v), v.note || "", v.is_default ? "★ 기본" : ""]
-      .forEach(x => { const c = document.createElement("td"); c.textContent = x; vr.appendChild(c); });
-    const cv = document.createElement("td");   // 👁 상세 — 내부 구조(프롬프트 전문) 뷰어
-    const toForm = () => {   // 상세를 보다가 바로 편집으로 (읽기 전용 막다름 방지)
-      sel.checked = true; cfg.setForm(v); $(cfg.name).value = name;
-      $(cfg.msg).textContent = `${name} v${v.version} 값을 폼에 불러왔습니다 — 수정 후 [버전 업]`;
-      $(cfg.name).scrollIntoView({behavior: "smooth", block: "center"});
-    };
-    cv.appendChild(_verBtn("👁 상세", async () =>
-      openVerModal(`${cfg.title} · ${name} v${v.version}`, await cfg.viewSections(v),
-                   [{label: "✏ 이 값을 폼으로 불러와 수정", fn: toForm,
-                     title: "이 버전 값을 아래 편집 폼에 채웁니다 — 고친 뒤 [버전 업]하면 새 버전"}])));
-    vr.appendChild(cv);
-    if (v.is_default) vr.classList.add("sel");
-    tb.appendChild(vr);
-  });
-  t.appendChild(tb); td.appendChild(t);
-  const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:6px";
-  bar.appendChild(_verBtn("✚ 이 라인에 버전 업 (현재 폼)", async () => {
-    if (!cfg.validate()) return;
-    const r = await fetch(cfg.versions(name), {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(cfg.readForm())});
-    const jj = await r.json().catch(() => ({}));
-    $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "버전 업"}` : (jj.detail || `실패 ${r.status}`);
-    if (r.ok) { vmVersions(cfg, name, 1, td); vmLoadLines(cfg); }
-  }));
-  bar.appendChild(_verBtn("★ 선택 버전을 기본으로", async () => {
-    const p = td.querySelector(`input[name=${cfg.radio}]:checked`);
-    if (!p) { $(cfg.msg).textContent = "버전을 먼저 선택하세요"; return; }
-    const r = await fetch(cfg.setDefault(name, p.value), {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-    const jj = await r.json().catch(() => ({}));
-    $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "기본 지정"}` : (jj.detail || `실패 ${r.status}`);
-    if (r.ok) { vmVersions(cfg, name, page, td); vmLoadLines(cfg); }
-  }));
-  _verPager(bar, j, page, p => vmVersions(cfg, name, p, td)); td.appendChild(bar);
-}
-async function vmNewLine(cfg) {
-  const name = $(cfg.name).value.trim();
-  if (!name) { $(cfg.msg).textContent = "새 라인 이름을 입력하세요"; return; }
-  if (!cfg.validate()) return;
-  const r = await fetch(cfg.linesEndpoint, {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({name, ...cfg.readForm()})});
-  const jj = await r.json().catch(() => ({}));
-  $(cfg.msg).textContent = r.ok ? `✓ ${jj.note || "새 라인 생성"}` : (jj.detail || `실패 ${r.status}`);
-  if (r.ok) vmLoadLines(cfg);
-}
 // ── 스키마 정규화 헬퍼 — 캔버스·표·요약 공용. v1(role entry/solution)→체인 2칸 변환 ──
 const _DEF_CHAIN = () => [
   {key: "goal", label: "목표", desc: "문서가 다루는 문제/목표", tags: []},
@@ -2611,7 +2383,77 @@ function chainBadge(c, i) {
   return i === 0 ? "진입점 🔗" : ((c.tags || []).includes("solution") ? "검증귀속 ⭐"
                                   : `체인 ${i + 1}단계`);
 }
-// ── ① 추출 (엔티티) — 스키마 캔버스가 편집기다 ────────────────────────────────
+// ── 판정 설정 — 도메인 지침(도메인별) + 병합 설정(한 벌) ────────────────────
+// 도메인 지침·추출 스키마·병합은 항상 같이 바뀌고, 바꾸면 전량 재구조화가 필요하다.
+// 그래서 차원별 버전을 없애고 한 화면·한 벌로 둔다. 이력은 run 스냅샷이 담당한다
+// (run이 조합 전체를 값으로 얼려 재현·비교가 되는 유일한 지점 — 2026-08-21 결정).
+const _DOMS = {};          // 이름 → 도메인 정의 (지침 편집·업서트 때 나머지 필드 보존)
+
+async function jcLoad() {
+  const j = await fetch("/admin/domains").then(r => r.ok ? r.json() : {domains: []})
+    .catch(() => ({domains: []}));
+  const sel = $("jcDomain"), keep = sel.value;
+  Object.keys(_DOMS).forEach(k => delete _DOMS[k]);
+  sel.innerHTML = "";
+  (j.domains || []).forEach(d => {
+    _DOMS[d.name] = d;
+    const o = document.createElement("option");
+    o.value = d.name; o.textContent = d.name + (d.scope === "doc" ? " (문서 전용)" : "");
+    sel.appendChild(o);
+  });
+  if (keep && _DOMS[keep]) sel.value = keep;
+  jcFill();
+}
+function jcFill() {
+  const d = _DOMS[$("jcDomain").value] || {};
+  $("jcHint").value = d.extract_hint || "";
+  const n = Object.keys(_DOMS).length;
+  $("jcMeta").textContent = n
+    ? `도메인 ${n}개 · 이 지침은 '${$("jcDomain").value}'에 물린 소스의 판정 기준입니다`
+    : "등록된 도메인이 없습니다 — 아래 [도메인 등록]에서 먼저 만드세요";
+  $("jcMsg").textContent = "";
+}
+$("jcDomain").onchange = jcFill;
+$("jcSave").onclick = async () => {
+  const name = $("jcDomain").value, d = _DOMS[name];
+  if (!d) { $("jcMsg").textContent = "도메인을 먼저 고르세요"; return; }
+  const r = await fetch("/admin/domains", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, tools: d.tools || "", priority: d.priority || 100,
+                          scope: d.scope || "both", extract_hint: $("jcHint").value})});
+  const jj = await r.json().catch(() => ({}));
+  $("jcMsg").textContent = r.ok ? "✓ 지침 저장됨 — 새로 만드는 run이 이 기준으로 판정합니다"
+                                : (jj.detail || `저장 실패 ${r.status}`);
+  if (r.ok) jcLoad();
+};
+
+async function vcLoad() {
+  const j = await fetch("/admin/cluster-config").then(r => r.ok ? r.json() : null)
+    .catch(() => null);
+  if (!j) return;
+  $("vcHigh").value = j.sim_high; $("vcThr").value = j.sim_threshold;
+  $("vcShort").value = j.short_name_chars; $("vcRatio").value = j.char_ratio;
+  $("vcSel").value = j.select_max;
+  bindDefaultable("vcSelPrompt", j.select_prompt, (j.defaults || {}).select_prompt,
+                  "후보선택 프롬프트");
+  $("vcMsg").textContent = "";
+}
+$("vcSave").onclick = async () => {
+  const r = await fetch("/admin/cluster-config", {method: "PUT",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({sim_high: parseFloat($("vcHigh").value),
+                          sim_threshold: parseFloat($("vcThr").value),
+                          short_name_chars: parseInt($("vcShort").value),
+                          char_ratio: parseFloat($("vcRatio").value),
+                          select_max: parseInt($("vcSel").value),
+                          select_prompt: $("vcSelPrompt").value})});
+  const jj = await r.json().catch(() => ({}));
+  $("vcMsg").textContent = r.ok ? `✓ ${jj.note}`
+    : (typeof jj.detail === "string" ? jj.detail
+       : (jj.detail && jj.detail[0] && jj.detail[0].msg) || `저장 실패 ${r.status}`);
+};
+
+// ── 뽑아낼 엔티티 — 스키마 캔버스가 편집기다 ──────────────────────────────────
 // 엔티티는 **한 벌**이고 버전이 없다(저장=덮어쓰기). 노드를 클릭하면 오른쪽 패널에서
 // 내용을 채우고, 노드의 ＋로 다음 계층·속성을 뻗는다.
 // 배치는 자동 — 노드 좌표를 사람이 관리할 이유가 없다(저장도 안 한다).
@@ -2995,37 +2837,6 @@ function annotatePh(t) {
   return Object.entries(_PH_KO).reduce(
     (s, [k, l]) => s.split("{" + k + "}").join("〔자동 입력: " + l + "〕"), t || "");
 }
-const CLUSTER_VM = {
-  title: "② 병합(클러스터)", lines: "clsLines", name: "vcName", msg: "vcMsg", newBtn: "clsNew", radio: "clspick",
-  rail: "clsRail", step: "② 병합 (클러스터)",
-  usedFor: "같은 뜻의 노드를 하나로 합치는 기준입니다",
-  linesEndpoint: "/admin/cluster-lines",
-  versions: n => `/admin/cluster-lines/${encodeURIComponent(n)}/versions`,
-  setDefault: (n, v) => `/admin/cluster-lines/${encodeURIComponent(n)}/versions/${v}/default`,
-  readForm: () => ({sim_high: parseFloat($("vcHigh").value), sim_threshold: parseFloat($("vcThr").value),
-    short_name_chars: parseInt($("vcShort").value), char_ratio: parseFloat($("vcRatio").value),
-    select_max: parseInt($("vcSel").value), select_prompt: $("vcSelPrompt").value, note: $("vcNote").value}),
-  setForm: v => { $("vcHigh").value = v.sim_high; $("vcThr").value = v.sim_threshold; $("vcShort").value = v.short_name_chars;
-    $("vcRatio").value = v.char_ratio; $("vcSel").value = v.select_max;
-    $("vcSelPrompt").value = v.select_prompt || ""; $("vcNote").value = v.note || ""; },
-  summary: v => `자동병합≥${v.sim_high}·후보≥${v.sim_threshold}·후보수${v.select_max}` +
-    (v.select_prompt ? "·프롬프트:커스텀" : ""),
-  viewSections: v => [
-    {label: "병합 규칙 (dedup 임계값)",
-     table: {head: ["규칙", "값", "뜻"], badge0: true, rows: [
-       ["자동병합 ≥", String(v.sim_high), "이 유사도 이상 + 문자 가드 통과 = LLM 없이 즉시 병합"],
-       ["문자 가드", `${v.short_name_chars}자 · ${v.char_ratio}`, "이름이 이보다 짧거나 문자 유사도 미달이면 LLM 판정으로"],
-       ["후보 하한 ≥", String(v.sim_threshold), "이 유사도 이상만 병합 후보로 수집"],
-       ["LLM 후보 수", String(v.select_max), "후보선택 LLM에 보여줄 최대 후보 개수"]]}},
-    {label: "LLM 후보선택 프롬프트 (select_prompt)", text: v.select_prompt, collapsed: true},
-    {label: "메모", text: v.note, empty: "(없음)"}],
-  validate: () => {
-    const sp = $("vcSelPrompt").value.trim();
-    if (sp && (!sp.includes("{name}") || !sp.includes("{cands}"))) {
-      $("vcMsg").textContent = "후보선택 프롬프트에 {name}·{cands} 필요"; return false; }
-    return true;
-  },
-};
 // ── 매핑 편집기 — 테이블·id·시간·역할 매핑을 여기서 정의 (원천 탭은 등록된 버전만 선택) ──
 const mvmsg = (t, ok) => { const e = $("mvMsg"); e.textContent = t;
   e.style.color = ok ? "var(--ok-ink)" : "var(--mut)"; };
@@ -3565,10 +3376,9 @@ const TABS = {
   pipe:    {secs: ["sec-pipe"], load: () => loadPipeline()},
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
-  entity:  {secs: ["sec-entity"], load: () => veLoad()},
-  cluster: {secs: ["sec-cluster"], load: () => renderVersionManager(CLUSTER_VM)},
+  entity:  {secs: ["sec-entity"],
+            load: () => { veLoad(); jcLoad(); vcLoad(); loadDomains(); }},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
-  domains: {secs: ["sec-domains"], load: () => loadDomains()},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources();
                           loadPipelineSettings(); loadDocStatus(); loadSchedule(); }},

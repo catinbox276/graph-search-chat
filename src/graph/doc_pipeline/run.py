@@ -299,6 +299,11 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
     return len(docs)
 
 
+def _lob_str(v) -> str:
+    """CLOB/문자열 공용 문자열화 — 스냅샷 값이 LOB으로 올 수 있다."""
+    return (v.read() if hasattr(v, "read") else (v or "")) or ""
+
+
 def _run_overrides(cur, run_id: str, s):
     """run 조합 스냅샷을 설정에 덮어씀 — (domain, hint, count) 반환.
     domain은 run에 스냅샷된 값(프리셋 오버라이드 포함) — 소스 등록 도메인보다 우선."""
@@ -325,10 +330,15 @@ def _run_overrides(cur, run_id: str, s):
     if isinstance(st.get("dedup"), dict):                # 클러스터(dedup) 스냅샷 적용
         s.dedup = {**s.dedup, **st["dedup"]}
     s.embed_model = (embed_model or "").strip() or s.embed_model   # run별 임베딩
-    cur.execute("""SELECT extract_hint FROM domain_versions
-                   WHERE name = :1 AND version = :2""", [domain, dver])
-    h = cur.fetchone()
-    return domain, (h[0] if h and h[0] else ""), active == "Y"
+    # 도메인 지침: run 스냅샷의 값이 1순위 (2026-08-21) — 버전 행을 다시 읽으면 그 행이
+    # 지워지거나 비어 있을 때 판정 기준이 조용히 사라진다. 옛 run은 값이 없어 행으로 폴백.
+    hint = (st.get("hint") or "").strip()
+    if not hint:
+        cur.execute("""SELECT extract_hint FROM domain_versions
+                       WHERE name = :1 AND version = :2""", [domain, dver])
+        h = cur.fetchone()
+        hint = _lob_str(h[0]) if h and h[0] else ""
+    return domain, hint, active == "Y"
 
 
 def run_for_source(source_name: str, limit: int = 0, drain: bool = False,

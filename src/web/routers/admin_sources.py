@@ -743,61 +743,76 @@ def admin_entity_preview(inp: EntityPreviewIn):
 
 
 # 클러스터 ---------------------------------------------------------------
-@router.get("/admin/cluster-versions")
-def admin_cluster_versions():
-    """전체 (라인, 버전) 평면 목록 — run 폼 드롭다운용."""
+# 병합(클러스터) 설정도 **한 벌**이다 — 라인·버전 관리 삭제 (2026-08-21 결정).
+# 근거: 버전 4개를 만들어놓고 run 11개가 전부 v1만 썼다. 판정 설정(도메인 지침·추출
+# 스키마·병합)은 항상 같이 바뀌고 바꾸면 전량 재구조화가 필요해서 변경 단위가 한 벌이다.
+# 이력은 run 스냅샷이 담당한다 (조합 전체를 얼려 재현·비교가 되는 유일한 지점).
+CLUSTER_LINE = "기본"
+
+
+def _select_tmpl() -> str:
+    """후보선택 프롬프트 코드 기본값 — llm.py의 단일 정의를 그대로 보여준다."""
+    from graph.graph_pipeline.llm import SELECT_PROMPT_TMPL
+    return SELECT_PROMPT_TMPL
+
+
+def _cluster_row(cur) -> tuple[str, int]:
+    """단일 병합 설정이 사는 (라인, 버전) = (기본, 1). 여러 행이 남아 있으면 접는다.
+    남길 내용 = 기본 라인의 최신 (마지막으로 쓰던 설정). 관례와 다른 지점: 여기서만
+    name·version을 직접 UPDATE한다 (versioning 헬퍼는 append 전용)."""
+    _ensure_cluster_versions(cur)
+    cur.execute("SELECT COUNT(*) FROM cluster_versions")
+    n = cur.fetchone()[0]
+    if not n:
+        versioning.new_line(cur, versioning.CLUSTER_SPEC, CLUSTER_LINE,
+                            {c: None for c in versioning.CLUSTER_SPEC.content_cols})
+    elif n > 1:
+        cur.execute("""SELECT name, version FROM cluster_versions
+                       ORDER BY CASE WHEN name = :1 THEN 0 ELSE 1 END, version DESC
+                       FETCH FIRST 1 ROWS ONLY""", [CLUSTER_LINE])
+        keep = cur.fetchone()
+        cur.execute("DELETE FROM cluster_versions WHERE NOT (name = :1 AND version = :2)", keep)
+    cur.execute("""UPDATE cluster_versions SET name = :1, version = 1, is_default = 'Y',
+                   note = NULL""", [CLUSTER_LINE])
+    return CLUSTER_LINE, 1
+
+
+@router.get("/admin/cluster-config")
+def admin_cluster_config():
+    """지금 쓰는 병합(dedup) 설정 한 벌 + 코드 기본값."""
     with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        return {"versions": versioning.list_flat(cur, versioning.CLUSTER_SPEC)}
+        name, ver = _cluster_row(cur)
+        cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
+                              select_max, select_prompt FROM cluster_versions
+                       WHERE name = :1 AND version = :2""", [name, ver])
+        r = cur.fetchone()
+    from graph.graph_pipeline.merge import default_merge_cfg
+    d = default_merge_cfg()
+    return {"sim_high": float(r[0]) if r[0] is not None else d["sim_high"],
+            "sim_threshold": float(r[1]) if r[1] is not None else d["sim_threshold"],
+            "short_name_chars": int(r[2]) if r[2] is not None else d["short_name_chars"],
+            "char_ratio": float(r[3]) if r[3] is not None else d["char_ratio"],
+            "select_max": int(r[4]) if r[4] is not None else d["select_max"],
+            "select_prompt": _lob_str(r[5]),
+            "defaults": {**{k: v for k, v in d.items() if k != "select_prompt"},
+                         "select_prompt": _select_tmpl()}}
 
 
-@router.get("/admin/cluster-lines")
-def admin_cluster_lines():
+@router.put("/admin/cluster-config")
+def admin_cluster_config_put(inp: ClusterVersionIn):
+    """덮어쓰기 저장 — 검증은 ClusterVersionIn이 그대로 한다."""
     with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        return {"lines": versioning.list_lines(cur, versioning.CLUSTER_SPEC)}
-
-
-@router.get("/admin/cluster-lines/{name}/versions")
-def admin_cluster_line_versions(name: str, page: int = 1):
-    with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        return versioning.list_versions(cur, versioning.CLUSTER_SPEC, name, page)
-
-
-@router.post("/admin/cluster-lines")
-def admin_cluster_line_add(inp: ClusterLineIn):
-    """새 라인 = 새 이름 v1 (기본 지정은 별도)."""
-    with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        try:
-            versioning.new_line(cur, versioning.CLUSTER_SPEC, inp.name, _cluster_vals(inp))
-        except ValueError as e:
-            raise HTTPException(409, str(e))
-    return {"ok": True, "note": f"라인 '{inp.name}' v1 생성됨 — 기본으로 쓰려면 [기본으로 지정]"}
-
-
-@router.post("/admin/cluster-lines/{name}/versions")
-def admin_cluster_version_up(name: str, inp: ClusterVersionIn):
-    """버전 업 — 기존 라인에 새 버전 (기본 지정은 별도)."""
-    with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        try:
-            v = versioning.version_up(cur, versioning.CLUSTER_SPEC, name, _cluster_vals(inp))
-        except KeyError:
-            raise HTTPException(404, f"없는 라인: {name} (버전 업은 기존 라인에만)")
-    return {"ok": True, "version": v, "note": f"{name} v{v} 생성됨 — 아직 기본이 아닙니다"}
-
-
-@router.post("/admin/cluster-lines/{name}/versions/{v}/default")
-def admin_cluster_version_default(name: str, v: int):
-    with db_cursor() as cur:
-        _ensure_cluster_versions(cur)
-        try:
-            versioning.set_default(cur, versioning.CLUSTER_SPEC, name, v)
-        except KeyError:
-            raise HTTPException(404, f"없는 버전: {name} v{v}")
-    return {"ok": True, "note": f"{name} v{v}이(가) 기본 — 새 조합 run이 이 기준으로 스냅샷"}
+        name, ver = _cluster_row(cur)
+        cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE cluster_versions
+                       SET sim_high = :sh, sim_threshold = :st, short_name_chars = :sn,
+                           char_ratio = :cr, select_max = :sm, select_prompt = :sp
+                       WHERE name = :nm AND version = :vr""",
+                    {"sh": inp.sim_high, "st": inp.sim_threshold,
+                     "sn": inp.short_name_chars, "cr": inp.char_ratio,
+                     "sm": inp.select_max, "sp": inp.select_prompt.strip() or None,
+                     "nm": name, "vr": ver})
+    return {"ok": True, "note": "병합 설정 저장됨 — 새로 만드는 run이 이 기준으로 합칩니다"}
 
 
 # ── 조합 프리셋 (헬름차트식 — 차원별 버전 선택을 이름 있는 세트로 저장, 소스에 적용) ──

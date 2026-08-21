@@ -274,6 +274,15 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
                 st["schema"] = snap["schema"]   # 재현성 — 어떤 스키마로 뽑았는지 스냅샷
                 st["doc_prompt"] = snap["doc_prompt"]
                 st["pack_prompt"] = snap["pack_prompt"]
+    # 도메인 지침을 **값으로** 스냅샷 (2026-08-21) — 전에는 run이 domain_version 번호만
+    # 들고 실행 때 그 행을 다시 읽었다. 행이 지워지거나 비어 있으면 판정 기준이 조용히
+    # 사라진다(실측: 빈 스냅샷 run이 코드 기본으로 판정). 값으로 얼려두면 재현이 보장된다.
+    cur.execute("""SELECT NVL(v.extract_hint, r.extract_hint) FROM domain_registry r
+                   LEFT JOIN domain_versions v ON v.name = r.name AND v.is_default = 'Y'
+                   WHERE r.name = :1""", [c["domain"]])
+    _h = cur.fetchone()
+    if _h and _h[0]:
+        st["hint"] = _lob(_h[0])
     # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
     cl_name, cv = (cluster_line or None), cluster_version
     if not (cl_name and cv):

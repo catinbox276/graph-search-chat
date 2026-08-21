@@ -112,6 +112,14 @@ def llm_same(kind: str, a: str, b: str) -> bool:
         return False
 
 
+# 후보선택 프롬프트 기본 템플릿 — 관리 화면의 '기본값 보기/불러오기'가 같은 문장을 쓰게
+# 코드와 화면이 한 곳을 참조한다 (문구가 갈라지면 사용자가 무엇이 기본인지 알 수 없다).
+SELECT_PROMPT_TMPL = (
+    '기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. '
+    '주제·도구가 비슷해도 의도가 다르면 같은 것이 아니다. JSON만 출력: {{"pick": 번호}}\n'
+    '기준: {name}\n후보:\n{cands}')
+
+
 def llm_select(kind: str, name: str, cands: list, max_n: int = 0,
                prompt: str = "") -> str | None:
     """후보 형제 여러 개 중 같은 의도 하나를 LLM이 선택 (없으면 없음).
@@ -125,10 +133,7 @@ def llm_select(kind: str, name: str, cands: list, max_n: int = 0,
            "max_tokens": 80}
           if config.LLM_AUX_NO_THINK else {})
     lines = "\n".join(f"{i + 1}. {n}" for i, (_s, _id, n) in enumerate(cands))
-    default_msg = (
-        f'기준 문구와 같은 {kind}를 가리키는 후보가 있으면 그 번호를, 없으면 0을 답하라. '
-        f'주제·도구가 비슷해도 의도가 다르면 같은 것이 아니다. JSON만 출력: {{"pick": 번호}}\n'
-        f'기준: {name}\n후보:\n{lines}')
+    default_msg = SELECT_PROMPT_TMPL.format(kind=kind, name=name, cands=lines)
     msg = default_msg
     if (prompt or "").strip():
         try:   # 사용자 템플릿 오타(KeyError 등)가 병합을 죽이지 않게 기본으로 폴백
