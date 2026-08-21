@@ -826,6 +826,115 @@ class JudgeConfigIn(EntityVersionIn):
     dedup: ClusterVersionIn = ClusterVersionIn()
 
 
+class JudgeConfigNewIn(JudgeConfigIn):
+    """새 묶음 생성 — 도메인 정체성(이름·용도·도구·우선순위)까지 한 번에 받는다.
+    묶음 = 도메인 1 + 엔티티 1 + 클러스터 1. 생성 통로는 이것 하나다."""
+    name: str
+    scope: Literal["both", "chat", "doc"] = "doc"
+    tools: str = ""
+    priority: int = 100
+    copy_from: str = ""    # 엔티티·병합을 복사할 원본 묶음 (빈값=코드 기본)
+
+    @field_validator("name")
+    @classmethod
+    def _nm(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("묶음(도메인) 이름을 입력하세요")
+        return v.strip()
+
+
+def _json_list(txt: str) -> list:
+    import json
+    try:
+        v = json.loads(txt or "[]")
+        return v if isinstance(v, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+@router.get("/admin/judge-configs")
+def admin_judge_configs():
+    """묶음 목록 — 도메인마다 지침·엔티티·병합 요약 + 이 묶음을 쓰는 소스."""
+    with db_cursor() as cur:
+        ensure_domain_registry(cur)
+        cur.execute("SELECT name FROM domain_registry ORDER BY priority, name")
+        for (n,) in cur.fetchall():      # 행 보장 (없으면 씨앗에서 복사)
+            _schema_row(cur, n)
+            _cluster_row(cur, n)
+        cur.execute("""SELECT r.name, NVL(r.scope, 'both'), r.tools, r.priority, r.extract_hint,
+                              e.etypes, e.criteria, c.sim_high, c.sim_threshold, c.select_max
+                       FROM domain_registry r
+                       JOIN entity_versions e ON e.name = r.name AND e.version = 1
+                       JOIN cluster_versions c ON c.name = r.name AND c.version = 1
+                       ORDER BY r.priority, r.name""")
+        rows = cur.fetchall()
+        cur.execute("""SELECT domain, source_name FROM source_registry
+                       WHERE domain IS NOT NULL AND enabled = 'Y'""")
+        used = {}
+        for dom, src in cur.fetchall():
+            used.setdefault(dom, []).append(src)
+    out = []
+    for r in rows:
+        sc = _judge.norm_schema(_json_list(_lob_str(r[5])))
+        out.append({"domain": r[0], "scope": r[1], "tools": r[2] or "", "priority": r[3],
+                    "hint": _lob_str(r[4]), "criteria": _lob_str(r[6]),
+                    "chain": [c.get("label") or c["key"] for c in sc["chain"]],
+                    "attrs": [a.get("label") or a["key"] for a in sc["attrs"]],
+                    "sim_high": float(r[7]) if r[7] is not None else None,
+                    "sim_threshold": float(r[8]) if r[8] is not None else None,
+                    "select_max": int(r[9]) if r[9] is not None else None,
+                    "sources": used.get(r[0], [])})
+    return {"configs": out}
+
+
+@router.post("/admin/judge-config")
+def admin_judge_config_new(inp: JudgeConfigNewIn):
+    """새 묶음 생성 — 도메인 + 엔티티 + 병합을 한 트랜잭션에 만든다.
+    엔티티·병합은 copy_from에서 복사해 시작하고, 요청에 값이 오면 그 값으로 덮는다."""
+    import json
+    with db_cursor() as cur:
+        ensure_domain_registry(cur)
+        cur.execute("SELECT COUNT(*) FROM domain_registry WHERE name = :1", [inp.name])
+        if cur.fetchone()[0]:
+            raise HTTPException(409, f"이미 있는 묶음입니다: {inp.name}")
+        cur.setinputsizes(h=oracledb.DB_TYPE_CLOB)
+        cur.execute("""INSERT INTO domain_registry (name, tools, priority, extract_hint, scope)
+                       VALUES (:n, :t, :p, :h, :s)""",
+                    {"n": inp.name, "t": inp.tools or None, "p": inp.priority,
+                     "h": inp.hint.strip() or None, "s": inp.scope})
+        _ensure_domain_versions(cur)   # registry 기준으로 v1을 시드할 수 있다
+        cur.setinputsizes(h=oracledb.DB_TYPE_CLOB)
+        cur.execute("""MERGE INTO domain_versions v USING dual ON (v.name = :n AND v.version = 1)
+                       WHEN MATCHED THEN UPDATE SET tools = :t, priority = :p,
+                            extract_hint = :h, scope = :s, is_default = 'Y'
+                       WHEN NOT MATCHED THEN
+                         INSERT (name, version, tools, priority, extract_hint, scope, is_default)
+                         VALUES (:n, 1, :t, :p, :h, :s, 'Y')""",
+                    {"n": inp.name, "t": inp.tools or None, "p": inp.priority,
+                     "h": inp.hint.strip() or None, "s": inp.scope})
+        _schema_row(cur, inp.name, inp.copy_from)
+        _cluster_row(cur, inp.name, inp.copy_from)
+        if inp.etypes:      # 생성 폼에서 스키마를 직접 써 보냈으면 그 값으로
+            cur.setinputsizes(et=oracledb.DB_TYPE_CLOB, cr=oracledb.DB_TYPE_CLOB)
+            cur.execute("""UPDATE entity_versions SET etypes = :et, criteria = :cr, descr = :ds
+                           WHERE name = :n AND version = 1""",
+                        {"et": json.dumps(inp.etypes, ensure_ascii=False),
+                         "cr": inp.criteria.strip() or None,
+                         "ds": inp.descr.strip() or None, "n": inp.name})
+        cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE cluster_versions
+                       SET sim_high = :sh, sim_threshold = :st, short_name_chars = :sn,
+                           char_ratio = :cr, select_max = :sm, select_prompt = :sp
+                       WHERE name = :n AND version = 1""",
+                    {"sh": inp.dedup.sim_high, "st": inp.dedup.sim_threshold,
+                     "sn": inp.dedup.short_name_chars, "cr": inp.dedup.char_ratio,
+                     "sm": inp.dedup.select_max,
+                     "sp": inp.dedup.select_prompt.strip() or None, "n": inp.name})
+    src = inp.copy_from or "코드 기본"
+    return {"ok": True, "domain": inp.name,
+            "note": f"묶음 '{inp.name}' 생성됨 (도메인+엔티티+병합) — 엔티티·병합은 '{src}' 기준"}
+
+
 @router.get("/admin/judge-config")
 def admin_judge_config(domain: str = ""):
     """이 도메인의 판정 설정 한 묶음 + 코드 기본값. domain 미지정=첫 도메인."""

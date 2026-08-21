@@ -444,11 +444,35 @@
       (행동/도구 노드는 대화에서 자동 생성)
     </div>
   </details>
+  <div id="jcList"><span class="hint">불러오는 중…</span></div>
+  <details id="jcNewBox" style="margin:8px 0">
+    <summary class="hint" style="cursor:pointer;margin:0">＋ 새 묶음 만들기 — 도메인 · 엔티티 · 병합을 한 번에 생성</summary>
+    <div class="schedrow" style="margin:6px 0 0">
+      <label class="fld"><span>묶음(도메인) 이름</span>
+        <input id="jnName" placeholder="예: 생활 QA" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
+      <label class="fld"><span>용도</span>
+        <select id="jnScope" title="문서 전용은 대화 분류·폴백에 끼지 않습니다">
+          <option value="doc">문서 전용</option>
+          <option value="both">대화+문서</option>
+          <option value="chat">대화 전용</option>
+        </select></label>
+      <label class="fld"><span>도구 (대화용, 쉼표구분)</span>
+        <input id="jnTools" placeholder="문서 전용이면 비워둠" style="min-width:150px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
+      <label class="fld"><span>우선순위</span>
+        <input id="jnPrio" type="number" value="100" min="1" style="width:90px" title="낮을수록 먼저 대조 — 최하순위가 폴백"></label>
+      <label class="fld"><span>엔티티·병합 복사 원본</span>
+        <select id="jnCopy" title="새 묶음의 엔티티 스키마·병합 설정을 어디서 복사해 시작할지"></select></label>
+      <button type="button" id="jnCreate">＋ 묶음 생성</button>
+      <span class="hint" id="jnMsg" style="margin:0"></span>
+    </div>
+    <p class="hint" style="margin:6px 0 0">생성하면 <b>도메인·엔티티·병합이 함께</b> 만들어지고 바로 아래에서 편집 상태가 됩니다.
+       지침은 생성 후 아래 1️⃣에 씁니다.</p>
+  </details>
   <div class="fgroup">
     <div class="fgroup-t">1️⃣ 도메인 지침 <small>— 어떤 문서를 이 도메인의 지식으로 인정할지. 여기가 비면 LLM이 도메인 이름만 보고 판단합니다</small></div>
     <div class="schedrow" style="margin:0 0 6px">
-      <label class="fld"><span>도메인 (이 화면 전체가 이 도메인의 설정)</span>
-        <select id="jcDomain" title="지침·추출 스키마·병합이 모두 이 도메인 것입니다 — 바꾸면 아래 전체가 다시 로드됩니다"></select></label>
+      <label class="fld"><span>편집할 묶음</span>
+        <select id="jcDomain" title="이 묶음(도메인+엔티티+병합) 전체가 아래에서 편집됩니다"></select></label>
       <span class="hint" id="jcMeta" style="margin:0"></span>
     </div>
     <textarea id="jcHint" class="psta" spellcheck="false" placeholder="예: 이 도메인은 조직이 참고하는 기술 문제해결 지식을 모은다. 출처가 사내 문서인지 외부 기술 Q&A인지는 따지지 않는다 — 재현 가능한 조치가 있으면 인정한다.&#10;인정: 문제 증상과 해법(설정·명령·코드·절차)이 함께 있는 글&#10;제외: 결론 없이 끝나는 글, 의견·추천만 있는 글"></textarea>
@@ -2393,7 +2417,41 @@ const _DOMS = {};          // 이름 → 도메인 정의 (지침 편집·업서
 function jcCurDomain() { const el = $("jcDomain"); return el ? el.value : ""; }
 const jcQ = () => jcCurDomain() ? "?domain=" + encodeURIComponent(jcCurDomain()) : "";
 
-async function jcLoad() {   // 도메인 목록만 — 설정 본문은 jcLoadAll이 한 번에 읽는다
+// 묶음 목록 — 도메인마다 엔티티·병합 요약과 쓰는 소스를 한 표로 (상태 관리 지점)
+const SCOPE_LB = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
+async function jcListLoad() {
+  const box = $("jcList"); if (!box) return;
+  const j = await fetch("/admin/judge-configs").then(r => r.ok ? r.json() : {configs: []})
+    .catch(() => ({configs: []}));
+  box.innerHTML = "";
+  const t = document.createElement("table"); t.className = "vertable fixed";
+  t.innerHTML = "<colgroup><col style='width:16%'><col style='width:11%'><col style='width:20%'>"
+    + "<col style='width:20%'><col style='width:10%'><col style='width:23%'></colgroup>"
+    + "<thead><tr><th>묶음 (도메인)</th><th>용도</th><th>엔티티 계층</th><th>속성</th>"
+    + "<th>병합 ≥</th><th>쓰는 소스</th></tr></thead>";
+  const tb = document.createElement("tbody");
+  (j.configs || []).forEach(c => {
+    const tr = document.createElement("tr");
+    tr.style.cursor = "pointer";
+    tr.title = c.hint ? "지침: " + c.hint.slice(0, 120) : "지침 없음 — 이름만으로 판정합니다";
+    [c.domain + (c.hint ? "" : " ⚠"), SCOPE_LB[c.scope] || c.scope,
+     (c.chain || []).join(" → "), (c.attrs || []).join(" · ") || "없음",
+     c.sim_high ?? "-", (c.sources || []).join(", ") || "연결된 소스 없음"]
+      .forEach((v, i) => { const td = document.createElement("td");
+        td.textContent = v; if (i >= 2) td.className = "trunc"; tr.appendChild(td); });
+    if (c.domain === jcCurDomain()) tr.classList.add("sel");
+    tr.onclick = () => { $("jcDomain").value = c.domain; jcFill(); jcLoadAll(); jcListLoad(); };
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const n = (j.configs || []).length;
+  const hint = document.createElement("p"); hint.className = "hint"; hint.style.margin = "4px 0 0";
+  hint.textContent = `묶음 ${n}개 — 행을 클릭하면 아래에서 그 묶음(도메인·엔티티·병합)을 편집합니다.`
+    + " ⚠ = 지침이 비어 있어 도메인 이름만으로 판정합니다.";
+  box.appendChild(hint);
+}
+
+async function jcLoad() {   // 묶음 셀렉트 채우기 — 본문은 jcLoadAll이 한 번에 읽는다
   const j = await fetch("/admin/domains").then(r => r.ok ? r.json() : {domains: []})
     .catch(() => ({domains: []}));
   const sel = $("jcDomain"), keep = sel.value;
@@ -2406,22 +2464,45 @@ async function jcLoad() {   // 도메인 목록만 — 설정 본문은 jcLoadAl
     sel.appendChild(o);
   });
   if (keep && _DOMS[keep]) sel.value = keep;
-  const cp = $("dcopy");
-  if (cp) {   // 새 도메인이 복사해 시작할 원본 — 빈 값으로 시작하지 않게
+  [["dcopy", "기본값으로 시작"], ["jnCopy", "코드 기본값으로 시작"]].forEach(([id, zero]) => {
+    const cp = $(id);   // 복사 원본 셀렉트 — 빈 값으로 시작하지 않게
+    if (!cp) return;
     const k2 = cp.value;
-    cp.innerHTML = `<option value="">기본값으로 시작</option>` +
-      Object.keys(_DOMS).map(n => `<option value="${esc(n)}">${esc(n)} 설정 복사</option>`).join("");
+    cp.innerHTML = `<option value="">${zero}</option>` +
+      Object.keys(_DOMS).map(n => `<option value="${esc(n)}">${esc(n)} 복사</option>`).join("");
     if (k2) cp.value = k2;
-  }
+  });
   jcFill();
 }
+
+$("jnCreate").onclick = async () => {   // 새 묶음 = 도메인 + 엔티티 + 병합을 한 번에
+  const name = $("jnName").value.trim();
+  if (!name) { $("jnMsg").textContent = "묶음 이름을 입력하세요"; return; }
+  const r = await fetch("/admin/judge-config", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name, scope: $("jnScope").value, tools: $("jnTools").value.trim(),
+                          priority: parseInt($("jnPrio").value) || 100,
+                          copy_from: $("jnCopy").value})});
+  const jj = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    $("jnMsg").textContent = typeof jj.detail === "string" ? jj.detail
+      : (jj.detail && jj.detail[0] && jj.detail[0].msg) || `생성 실패 ${r.status}`;
+    return;
+  }
+  $("jnMsg").textContent = `✓ ${jj.note}`;
+  $("jnName").value = "";
+  await jcLoad();
+  $("jcDomain").value = name; jcFill(); jcLoadAll(); jcListLoad();
+  loadDomainOptions(true);        // 소스 폼의 도메인 셀렉트도 동기화
+  $("jcHint").focus();            // 다음에 할 일 = 지침 쓰기
+};
 function jcFill() {   // 도메인 셀렉트 주변 표시만 (본문은 jcLoadAll)
   const n = Object.keys(_DOMS).length;
   $("jcMeta").textContent = n
-    ? `도메인 ${n}개 · 이 화면 전체가 '${$("jcDomain").value}'의 판정 설정입니다`
-    : "등록된 도메인이 없습니다 — 아래 [도메인 등록]에서 먼저 만드세요";
+    ? `아래 편집기는 '${$("jcDomain").value}' 묶음 — 도메인 지침 · 엔티티 · 병합이 한 벌입니다`
+    : "묶음이 없습니다 — [＋ 새 묶음 만들기]로 먼저 만드세요";
 }
-$("jcDomain").onchange = () => { jcFill(); jcLoadAll(); };   // 도메인 = 판정 설정 한 묶음
+$("jcDomain").onchange = () => { jcFill(); jcLoadAll(); jcListLoad(); };   // 묶음 전환
 
 // 판정 설정 한 묶음 로드 — 지침·엔티티 스키마·뽑는 방식·병합을 한 번에 읽는다
 async function jcLoadAll() {
@@ -2498,7 +2579,7 @@ async function veSave() {   // 판정 설정 한 묶음 저장 — 부분 저장
   $("veMsg").textContent = r.ok ? `✓ ${j.note || "저장됨"}`
     : (typeof j.detail === "string" ? j.detail
        : (j.detail && j.detail[0] && j.detail[0].msg) || `저장 실패 ${r.status}`);
-  if (r.ok) { VE.dirty = false; jcLoad(); veRail(); }
+  if (r.ok) { VE.dirty = false; jcLoad(); jcListLoad(); veRail(); }
 }
 
 // 상태 레일 — 지금 스키마가 어떤 모양이고 저장됐는지 한 줄
@@ -3333,7 +3414,7 @@ const TABS = {
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"],
             // 도메인 먼저 — 스키마·병합은 그 도메인 것을 읽는다 (판정 설정 = 도메인 한 벌)
-            load: async () => { await jcLoad(); jcLoadAll(); loadDomains(); }},
+            load: async () => { await jcLoad(); jcLoadAll(); jcListLoad(); loadDomains(); }},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources();
