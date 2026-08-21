@@ -976,6 +976,7 @@ $("dform").onsubmit = async (e) => {
   }
   const note = (await r.json().catch(() => ({}))).note || "";
   await loadDomains(name);   // 폼은 유지 — 이어서 수정 가능
+  await jcLoad();            // 새 도메인이 셀렉트에 뜬 뒤에 골라야 한다 (없는 값은 무시된다)
   $("jcDomain").value = name; jcFill(); veLoad(); vcLoad();   // 새 도메인 설정을 바로 편집
   loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
   dmsg(`✓ "${name}" 저장됨 — ${note || "다음 run부터 반영"}`, true);
