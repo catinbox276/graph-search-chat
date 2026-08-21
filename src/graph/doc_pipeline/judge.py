@@ -86,6 +86,21 @@ def _out_fields(schema: dict, brief: bool = False, src: str = "문서") -> str:
     return ",\n".join(lines)
 
 
+def _attr_rule(schema: dict) -> str:
+    """속성 값 표기 규칙 — 같은 값이 표기만 달라 노드가 갈라지는 걸 원천에서 줄인다.
+    실측(2026-08-21): 'TensorFlow/Tensorflow'·'전처리/데이터 전처리' 같은 변이와,
+    한 칸에 'pandas, matplotlib'처럼 여러 값을 넣은 오류가 함께 나왔다.
+    속성이 없는 스키마에는 붙지 않는다 (프롬프트 길이 보호)."""
+    if not schema.get("attrs"):
+        return ""
+    return """
+
+속성 값 표기 규칙:
+- 값은 **하나만** — 여러 개가 해당해도 가장 대표적인 하나만 쓴다 (쉼표로 나열 금지).
+- 공식 표기 그대로, 짧은 표준형으로 (예: TensorFlow·pandas·전처리). 문서의 대소문자·
+  띄어쓰기 변형이나 수식어를 붙인 형태("데이터 전처리 작업")로 쓰지 않는다."""
+
+
 def _crit_block(criteria: str) -> str:
     criteria = (criteria or "").strip()
     return f"\n엔티티 판정·추출 지침:\n{criteria}" if criteria else ""
@@ -110,7 +125,7 @@ def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
 - {labels}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
-- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
+- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글{_attr_rule(sc)}"""
 
 
 def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
@@ -127,7 +142,7 @@ def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
 
 출력 형식: 문서마다 1개씩, 입력 순서대로 JSON 배열.
 [{{"id": "문서id", "fits": true|false, "reason": "판정 근거 한 문장",
-{_out_fields(sc, brief=True)}}}, ...]
+{_out_fields(sc, brief=True)}}}, ...]{_attr_rule(sc)}
 
 fits=false로 판정할 것: 도메인과 무관 / {labels}도 없음 / 결말·결론 없음 / 내용이 빈약함.
 각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
@@ -174,7 +189,7 @@ def build_session_extract_prompt(schema: dict | None = None, criteria: str = "")
 fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
 조직 지식으로 축적할 가치가 없는 대화.
 grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
-모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함)."""
+모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함).{_attr_rule(sc)}"""
 
 
 def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -> str:
@@ -201,7 +216,7 @@ def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -
 - success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
 - fail: 접근 자체가 막힌 경우만 — 데이터/글이 존재하지 않아 목표 달성이 불가능했고 답변이 이를 인정함
   (기준이 '실패 인정'이면 인정했을 때 fail)
-- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우"""
+- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우{_attr_rule(sc)}"""
 
 
 def build_session_prompts(schema: dict | None = None, criteria: str = "") -> tuple:

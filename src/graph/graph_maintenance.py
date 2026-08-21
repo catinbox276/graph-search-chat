@@ -13,6 +13,7 @@
 usage: python -m graph.graph_maintenance [--age-days 14]
 """
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -193,6 +194,112 @@ def pass_attr_embed(cur, limit=500):
     return done
 
 
+def _attr_norm(s: str) -> str:
+    """표기 비교용 정규화 — 대소문자·공백·구분기호를 지운다 ('데이터 전처리'→'데이터전처리')."""
+    return re.sub(r"[\s_·\-/]+", "", (s or "")).lower()
+
+
+def _attr_mergeable(a: str, b: str) -> str:
+    """표기 변이 판정 — "same"(정규화 동일) / "sub"(한쪽이 다른 쪽을 품음) / ""(아님).
+
+    실측(2026-08-21, 속성 188개)에서 두 종류가 섞여 나왔다:
+    - 대소문자·공백만 다른 확실한 변이 — TensorFlow/Tensorflow, pandas/Pandas,
+      딥 러닝/딥러닝 → "same". 판정이 자명해 LLM 확인 없이 합친다.
+    - 포함 관계 — 전처리/데이터 전처리(같은 값), sqlite/SQL(다른 값) → "sub".
+      자명하지 않아 LLM 확인을 거친다.
+
+    제외 규칙:
+    - 숫자 포함: '2024-03'/'2024-04', 'Python 2'/'Python 3' — 버전·시점이 의미를 가른다
+    - 쉼표 포함: 'pandas, matplotlib' — 한 칸에 여러 값을 넣은 추출 오류라 통합 대상이
+      아니다 (프롬프트의 값 규칙으로 예방한다)"""
+    if any(ch.isdigit() for ch in a + b) or "," in a or "," in b:
+        return ""
+    na, nb = _attr_norm(a), _attr_norm(b)
+    if not na or not nb:
+        return ""
+    if na == nb:
+        return "same"
+    short, long_ = (na, nb) if len(na) <= len(nb) else (nb, na)
+    return "sub" if len(short) >= 2 and short in long_ else ""
+
+
+def merge_attr_into(cur, src, dst):
+    """속성 노드 흡수 — 부모가 여럿이라 pass1의 merge_into(부모 1개)를 못 쓴다.
+    모든 부모 엣지를 dst로 재연결하고 증거(run_id 포함)를 승계한 뒤 src를 삭제한다."""
+    cur.execute("""INSERT INTO node_evidence (node_id, kind, ref, run_id)
+                   SELECT :dst, e1.kind, e1.ref, e1.run_id FROM node_evidence e1
+                   WHERE e1.node_id = :src AND NOT EXISTS
+                     (SELECT 1 FROM node_evidence e2 WHERE e2.node_id = :dst
+                      AND e2.kind = e1.kind AND e2.ref = e1.ref AND e2.run_id = e1.run_id)""",
+                {"src": src, "dst": dst})
+    cur.execute("SELECT src, raw_count, weight FROM edges WHERE dst = :1", [src])
+    for parent, c, w in cur.fetchall():
+        cur.execute("""MERGE INTO edges e USING dual ON (e.src = :p AND e.dst = :d)
+                       WHEN MATCHED THEN UPDATE SET raw_count = raw_count + :c, weight = weight + :w
+                       WHEN NOT MATCHED THEN INSERT (src, dst, raw_count, weight)
+                       VALUES (:p, :d, :c, :w)""",
+                    {"p": parent, "d": dst, "c": c, "w": w})
+    cur.execute("DELETE FROM nodes WHERE id = :1", [src])   # 엣지·증거는 FK 캐스케이드
+
+
+def pass_attr_consolidate(cur):
+    """속성 값 표기 통합 — '전처리'/'데이터 전처리'처럼 같은 값이 표기만 달라 노드가
+    갈라진 것을 합친다. 구조화 시점 병합은 정확일치만 하므로(2024-03/04 오병합 방지)
+    표기 변이는 여기서 사후에 정리한다.
+
+    가드: ① 같은 entity_type ② 문자 가드(_attr_mergeable) ③ 정규화 동일("same")은
+    바로 병합, 포함 관계("sub")는 코사인 >= SIM_THRESHOLD를 예비 필터로 쓰고 **LLM이 판정**
+    (pass1_sibling_merge와 같은 방식). SIM_HIGH(0.92)로 잡으면 '전처리'/'데이터 전처리'
+    (실측 0.841) 같은 진짜 변이가 걸러져 나가고, 반대로 벡터만 높은 'SQL'/'MySQL'(0.864)은
+    통과해버린다 — 의미 판정은 벡터가 아니라 LLM 몫이다.
+    남기는 쪽 = 증거 많은 노드 (동수면 짧은 표기 = 표준형). 병합은 전부 로그로 남긴다."""
+    cur.execute("""SELECT entity_type, id, name, embedding FROM nodes
+                   WHERE layer = 9 AND embedding IS NOT NULL AND name IS NOT NULL
+                   ORDER BY entity_type""")
+    by_type = {}
+    for etype, nid, name, emb in cur.fetchall():
+        vec = json.loads(emb.read() if hasattr(emb, "read") else emb)
+        by_type.setdefault(etype or "", []).append(
+            [nid, name, vec, evidence_count(cur, nid)])
+    merged = 0
+    for etype, rows in by_type.items():
+        dead = set()
+        for i, (nid, name, vec, cnt) in enumerate(rows):
+            if nid in dead:
+                continue
+            for nid2, name2, vec2, cnt2 in rows[i + 1:]:
+                if nid2 in dead or len(vec) != len(vec2):
+                    continue
+                how = _attr_mergeable(name, name2)
+                if not how:
+                    continue
+                if how == "sub":   # 포함 관계는 자명하지 않다 — 벡터는 예비 필터, 판정은 LLM
+                    if cosine(vec, vec2) < SIM_THRESHOLD:
+                        continue
+                    if not llm_same(f"{etype or '값'}(같은 대상의 다른 표기인지)", name, name2):
+                        continue
+                # 남길 쪽: 증거 많은 노드, 동수면 짧은 표기(표준형)
+                keep, drop = ((nid, name, cnt), (nid2, name2, cnt2)) \
+                    if (cnt, -len(name)) >= (cnt2, -len(name2)) else \
+                    ((nid2, name2, cnt2), (nid, name, cnt))
+                merge_attr_into(cur, drop[0], keep[0])
+                dead.add(drop[0])
+                merged += 1
+                print(f"  [속성 통합] '{drop[1]}'({drop[2]}건) -> '{keep[1]}'({keep[2]}건)"
+                      f" · {etype} · {how}", flush=True)
+                if drop[0] == nid:
+                    break     # 지금 노드가 흡수됐으면 이 노드의 남은 비교는 무의미
+    # 부모 없는 속성 노드 = 붙어 있던 목표가 사라진 죽은 값. 검색 인덱스에는 남아
+    # 진입 후보로 잡히지만 올라갈 목표가 없어 아무 경로도 못 준다 — 지운다.
+    cur.execute("""DELETE FROM nodes WHERE layer = 9
+                   AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.dst = nodes.id)""")
+    dead_attr = cur.rowcount
+    if dead_attr:
+        print(f"  [속성 통합] 부모 없는 속성 노드 {dead_attr}개 제거", flush=True)
+    print(f"  [속성 통합] {merged}건", flush=True)
+    return merged
+
+
 def pass4_integrity(cur):
     """무결성 점검 리포트 — FK가 못 막는 참조를 검사해 위반을 침묵이 아닌 리포트로.
     (노드 참조는 FK 캐스케이드가 강제하므로 여기선 '바깥' 참조만: 세션·문서·도메인)
@@ -238,10 +345,13 @@ def main():
     d = pass3_decay(cur)
     e = pass_attr_embed(cur)
     con.commit()
+    ac = pass_attr_consolidate(cur)
+    con.commit()
     bad = pass4_integrity(cur)
     cur.execute("SELECT COUNT(*) FROM nodes")
     print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d), 감쇠 {d}건, "
-          f"속성 임베딩 {e}건, 무결성 위반 {bad}건 — 노드 {before} -> {cur.fetchone()[0]}")
+          f"속성 임베딩 {e}건, 속성 통합 {ac}건, 무결성 위반 {bad}건 "
+          f"— 노드 {before} -> {cur.fetchone()[0]}")
     con.close()
     # 활동 로그 보관 회전 — "전부 쌓기"의 무한 증가 방지 (config.EVENTS_RETAIN_DAYS)
     from core import events
