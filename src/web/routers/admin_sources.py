@@ -1899,7 +1899,10 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
     for src_id, title, kind, body in docs:
         j = doc_pipeline.judge_doc(domain, hint, kind, title, body,
                                    model=model, body_chars=body_chars, doc_prompt=doc_prompt)
-        extracted = {label: str(j.get(k) or "") for k, label in keys if j.get(k)}
+        # 속성은 배열로 올 수 있다 (키워드 여러 개) — 표시용으로 한 줄로 합친다
+        extracted = {label: (" · ".join(str(x) for x in j[k] if x) if isinstance(j.get(k), list)
+                             else str(j.get(k) or ""))
+                     for k, label in keys if j.get(k)}
         out.append({"src_id": src_id, "title": title.strip()[:120],
                     "fits": bool(j.get("fits")), "reason": j.get("reason") or
                     j.get("_error") or "파싱 실패",

@@ -15,6 +15,10 @@ from graph.graph_pipeline import CHAT_MODEL, client_for
 # attr(속성)→그래프 9층, 도구→8층. v1(role entry/solution 각 1행)은 체인 2칸으로 정규화.
 _DEF_ENTRY = {"key": "goal", "label": "목표", "desc": "문서가 다루는 문제/목표"}
 _DEF_SOLUTION = {"key": "approach", "label": "접근법", "desc": "핵심 해법/접근법"}
+# 속성 값 상한 — 키워드 추출이라 여러 개가 정상이지만, 한 문서가 그래프를 뒤덮지 않게 자른다.
+# 실측(2026-08-21): 다중값 문서 25건 중 최대 7개 → 5개면 대부분 살리고 꼬리만 자른다.
+# 프롬프트에 쓰고 merge.apply_extras가 한 번 더 자른다 (LLM이 지시를 어긴 실적이 있다).
+ATTR_MAX = 5
 
 
 def norm_schema(etypes, rtypes=None) -> dict:
@@ -81,24 +85,28 @@ def _out_fields(schema: dict, brief: bool = False, src: str = "문서") -> str:
     suffix = "" if brief else " (한 문장, fits=true일 때만)"
     lines = [f' "{c["key"]}": "{c["desc"] or c["label"]}{suffix}"' for c in chain]
     for a in schema["attrs"]:
-        lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
-                     f' ({src}에서 확인될 때만 — 없으면 이 키를 생략)"')
+        lines.append(f' "{a["key"]}": ["{a["desc"] or a["label"]}'
+                     f' — 해당하는 값 전부, 최대 {ATTR_MAX}개'
+                     f' ({src}에서 확인될 때만 — 없으면 이 키를 생략)"]')
     return ",\n".join(lines)
 
 
 def _attr_rule(schema: dict) -> str:
-    """속성 값 표기 규칙 — 같은 값이 표기만 달라 노드가 갈라지는 걸 원천에서 줄인다.
-    실측(2026-08-21): 'TensorFlow/Tensorflow'·'전처리/데이터 전처리' 같은 변이와,
-    한 칸에 'pandas, matplotlib'처럼 여러 값을 넣은 오류가 함께 나왔다.
+    """속성 값 규칙 — 속성은 키워드 추출이라 값이 여러 개인 게 정상이다.
+    실측(2026-08-21): 단일 값만 받으니 LLM이 한 칸에 'NumPy, Scipy, pandas, …'를 밀어넣고,
+    그렇게 묶인 이름 43개 중 35개는 단독 노드가 없어 검색으로 닿지 못했다 → 배열로 받는다.
+    표기(대소문자·수식어) 규칙은 노드가 표기만 달라 갈라지는 걸 줄인다.
     속성이 없는 스키마에는 붙지 않는다 (프롬프트 길이 보호)."""
     if not schema.get("attrs"):
         return ""
-    return """
+    return f"""
 
-속성 값 표기 규칙:
-- 값은 **하나만** — 여러 개가 해당해도 가장 대표적인 하나만 쓴다 (쉼표로 나열 금지).
-- 공식 표기 그대로, 짧은 표준형으로 (예: TensorFlow·pandas·전처리). 문서의 대소문자·
-  띄어쓰기 변형이나 수식어를 붙인 형태("데이터 전처리 작업")로 쓰지 않는다."""
+속성 값 규칙:
+- 값은 **배열**로 쓴다. 해당하는 것이 여러 개면 전부 (예: ["NumPy", "pandas"]),
+  하나면 한 개짜리 배열. 한 문자열에 쉼표로 나열하지 않는다.
+- 값 하나는 **키워드 하나** — 최대 {ATTR_MAX}개까지만.
+- 공식 표기 그대로, 짧은 표준형으로 (예: TensorFlow·pandas·전처리). 수식어를 붙인
+  형태("데이터 전처리 작업")로 쓰지 않는다."""
 
 
 def _crit_block(criteria: str) -> str:

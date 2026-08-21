@@ -46,8 +46,15 @@ def upsert_entity(cur, etype: str, value: str, parent_id: str,
     임베딩은 **검색 진입용으로만** 채운다 (2026-08-21) — 사용자가 "PostgreSQL 노하우"
     처럼 속성 값으로 묻는 경우가 실제로 많고(측정: 속성이 붙은 문서 311/333건),
     벡터가 없으면 path_suggest의 의미 검색이 이 노드에 닿지 못한다. 병합 판정은
-    여전히 이름 정확일치만 본다 — 벡터는 조회에만 쓴다."""
-    cur.execute("""SELECT id FROM nodes WHERE layer = :1 AND entity_type = :2 AND name = :3""",
+    여전히 이름 기준이다 — 벡터는 조회에만 쓴다.
+
+    조회는 **대소문자 무시**, 저장은 **원문 표기 보존** (2026-08-21) — 'Pandas'가 와도
+    먼저 만들어진 'pandas' 노드로 합류한다. 화면·답변에는 원문 표기가 그대로 나가야 해서
+    소문자로 눌러 저장하지 않는다 ('postgresql'은 틀린 표기로 보인다).
+    # ponytail: 대소문자가 의미를 가르는 값(예: 'IT'/'it')은 잘못 합쳐진다 — 그런 스키마가
+    # 생기면 속성별 '대소문자 구분' 옵션으로 올린다. 지금 데이터에는 없다."""
+    cur.execute("""SELECT id FROM nodes WHERE layer = :1 AND entity_type = :2
+                     AND UPPER(name) = UPPER(:3)""",
                 [ENTITY_LAYER, etype, value])
     r = cur.fetchone()
     node_id = r[0] if r else None
@@ -77,21 +84,46 @@ def upsert_entity(cur, etype: str, value: str, parent_id: str,
     return node_id
 
 
+def _attr_values(raw) -> list:
+    """속성 값 하나 → 키워드 목록. 속성은 키워드 추출이라 값이 여러 개인 게 정상이다.
+
+    배열이 정상 입력(프롬프트가 배열을 요구한다). 문자열이 오면 쉼표로 쪼갠다 —
+    LLM이 지시를 어겨 'NumPy, Scipy, pandas'를 한 칸에 넣은 실적이 있고(2026-08-21,
+    노드 25개), 그렇게 묶이면 개별 이름으로 검색이 안 된다.
+    # ponytail: 쉼표가 정당한 값(주소 등)을 쓰는 스키마에서는 잘못 쪼개진다 — 그런 속성이
+    # 생기면 '쉼표 그대로' 옵션으로 올린다. 지금 스키마(라이브러리·작업유형)에는 없다.
+    상한은 호출부에서 ATTR_MAX로 자른다."""
+    items = raw if isinstance(raw, list) else [raw]
+    out = []
+    for it in items:
+        if not isinstance(it, (str, int, float)):
+            continue
+        for part in str(it).split(","):
+            v = part.strip()[:400]
+            if v and v not in out:
+                out.append(v)
+    return out
+
+
 def apply_extras(cur, sc, ej, rj, anchor, val2node, ev_kind, ref,
                  run_id: str = "-", count: bool = True) -> tuple:
     """스키마의 속성(9층)을 판정 결과에서 병합 — (attrs_out, []) 반환.
-    문서·세션 파이프라인 공용. ej: {속성키: 값}(호출자가 legacy 폴백 처리),
+    문서·세션 파이프라인 공용. ej: {속성키: 값 또는 값 배열}(호출자가 legacy 폴백 처리),
     anchor: 속성이 붙는 진입점 노드, val2node: (타입키, 값)→노드id.
+    값이 여러 개면 각각 별개 노드가 되고 전부 진입점 아래 붙는다 (키워드 하나 = 노드 하나).
     rj는 관계 제거(2026-08-21) 후 무시 — 옛 run 스냅샷 재생 시 인자가 남아 있어 받는다.
     두 번째 반환값은 호출부 호환용 빈 리스트."""
+    from graph.doc_pipeline.judge import ATTR_MAX   # 지연 import — 순환 방지
     attrs_out = {}
     for ak, av in list((ej or {}).items())[:30]:
-        if isinstance(av, (str, int, float)) and str(av).strip():
-            ak_, av_ = str(ak).strip()[:100], str(av).strip()[:400]
-            attrs_out[ak_] = av_
-            nid = upsert_entity(cur, ak_, av_, anchor, ev_kind, ref,
-                                run_id=run_id, count=count)
-            val2node[(ak_, av_)] = nid
+        vals = _attr_values(av)[:ATTR_MAX]
+        if not vals:
+            continue
+        ak_ = str(ak).strip()[:100]
+        attrs_out[ak_] = " · ".join(vals)   # 결과 표시용 (doc_results.entities)
+        for v in vals:
+            val2node[(ak_, v)] = upsert_entity(cur, ak_, v, anchor, ev_kind, ref,
+                                               run_id=run_id, count=count)
     return attrs_out, []
 
 
