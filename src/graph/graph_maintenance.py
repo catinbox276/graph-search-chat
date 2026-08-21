@@ -300,6 +300,34 @@ def pass_attr_consolidate(cur):
     return merged
 
 
+def pass_dangling_refs(cur):
+    """끊긴 참조 정리 — 세션이 지워졌는데 남은 증거·노출기록을 지운다.
+
+    node_evidence.ref는 문서/세션 공용 문자열이라 FK를 걸 수 없다 (kind에 따라 가리키는
+    테이블이 다름). 그래서 세션 행이 사라지면 증거가 붙은 채 남는다. 성공/실패 카운트는
+    sessions와 JOIN해 세므로 이미 0으로 취급되지만, evidence_count(잎 흡수 판정)는
+    이 행들을 세고 무결성 리포트는 매일 위반으로 보고한다 — 지우는 게 맞다.
+    (pass4_integrity는 '삭제하지 않고 보고'가 원칙이지만, 이 두 종류는 원인이 분명하고
+    되살릴 값이 없어 여기서 처리한다. 나머지 위반은 그대로 리포트로 남긴다.)"""
+    cur.execute("""DELETE FROM node_evidence ev WHERE ev.kind = 'session'
+                   AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = ev.ref)""")
+    ev = cur.rowcount
+    cur.execute("""DELETE FROM suggestions g WHERE g.session_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = g.session_id)""")
+    sg = cur.rowcount
+    # 증거가 하나도 안 남은 노드는 행까지 (엣지·노출기록은 FK CASCADE) — 유령 노드 방지
+    cur.execute("""DELETE FROM nodes n
+                   WHERE NOT EXISTS (SELECT 1 FROM node_evidence ev WHERE ev.node_id = n.id)""")
+    orphan = cur.rowcount
+    cur.execute("DELETE FROM edges WHERE raw_count <= 0 AND weight <= 0")
+    if ev or sg or orphan:
+        print(f"  [끊긴 참조] 세션 증거 {ev}건 · 노출기록 {sg}건 · 고아 노드 {orphan}개 정리",
+              flush=True)
+    else:
+        print("  [끊긴 참조] 없음", flush=True)
+    return ev + sg + orphan
+
+
 def pass4_integrity(cur):
     """무결성 점검 리포트 — FK가 못 막는 참조를 검사해 위반을 침묵이 아닌 리포트로.
     (노드 참조는 FK 캐스케이드가 강제하므로 여기선 '바깥' 참조만: 세션·문서·도메인)
@@ -346,11 +374,12 @@ def main():
     e = pass_attr_embed(cur)
     con.commit()
     ac = pass_attr_consolidate(cur)
+    dr = pass_dangling_refs(cur)
     con.commit()
     bad = pass4_integrity(cur)
     cur.execute("SELECT COUNT(*) FROM nodes")
     print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d), 감쇠 {d}건, "
-          f"속성 임베딩 {e}건, 속성 통합 {ac}건, 무결성 위반 {bad}건 "
+          f"속성 임베딩 {e}건, 속성 통합 {ac}건, 끊긴 참조 {dr}건, 무결성 위반 {bad}건 "
           f"— 노드 {before} -> {cur.fetchone()[0]}")
     con.close()
     # 활동 로그 보관 회전 — "전부 쌓기"의 무한 증가 방지 (config.EVENTS_RETAIN_DAYS)
