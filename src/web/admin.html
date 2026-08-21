@@ -2422,9 +2422,9 @@ $("jcSave").onclick = async () => {
     body: JSON.stringify({name, tools: d.tools || "", priority: d.priority || 100,
                           scope: d.scope || "both", extract_hint: $("jcHint").value})});
   const jj = await r.json().catch(() => ({}));
+  if (r.ok) await jcLoad();   // 목록 갱신이 jcFill로 메시지를 지우므로 갱신 뒤에 쓴다
   $("jcMsg").textContent = r.ok ? "✓ 지침 저장됨 — 새로 만드는 run이 이 기준으로 판정합니다"
                                 : (jj.detail || `저장 실패 ${r.status}`);
-  if (r.ok) jcLoad();
 };
 
 async function vcLoad() {
@@ -3069,15 +3069,14 @@ async function plRefresh() {
     fetch("/admin/cluster-versions").then(r => r.json()).catch(() => ({versions: []})),
     fetch(`/admin/sources/${encodeURIComponent(src)}/runs`).then(r => r.json()).catch(() => ({runs: []})),
     fetch("/admin/doc-status").then(r => r.json()).catch(() => ({sources: []})),
-    dom ? fetch(`/admin/domains/${encodeURIComponent(dom)}/versions?page=1`).then(r => r.json()).catch(() => ({versions: []}))
-        : Promise.resolve({versions: []})]);
+    fetch("/admin/domains").then(r => r.json()).catch(() => ({domains: []}))]);
   const esc0 = normEtypes(parseEtypes(ents && ents.etypes));
   PL.d = {...PL.d, sinfo, dom, maps: maps.versions || [], datas: datas.versions || [],
           ent: {chain: esc0.chain.map(c => c.label || c.key), attrs: esc0.attrs.length,
                 criteria: !!(ents && ents.criteria)},
           clus: clus.versions || [], runs: runs.runs || [],
           stat: (status.sources || []).find(x => x.source === src) || {},
-          domv: domv.versions || []};
+          hint: ((domv.domains || []).find(x => x.name === dom) || {}).extract_hint || ""};
   plRender();
 }
 
@@ -3231,18 +3230,12 @@ function plRender() {
       onPick: v => { PL.sel.data = v; plRender(); }}});
   plArrow(wrap);
   // ④ 도메인
-  const dmDef = _plDefault(D.domv);
-  const dmSel = viewing ? R.domain_version : defOr(sel.domain_version, dmDef && dmDef.version);
-  plNode(wrap, {title: "도메인 (판정 기준)", value: D.dom ? `${D.dom} v${dmSel ?? "?"}` : "미지정",
-    sub: D.dom ? ((D.domv.find(v => v.version === dmSel) || {}).extract_hint || "").slice(0, 48)
+  plNode(wrap, {title: "도메인 (판정 기준)",
+    value: D.dom || "미지정",
+    sub: D.dom ? (D.hint || "").slice(0, 60) || "지침 없음 — 도메인 이름만으로 판정합니다"
                : "소스 등록에서 도메인을 지정해야 구조화됩니다",
-    custom: !viewing && sel.domain_version != null && sel.domain_version !== (dmDef && dmDef.version),
-    star: !viewing && dmSel != null && dmSel === (dmDef && dmDef.version),
-    edit: {tab: "domains", label: "도메인 시드"},
-    pop: (viewing || !D.dom) ? null : {title: "도메인 버전 선택", current: dmSel,
-      items: D.domv.map(v => ({label: `v${v.version}${v.is_default ? " ★" : ""}`,
-        sub: (v.extract_hint || "").slice(0, 60), value: v.version})),
-      onPick: v => { PL.sel.domain_version = v; plRender(); }}});
+    fixed: true,
+    edit: {tab: "entity", label: "판정 설정"}});
   plArrow(wrap);
   // ⑤ ①추출(엔티티) — 스키마는 한 벌이라 고를 게 없다. 요약 + 편집 딥링크만.
   const eSum = D.ent || {};
