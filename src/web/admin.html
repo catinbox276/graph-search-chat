@@ -88,7 +88,6 @@
   .dfltbox pre { margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap;
                  word-break: break-word; font-size: .72rem; line-height: 1.5;
                  color: var(--mut); }
-  #dform #dname { width: 130px; } #dform #dtools { flex: 1; } #dform #dprio { width: 70px; }
   /* ── 스키마 편집: 목록 + 상세 2단 (콘텐츠 모델링 도구 공통 패턴) ──
      계층은 들여쓰기로 보이고, 프로세는 오른쪽 패널에서 넓게 쓴다 ── */
   .ve2 { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(320px, 1fr);
@@ -447,11 +446,19 @@
   <div id="jcList"><span class="hint">불러오는 중…</span></div>
   <div class="schedrow" style="margin:8px 0 0">
     <button type="button" id="jcNewBtn">＋ 새 묶음 만들기</button>
-    <span class="hint" style="margin:0">이 페이지에서 도메인·엔티티·병합을 전부 작성해 생성합니다</span>
+    <span class="hint" style="margin:0">도메인·엔티티·병합을 <b>한 화면에서 함께</b> 작성해 만듭니다. 기존 묶음은 위 표에서 행을 클릭해 편집합니다</span>
   </div>
-  <div id="jcNewHead" class="fgroup" style="display:none;border-color:var(--path)">
-    <div class="fgroup-t">🆕 새 묶음 작성 중 <small>— 아래를 다 채우고 [＋ 묶음 생성]을 누르면 만들어집니다 (누르기 전에는 저장되지 않습니다)</small></div>
-    <div class="schedrow" style="margin:0">
+
+  <div id="jcPanel" style="display:none;margin-top:10px;border-top:2px solid var(--path);padding-top:10px">
+  <div class="schedrow" style="margin:0 0 8px">
+    <b id="jcPanelTitle" style="font-size:.9rem">새 묶음 만들기</b>
+    <span class="hint" id="jcMeta" style="margin:0"></span>
+    <span class="spacer" style="flex:1"></span>
+    <button type="button" class="ghost" id="jcClose">✕ 닫기</button>
+  </div>
+  <div class="fgroup">
+    <div class="fgroup-t">① 도메인 <small>— 이 묶음의 이름·용도와, 어떤 문서를 이 도메인의 지식으로 인정할지</small></div>
+    <div class="schedrow" style="margin:0 0 6px">
       <label class="fld"><span>묶음(도메인) 이름</span>
         <input id="jnName" placeholder="예: 생활 QA" style="min-width:150px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
       <label class="fld"><span>용도</span>
@@ -464,23 +471,14 @@
         <input id="jnTools" placeholder="문서 전용이면 비워둠" style="min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
       <label class="fld"><span>우선순위</span>
         <input id="jnPrio" type="number" value="100" min="1" style="width:80px" title="낮을수록 먼저 대조"></label>
-      <label class="fld"><span>아래 내용을 어디서 복사해 시작할지</span>
-        <select id="jnCopy" title="고르면 아래 지침·엔티티·병합이 그 묶음 값으로 채워집니다"></select></label>
-      <button type="button" class="ghost" id="jnCancel">✕ 취소</button>
-      <span class="hint" id="jnMsg" style="margin:0"></span>
+      <label class="fld" id="jnCopyWrap"><span>시작값</span>
+        <select id="jnCopy" title="빈 기본값으로 시작하거나, 기존 묶음의 엔티티·병합을 베껴 시작합니다"></select></label>
     </div>
-  </div>
-  <div class="fgroup">
-    <div class="fgroup-t">1️⃣ 도메인 지침 <small>— 어떤 문서를 이 도메인의 지식으로 인정할지. 여기가 비면 LLM이 도메인 이름만 보고 판단합니다</small></div>
-    <div class="schedrow" style="margin:0 0 6px">
-      <label class="fld"><span>편집할 묶음</span>
-        <select id="jcDomain" title="이 묶음(도메인+엔티티+병합) 전체가 아래에서 편집됩니다"></select></label>
-      <span class="hint" id="jcMeta" style="margin:0"></span>
-    </div>
+    <textarea id="jcHint" class="psta" spellcheck="false" placeholder="예: 이 도메인은 조직이 참고하는 기술 문제해결 지식을 모은다 — 재현 가능한 조치가 있으면 인정한다.&#10;인정: 문제 증상과 해법(설정·명령·코드·절차)이 함께 있는 글&#10;제외: 결론 없이 끝나는 글, 의견·추천만 있는 글"></textarea>
     <textarea id="jcHint" class="psta" spellcheck="false" placeholder="예: 이 도메인은 조직이 참고하는 기술 문제해결 지식을 모은다. 출처가 사내 문서인지 외부 기술 Q&A인지는 따지지 않는다 — 재현 가능한 조치가 있으면 인정한다.&#10;인정: 문제 증상과 해법(설정·명령·코드·절차)이 함께 있는 글&#10;제외: 결론 없이 끝나는 글, 의견·추천만 있는 글"></textarea>
-    <span class="hint" style="margin:0">지침·엔티티·뽑는 방식·병합은 <b>한 묶음</b>입니다 — 아래 [💾 저장]이 전부를 함께 저장합니다</span>
+    <span class="hint" style="margin:0">①~④는 <b>한 묶음</b>입니다 — 아래 버튼 하나가 전부를 함께 만들거나 저장합니다</span>
   </div>
-  <div class="fgroup-t" style="margin:10px 0 0">2️⃣ 뽑아낼 엔티티 <small>— 노드를 클릭해 오른쪽에서 채웁니다. 끌어서 자리를 옮길 수 있습니다</small></div>
+  <div class="fgroup-t" style="margin:10px 0 0">② 엔티티 <small>— 이 도메인에서 뽑아낼 계층·속성. 노드를 클릭해 오른쪽에서 채우고, 끌어서 자리를 옮깁니다</small></div>
   <div class="schedrow" style="margin:6px 0 0">
     <button type="button" class="ghost" id="veChainAdd" title="계층 칸 추가 (최대 5개) — 추가한 칸은 그래프의 다음 층이 됩니다">＋ 계층 칸</button>
     <button type="button" class="ghost" id="veTypeAdd" title="속성 추가 — 진입점 노드 바로 아래에 붙는 부가 정보">＋ 속성</button>
@@ -492,7 +490,7 @@
     <div class="vedetail" id="veDetail"></div>
   </div>
   <div class="fgroup">
-    <div class="fgroup-t">3️⃣ 뽑는 방식 지침 <small>— 값을 어떻게 일반화할지 (선택, 빈값=코드 기본). 인정/제외 기준은 위 도메인 지침에</small></div>
+    <div class="fgroup-t">③ 뽑는 방식 지침 <small>— 값을 어떻게 일반화할지 (선택, 빈값=코드 기본). 인정/제외 기준은 위 도메인 지침에</small></div>
     <textarea id="veCrit" class="psta" spellcheck="false" placeholder="예: 결말·결론 없는 글은 제외. goal은 문제 증상 중심으로, approach는 실제 조치 중심으로 한 문장씩 일반화하라."></textarea>
   </div>
   <div class="schedrow" style="margin:8px 0 0">
@@ -502,8 +500,18 @@
     <span class="hint" id="veMsg" style="margin:0"></span>
   </div>
   <div id="veGate" class="vegate" style="margin:6px 0 0"></div>
+  <details class="danger" id="jcDanger" style="margin:8px 0 0">
+    <summary>⚠ 이 묶음에 대한 되돌리기 어려운 작업</summary>
+    <div class="row">
+      <button type="button" class="warn" id="dreset"
+              title="이 묶음에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 문서 초기화 (재구조화)</button>
+      <button type="button" class="warn" id="ddelete"
+              title="묶음 삭제 — 도메인·엔티티·병합 설정이 사라집니다. 연결 데이터가 있으면 delete 입력 확인">⚠ 이 묶음 삭제</button>
+      <span class="hint err" id="derr" style="margin:0"></span>
+    </div>
+  </details>
   <details style="margin:8px 0 0">
-    <summary class="hint" style="cursor:pointer;margin:0">4️⃣ 병합(dedup) 설정 — 같은 뜻의 문구를 한 노드로 합치는 기준 (기본값 권장)</summary>
+    <summary class="hint" style="cursor:pointer;margin:0">④ 병합(dedup) 설정 — 같은 뜻의 문구를 한 노드로 합치는 기준 (기본값 권장)</summary>
     <div style="font-size:.78rem;color:var(--mut);margin:6px 0">
       임계값을 낮추면 더 많이 합쳐지고(과병합 위험), 높이면 비슷한 노드가 갈라집니다.
       애매한 구간에서만 LLM에 "같은 의도의 후보 번호를 골라라"고 1회 묻습니다.
@@ -524,32 +532,6 @@
     <textarea id="vcSelPrompt" class="psta" spellcheck="false"></textarea>
   </details>
   <details style="margin:8px 0 0">
-    <summary class="hint" style="cursor:pointer;margin:0">⚙ 도메인 등록·삭제 (고급) — 1층 닫힌 목록, 사람 전용</summary>
-    <table id="dlist"><thead><tr><th>도메인</th><th>용도</th><th>도구 (쉼표구분)</th><th>우선순위</th><th>지침</th><th><span class="sronly">동작</span></th></tr></thead>
-      <tbody></tbody></table>
-    <form id="dform">
-      <input id="dname" placeholder="도메인 이름" required>
-      <select id="dscope" title="이 도메인을 어디에 쓸지 — 문서 전용은 대화 분류·폴백에 끼지 않음">
-        <option value="both">대화+문서</option>
-        <option value="chat">대화 전용</option>
-        <option value="doc">문서 전용</option>
-      </select>
-      <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
-      <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
-      <label class="fld"><span>설정 복사 원본</span>
-        <select id="dcopy" title="새 도메인의 추출 스키마·병합 설정을 어디서 복사해 시작할지 — 빈 값으로 시작하지 않습니다">
-          <option value="">기본값으로 시작</option></select></label>
-      <button id="dsave">추가/수정</button>
-      <button type="button" class="warn" id="dreset"
-              title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
-      <button type="button" class="warn" id="ddelete"
-              title="도메인 삭제 — 처리된 데이터가 없으면 즉시, 있으면 연결 데이터 전부 삭제 경고 후 delete 입력 확인">⚠ 도메인 삭제</button>
-    </form>
-    <p class="hint">같은 이름으로 저장하면 수정(upsert). 지침은 위 1️⃣에서 편집합니다.
-       <b>문서 전용</b>은 대화 분류·폴백에 끼지 않고 소스 구조화에만 쓰입니다. 변경은 다음 run부터 반영 — 소급 재분류 없음.</p>
-    <p class="hint err" id="derr"></p>
-  </details>
-  <details style="margin:8px 0 0">
     <summary class="hint" style="cursor:pointer;margin:0">🔒 조립 결과 미리보기 (읽기 전용) — 이 스키마·지침으로 만들어지는 실제 프롬프트</summary>
     <div class="schedrow" style="margin:4px 0 0">
       <button type="button" class="ghost" id="entPvBtn">🔄 현재 화면으로 미리보기</button>
@@ -558,6 +540,7 @@
     </div>
     <pre id="entScaffold" style="font-size:.74rem;color:var(--mut);white-space:pre-wrap;border:1px dashed var(--line);border-radius:6px;padding:8px;margin:4px 0">[🔄 현재 화면으로 미리보기]를 누르면 조립 결과가 보입니다</pre>
   </details>
+  </div><!-- /jcPanel -->
 </section>
 <section class="card" id="sec-mapping">
   <h2>매핑 버전 <small>원천 테이블·id·시간·역할 매핑을 여기서 정의 — 저장하면 새 버전. [원천 테이블] 탭은 등록된 버전을 골라 씁니다</small></h2>
@@ -934,77 +917,9 @@ async function userAct(uid, action, label) {
 }
 
 // ── 도메인 시드 관리 ──────────────────────────────────────────
-async function loadDomains(selName) {
-  dmsg("");
-  const r = await fetch("/admin/domains");
-  if (!r.ok) { dmsg(`조회 실패 (${r.status}) — 관리자 권한이 필요합니다`); return; }
-  const tb = $("dlist").querySelector("tbody");
-  tb.innerHTML = "";
-  const SCOPE_LABEL = {both: "대화+문서", chat: "대화 전용", doc: "문서 전용"};
-  (await r.json()).domains.forEach(d => {
-    const tr = document.createElement("tr");
-    [d.name, SCOPE_LABEL[d.scope] || d.scope, d.tools, d.priority,
-     d.extract_hint].forEach(v => {  // textContent — XSS 차단
-      const td = document.createElement("td");
-      td.textContent = v ?? "";
-      tr.appendChild(td);
-    });
-    const cv = document.createElement("td");   // 👁 상세 — 정의 전문(지침 잘림 해소) 뷰어
-    const vb = document.createElement("button"); vb.type = "button"; vb.className = "ghost";
-    vb.textContent = "👁";
-    vb.onclick = ev => { ev.stopPropagation();   // 행 클릭(폼 로드·버전 펼침)과 분리
-      openVerModal(`🏷 도메인 · ${d.name} (현재 기본)`, [
-        {label: "정의",
-         table: {head: ["항목", "값"], badge0: true, rows: [
-           ["용도", SCOPE_LABEL[d.scope] || d.scope],
-           ["우선순위", `${d.priority} (낮을수록 먼저 대조)`],
-           ["도구", d.tools || "(없음)"]]}},
-        {label: "추출 지침 (시스템 프롬프트에 주입)", text: d.extract_hint,
-         empty: "(없음 — 도메인명 기준으로 판정)"}]); };
-    cv.appendChild(vb); tr.appendChild(cv);
-    tr.children[2].className = "tools";
-    if (d.name === selName) tr.classList.add("sel");
-    tr.onclick = () => {
-      tb.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel"));
-      tr.classList.add("sel");
-      dmsg("");
-      $("dname").value = d.name; $("dscope").value = d.scope || "both";
-      $("dtools").value = d.tools; $("dprio").value = d.priority;
-      if ([...$("jcDomain").options].some(o => o.value === d.name)) {
-        $("jcDomain").value = d.name; jcFill(); jcLoadAll();   // 설정 편집은 위 한 곳에서
-      }
-    };
-    tb.appendChild(tr);
-  });
-}
-$("dform").onsubmit = async (e) => {
-  e.preventDefault();
-  dmsg("");
-  const name = $("dname").value.trim();
-  const r = await fetch("/admin/domains", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({name, tools: $("dtools").value.trim(),
-                          priority: parseInt($("dprio").value) || 100,
-                          extract_hint: (_DOMS[name] || {}).extract_hint || "",
-                          scope: $("dscope").value, copy_from: $("dcopy").value}),
-  });
-  if (!r.ok) {
-    let msg = `저장 실패 (${r.status})`;
-    try { msg += " — " + (await r.json()).detail; } catch {}
-    dmsg(msg);
-    return;
-  }
-  const note = (await r.json().catch(() => ({}))).note || "";
-  await loadDomains(name);   // 폼은 유지 — 이어서 수정 가능
-  await jcLoad();            // 새 도메인이 셀렉트에 뜬 뒤에 골라야 한다 (없는 값은 무시된다)
-  $("jcDomain").value = name; jcFill(); jcLoadAll();   // 새 도메인 설정을 바로 편집
-  loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
-  dmsg(`✓ "${name}" 저장됨 — ${note || "다음 run부터 반영"}`, true);
-};
 $("dreset").onclick = async () => {
-  const name = $("dname").value.trim();
-  if (!name) { dmsg("도메인을 먼저 선택하세요 (목록 행 클릭)"); return; }
+  const name = jcCurDomain();
+  if (!name) { dmsg("묶음을 먼저 고르세요 (표에서 행 클릭)"); return; }
   if (!confirm(`"${name}" 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고\n` +
                "처음부터 재구조화합니다. 대화 세션 기여는 유지됩니다. 계속할까요?")) return;
   dmsg("⏳ 도메인 문서 초기화 중…");
@@ -1278,8 +1193,8 @@ $("sdelete").onclick = async () => {
   loadSources(); loadDocStatus();
 };
 $("ddelete").onclick = async () => {
-  const name = $("dname").value.trim();
-  if (!name) { dmsg("삭제할 도메인을 선택하세요 (목록 행 클릭)"); return; }
+  const name = jcCurDomain();
+  if (!name) { dmsg("삭제할 묶음을 고르세요 (표에서 행 클릭)"); return; }
   // 1차: 확인 없이 시도 — 연결 데이터 없으면 즉시 삭제, 있으면 409로 영향 안내가 온다
   let r = await fetch(`/admin/domains/${encodeURIComponent(name)}/delete`, {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -1300,8 +1215,8 @@ $("ddelete").onclick = async () => {
   }
   const j = await r.json();
   dmsg(`✓ ${j.note}` + (j.deleted_nodes ? ` (노드 ${j.deleted_nodes}개 삭제)` : ""), true);
-  $("dname").value = "";
-  loadDomains(); loadSources(); loadDocStatus(); loadDomainOptions(true);
+  jcClosePanel(); await jcLoad(); jcListLoad();
+  loadSources(); loadDocStatus(); loadDomainOptions(true);
 };
 $("sretry").onclick = () => reprocess("errors", "실패 재시도");
 $("sreset").onclick = () => reprocess("reset", "초기화 재처리");
@@ -2415,8 +2330,10 @@ function chainBadge(c, i) {
 // 그래서 차원별 버전을 없애고 한 화면·한 벌로 둔다. 이력은 run 스냅샷이 담당한다
 // (run이 조합 전체를 값으로 얼려 재현·비교가 되는 유일한 지점 — 2026-08-21 결정).
 const _DOMS = {};          // 이름 → 도메인 정의 (지침 편집·업서트 때 나머지 필드 보존)
-// 지금 고른 도메인 — 지침·추출 스키마·병합이 전부 이 도메인 것이다 (판정 설정 = 도메인 한 벌)
-function jcCurDomain() { const el = $("jcDomain"); return el ? el.value : ""; }
+// 지금 편집 중인 묶음 — 도메인·엔티티·병합이 전부 이 묶음 것이다. 셀렉트가 아니라
+// 표에서 행을 클릭해 고른다 (묶음이 단위이므로 "차원별 선택"이라는 개념 자체가 없다).
+let jcDomainSel = "";
+function jcCurDomain() { return jcDomainSel; }
 const jcQ = () => jcCurDomain() ? "?domain=" + encodeURIComponent(jcCurDomain()) : "";
 
 // 묶음 목록 — 도메인마다 엔티티·병합 요약과 쓰는 소스를 한 표로 (상태 관리 지점)
@@ -2444,39 +2361,32 @@ async function jcListLoad() {
     if (c.domain === jcCurDomain()) tr.classList.add("sel");
     tr.onclick = () => {
       if (jcCreating) { $("jnMsg").textContent = "작성 중입니다 — 생성하거나 취소하세요"; return; }
-      $("jcDomain").value = c.domain; jcFill(); jcLoadAll(); jcListLoad();
+      jcOpenPanel(c.domain);
     };
     tb.appendChild(tr);
   });
   t.appendChild(tb); box.appendChild(t);
   const n = (j.configs || []).length;
   const hint = document.createElement("p"); hint.className = "hint"; hint.style.margin = "4px 0 0";
-  hint.textContent = `묶음 ${n}개 — 행을 클릭하면 아래에서 그 묶음(도메인·엔티티·병합)을 편집합니다.`
-    + " ⚠ = 지침이 비어 있어 도메인 이름만으로 판정합니다.";
+  hint.textContent = jcCreating
+    ? "새 묶음 작성 중 — 생성하거나 닫으면 다시 고를 수 있습니다."
+    : `묶음 ${n}개 — 행을 클릭하면 아래에서 그 묶음(도메인·엔티티·병합)을 편집합니다.`
+      + " ⚠ = 지침이 비어 있어 도메인 이름만으로 판정합니다.";
   box.appendChild(hint);
 }
 
-async function jcLoad() {   // 묶음 셀렉트 채우기 — 본문은 jcLoadAll이 한 번에 읽는다
+async function jcLoad() {   // 묶음 정의 캐시 — 본문은 jcLoadAll이 한 번에 읽는다
   const j = await fetch("/admin/domains").then(r => r.ok ? r.json() : {domains: []})
     .catch(() => ({domains: []}));
-  const sel = $("jcDomain"), keep = sel.value;
   Object.keys(_DOMS).forEach(k => delete _DOMS[k]);
-  sel.innerHTML = "";
-  (j.domains || []).forEach(d => {
-    _DOMS[d.name] = d;
-    const o = document.createElement("option");
-    o.value = d.name; o.textContent = d.name + (d.scope === "doc" ? " (문서 전용)" : "");
-    sel.appendChild(o);
-  });
-  if (keep && _DOMS[keep]) sel.value = keep;
-  [["dcopy", "기본값으로 시작"], ["jnCopy", "빈 기본값으로 시작"]].forEach(([id, zero]) => {
-    const cp = $(id);   // 복사 원본 셀렉트 — 빈 값으로 시작하지 않게
-    if (!cp) return;
+  (j.domains || []).forEach(d => { _DOMS[d.name] = d; });
+  const cp = $("jnCopy");   // 시작값 — 빈 기본값 또는 기존 묶음 베끼기
+  if (cp) {
     const k2 = cp.value;
-    cp.innerHTML = `<option value="">${zero}</option>` +
-      Object.keys(_DOMS).map(n => `<option value="${esc(n)}">${esc(n)} 복사</option>`).join("");
+    cp.innerHTML = `<option value="">빈 기본값 (목표 → 접근법)</option>` +
+      Object.keys(_DOMS).map(n => `<option value="${esc(n)}">${esc(n)} 베끼기</option>`).join("");
     if (k2) cp.value = k2;
-  });
+  }
   jcFill();
 }
 
@@ -2487,23 +2397,27 @@ async function jcLoad() {   // 묶음 셀렉트 채우기 — 본문은 jcLoadAl
 let jcCreating = false;
 function jcSetCreate(on) {
   jcCreating = on;
-  $("jcNewHead").style.display = on ? "" : "none";
+  $("jcList").style.pointerEvents = on ? "none" : "";   // 흐리게 하면 대비가 깨진다(axe)
   $("jcNewBtn").style.display = on ? "none" : "";
-  $("jcDomain").disabled = on;          // 작성 중에는 편집 대상을 바꾸지 않는다
-  $("jcList").style.opacity = on ? ".45" : "";
-  $("entSave").textContent = on ? "＋ 묶음 생성 (도메인·엔티티·병합)" : "💾 판정 설정 저장 (한 묶음)";
+  $("jnCopyWrap").style.display = on ? "" : "none";
+  $("jnName").disabled = !on;
+  $("jcDanger").style.display = on ? "none" : "";   // 아직 없는 묶음엔 위험 작업이 없다
+  $("entSave").textContent = on ? "＋ 묶음 생성 (①~④ 한 번에)" : "💾 이 묶음 저장 (①~④ 한 번에)";
   $("veMsg").textContent = "";
   veRail();
 }
-$("jcNewBtn").onclick = async () => {
+$("jcNewBtn").onclick = async () => {   // 새 묶음 = 도메인·엔티티·병합을 한 화면에서 작성
+  jcDomainSel = "";
+  $("jcPanel").style.display = "";
   jcSetCreate(true);
   $("jnName").value = ""; $("jnTools").value = ""; $("jnPrio").value = 100;
-  $("jnScope").value = "doc"; $("jnMsg").textContent = "";
-  await jcLoadAll();                    // 복사 원본(기본=현재 묶음) 값으로 편집기를 채운다
+  $("jnScope").value = "doc"; $("jnCopy").value = "";
+  jcFill();
+  await jcLoadAll();                    // 시작값(빈 기본값 또는 베낀 묶음)으로 채운다
+  $("jcPanel").scrollIntoView({behavior: "smooth", block: "nearest"});
   $("jnName").focus();
 };
-$("jnCancel").onclick = () => { jcSetCreate(false); jcLoadAll(); };
-$("jnCopy").onchange = () => { if (jcCreating) jcLoadAll(); };   // 원본 바꾸면 아래가 다시 채워짐
+$("jnCopy").onchange = () => { if (jcCreating) jcLoadAll(); };   // 시작값 바꾸면 아래가 다시 채워짐
 
 async function jcCreate() {   // 작성한 내용 전부로 묶음 생성 (도메인+엔티티+병합)
   const name = $("jnName").value.trim();
@@ -2523,9 +2437,8 @@ async function jcCreate() {   // 작성한 내용 전부로 묶음 생성 (도�
       : (jj.detail && jj.detail[0] && jj.detail[0].msg) || `생성 실패 ${r.status}`;
     return;
   }
-  jcSetCreate(false);
   await jcLoad();
-  $("jcDomain").value = name; jcFill(); await jcLoadAll(); jcListLoad();
+  await jcOpenPanel(name);        // 만든 묶음을 그대로 편집 상태로 (로드 완료까지 기다림)
   loadDomainOptions(true);        // 소스 폼의 도메인 셀렉트도 동기화
   $("veMsg").textContent = `✓ ${jj.note}`;
 }
@@ -2537,18 +2450,56 @@ function jcDedupRead() {
           select_max: parseInt($("vcSel").value),
           select_prompt: $("vcSelPrompt").value};
 }
-function jcFill() {   // 도메인 셀렉트 주변 표시만 (본문은 jcLoadAll)
-  const n = Object.keys(_DOMS).length;
-  $("jcMeta").textContent = n
-    ? `아래 편집기는 '${$("jcDomain").value}' 묶음 — 도메인 지침 · 엔티티 · 병합이 한 벌입니다`
-    : "묶음이 없습니다 — [＋ 새 묶음 만들기]로 먼저 만드세요";
+function jcFill() {   // 패널 머리말 (본문은 jcLoadAll)
+  const d = _DOMS[jcDomainSel] || {};
+  $("jcPanelTitle").textContent = jcCreating ? "🆕 새 묶음 만들기" : `✏ '${jcDomainSel}' 묶음 편집`;
+  $("jcMeta").textContent = jcCreating
+    ? "①~④를 채우고 아래 [＋ 묶음 생성]을 누르면 만들어집니다 (누르기 전에는 저장되지 않습니다)"
+    : `용도 ${({both: "대화+문서", chat: "대화 전용", doc: "문서 전용"})[d.scope] || d.scope || "-"}`
+      + ` · 우선순위 ${d.priority ?? "-"}`;
 }
-$("jcDomain").onchange = () => { jcFill(); jcLoadAll(); jcListLoad(); };   // 묶음 전환
+
+function jcOpenPanel(domain) {   // 표에서 행 클릭 = 그 묶음 편집 패널 열기
+  jcCreating = false;
+  jcDomainSel = domain;
+  $("jcPanel").style.display = "";
+  $("jnCopyWrap").style.display = "none";       // 시작값은 생성 때만
+  $("jnName").value = domain; $("jnName").disabled = true;   // 이름 변경은 별개 작업
+  const d = _DOMS[domain] || {};
+  $("jnScope").value = d.scope || "both";
+  $("jnTools").value = d.tools || "";
+  $("jnPrio").value = d.priority ?? 100;
+  $("jcDanger").style.display = "";
+  $("entSave").textContent = "💾 이 묶음 저장 (①~④ 한 번에)";
+  jcFill(); jcListLoad();
+  $("jcPanel").scrollIntoView({behavior: "smooth", block: "nearest"});
+  return jcLoadAll();          // 호출부가 기다릴 수 있게 (메시지가 로드에 지워지지 않도록)
+}
+function jcClosePanel() {
+  jcCreating = false; jcDomainSel = "";
+  $("jcPanel").style.display = "none";
+  $("jcNewBtn").style.display = "";
+  jcListLoad();
+}
+$("jcClose").onclick = jcClosePanel;
 
 // 판정 설정 한 묶음 로드 — 지침·엔티티 스키마·뽑는 방식·병합을 한 번에 읽는다
 async function jcLoadAll() {
   // 작성 모드에서는 복사 원본(없으면 현재 묶음)의 값을 읽어 편집기를 채운다 — 빈 화면 금지
-  const src = jcCreating ? ($("jnCopy").value || jcCurDomain()) : jcCurDomain();
+  const src = jcCreating ? $("jnCopy").value : jcCurDomain();
+  if (jcCreating && !src) {   // 빈 기본값으로 시작 — 코드 기본 계층 2칸, 속성 없음
+    vePosLoad();
+    $("jcHint").value = ""; $("veCrit").value = ""; $("veDescr").value = "";
+    VE.chain = _DEF_CHAIN(); VE.attrs = []; VE.sel = {kind: "chain", i: 0}; VE.dirty = false;
+    const d0 = {sim_high: 0.92, sim_threshold: 0.7, short_name_chars: 12,
+                char_ratio: 0.4, select_max: 8};
+    $("vcHigh").value = d0.sim_high; $("vcThr").value = d0.sim_threshold;
+    $("vcShort").value = d0.short_name_chars; $("vcRatio").value = d0.char_ratio;
+    $("vcSel").value = d0.select_max;
+    bindDefaultable("vcSelPrompt", "", "", "후보선택 프롬프트");
+    veRender();
+    return;
+  }
   const q = src ? "?domain=" + encodeURIComponent(src) : "";
   const j = await fetch("/admin/judge-config" + q).then(r => r.ok ? r.json() : null)
     .catch(() => null);
@@ -3456,7 +3407,7 @@ const TABS = {
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"],
             // 도메인 먼저 — 스키마·병합은 그 도메인 것을 읽는다 (판정 설정 = 도메인 한 벌)
-            load: async () => { await jcLoad(); jcLoadAll(); jcListLoad(); loadDomains(); }},
+            load: async () => { await jcLoad(); jcListLoad(); jcClosePanel(); }},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources();
