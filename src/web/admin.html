@@ -445,11 +445,15 @@
     </div>
   </details>
   <div id="jcList"><span class="hint">불러오는 중…</span></div>
-  <details id="jcNewBox" style="margin:8px 0">
-    <summary class="hint" style="cursor:pointer;margin:0">＋ 새 묶음 만들기 — 도메인 · 엔티티 · 병합을 한 번에 생성</summary>
-    <div class="schedrow" style="margin:6px 0 0">
+  <div class="schedrow" style="margin:8px 0 0">
+    <button type="button" id="jcNewBtn">＋ 새 묶음 만들기</button>
+    <span class="hint" style="margin:0">이 페이지에서 도메인·엔티티·병합을 전부 작성해 생성합니다</span>
+  </div>
+  <div id="jcNewHead" class="fgroup" style="display:none;border-color:var(--path)">
+    <div class="fgroup-t">🆕 새 묶음 작성 중 <small>— 아래를 다 채우고 [＋ 묶음 생성]을 누르면 만들어집니다 (누르기 전에는 저장되지 않습니다)</small></div>
+    <div class="schedrow" style="margin:0">
       <label class="fld"><span>묶음(도메인) 이름</span>
-        <input id="jnName" placeholder="예: 생활 QA" style="min-width:160px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
+        <input id="jnName" placeholder="예: 생활 QA" style="min-width:150px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
       <label class="fld"><span>용도</span>
         <select id="jnScope" title="문서 전용은 대화 분류·폴백에 끼지 않습니다">
           <option value="doc">문서 전용</option>
@@ -457,17 +461,15 @@
           <option value="chat">대화 전용</option>
         </select></label>
       <label class="fld"><span>도구 (대화용, 쉼표구분)</span>
-        <input id="jnTools" placeholder="문서 전용이면 비워둠" style="min-width:150px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
+        <input id="jnTools" placeholder="문서 전용이면 비워둠" style="min-width:140px;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
       <label class="fld"><span>우선순위</span>
-        <input id="jnPrio" type="number" value="100" min="1" style="width:90px" title="낮을수록 먼저 대조 — 최하순위가 폴백"></label>
-      <label class="fld"><span>엔티티·병합 복사 원본</span>
-        <select id="jnCopy" title="새 묶음의 엔티티 스키마·병합 설정을 어디서 복사해 시작할지"></select></label>
-      <button type="button" id="jnCreate">＋ 묶음 생성</button>
+        <input id="jnPrio" type="number" value="100" min="1" style="width:80px" title="낮을수록 먼저 대조"></label>
+      <label class="fld"><span>아래 내용을 어디서 복사해 시작할지</span>
+        <select id="jnCopy" title="고르면 아래 지침·엔티티·병합이 그 묶음 값으로 채워집니다"></select></label>
+      <button type="button" class="ghost" id="jnCancel">✕ 취소</button>
       <span class="hint" id="jnMsg" style="margin:0"></span>
     </div>
-    <p class="hint" style="margin:6px 0 0">생성하면 <b>도메인·엔티티·병합이 함께</b> 만들어지고 바로 아래에서 편집 상태가 됩니다.
-       지침은 생성 후 아래 1️⃣에 씁니다.</p>
-  </details>
+  </div>
   <div class="fgroup">
     <div class="fgroup-t">1️⃣ 도메인 지침 <small>— 어떤 문서를 이 도메인의 지식으로 인정할지. 여기가 비면 LLM이 도메인 이름만 보고 판단합니다</small></div>
     <div class="schedrow" style="margin:0 0 6px">
@@ -496,7 +498,7 @@
   <div class="schedrow" style="margin:8px 0 0">
     <label class="fld" style="flex:1;min-width:240px"><span>설명 (사람용 — 이 추출기가 뭘 뽑는지)</span>
       <input id="veDescr" placeholder="예: 기술 Q&A·문제해결 문서" style="width:100%;padding:5px 8px;border:1px solid var(--line);border-radius:6px"></label>
-    <button type="button" id="entSave" title="이 도메인의 판정 설정 한 묶음(지침·엔티티·뽑는 방식·병합)을 덮어씁니다">💾 판정 설정 저장 (한 묶음)</button>
+    <button type="button" id="entSave" title="이 묶음(지침·엔티티·뽑는 방식·병합)을 한 번에 저장합니다">💾 판정 설정 저장 (한 묶음)</button>
     <span class="hint" id="veMsg" style="margin:0"></span>
   </div>
   <div id="veGate" class="vegate" style="margin:6px 0 0"></div>
@@ -2440,7 +2442,10 @@ async function jcListLoad() {
       .forEach((v, i) => { const td = document.createElement("td");
         td.textContent = v; if (i >= 2) td.className = "trunc"; tr.appendChild(td); });
     if (c.domain === jcCurDomain()) tr.classList.add("sel");
-    tr.onclick = () => { $("jcDomain").value = c.domain; jcFill(); jcLoadAll(); jcListLoad(); };
+    tr.onclick = () => {
+      if (jcCreating) { $("jnMsg").textContent = "작성 중입니다 — 생성하거나 취소하세요"; return; }
+      $("jcDomain").value = c.domain; jcFill(); jcLoadAll(); jcListLoad();
+    };
     tb.appendChild(tr);
   });
   t.appendChild(tb); box.appendChild(t);
@@ -2464,7 +2469,7 @@ async function jcLoad() {   // 묶음 셀렉트 채우기 — 본문은 jcLoadAl
     sel.appendChild(o);
   });
   if (keep && _DOMS[keep]) sel.value = keep;
-  [["dcopy", "기본값으로 시작"], ["jnCopy", "코드 기본값으로 시작"]].forEach(([id, zero]) => {
+  [["dcopy", "기본값으로 시작"], ["jnCopy", "빈 기본값으로 시작"]].forEach(([id, zero]) => {
     const cp = $(id);   // 복사 원본 셀렉트 — 빈 값으로 시작하지 않게
     if (!cp) return;
     const k2 = cp.value;
@@ -2475,27 +2480,63 @@ async function jcLoad() {   // 묶음 셀렉트 채우기 — 본문은 jcLoadAl
   jcFill();
 }
 
-$("jnCreate").onclick = async () => {   // 새 묶음 = 도메인 + 엔티티 + 병합을 한 번에
+// ── 새 묶음 작성 모드 ────────────────────────────────────────────────────────
+// 생성 전용 화면을 따로 두지 않는다 — 같은 편집기를 '작성 모드'로 쓴다. 캔버스·상세 패널을
+// 복제하면 두 벌이 갈라지고(오늘 갈라진 설정이 사고를 만들었다) 유지 비용이 두 배가 된다.
+// 작성 모드에서는 [＋ 묶음 생성]을 누를 때까지 아무것도 저장되지 않는다.
+let jcCreating = false;
+function jcSetCreate(on) {
+  jcCreating = on;
+  $("jcNewHead").style.display = on ? "" : "none";
+  $("jcNewBtn").style.display = on ? "none" : "";
+  $("jcDomain").disabled = on;          // 작성 중에는 편집 대상을 바꾸지 않는다
+  $("jcList").style.opacity = on ? ".45" : "";
+  $("entSave").textContent = on ? "＋ 묶음 생성 (도메인·엔티티·병합)" : "💾 판정 설정 저장 (한 묶음)";
+  $("veMsg").textContent = "";
+  veRail();
+}
+$("jcNewBtn").onclick = async () => {
+  jcSetCreate(true);
+  $("jnName").value = ""; $("jnTools").value = ""; $("jnPrio").value = 100;
+  $("jnScope").value = "doc"; $("jnMsg").textContent = "";
+  await jcLoadAll();                    // 복사 원본(기본=현재 묶음) 값으로 편집기를 채운다
+  $("jnName").focus();
+};
+$("jnCancel").onclick = () => { jcSetCreate(false); jcLoadAll(); };
+$("jnCopy").onchange = () => { if (jcCreating) jcLoadAll(); };   // 원본 바꾸면 아래가 다시 채워짐
+
+async function jcCreate() {   // 작성한 내용 전부로 묶음 생성 (도메인+엔티티+병합)
   const name = $("jnName").value.trim();
-  if (!name) { $("jnMsg").textContent = "묶음 이름을 입력하세요"; return; }
+  if (!name) { $("jnMsg").textContent = "묶음 이름을 입력하세요"; $("jnName").focus(); return; }
+  if (!veGate()) { $("veMsg").textContent = "위 ⚠ 사유를 먼저 해결하세요"; return; }
   const r = await fetch("/admin/judge-config", {method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({name, scope: $("jnScope").value, tools: $("jnTools").value.trim(),
                           priority: parseInt($("jnPrio").value) || 100,
-                          copy_from: $("jnCopy").value})});
+                          copy_from: $("jnCopy").value,
+                          hint: $("jcHint").value, etypes: veTypesRead(),
+                          criteria: $("veCrit").value, descr: $("veDescr").value,
+                          dedup: jcDedupRead()})});
   const jj = await r.json().catch(() => ({}));
   if (!r.ok) {
-    $("jnMsg").textContent = typeof jj.detail === "string" ? jj.detail
+    $("veMsg").textContent = typeof jj.detail === "string" ? jj.detail
       : (jj.detail && jj.detail[0] && jj.detail[0].msg) || `생성 실패 ${r.status}`;
     return;
   }
-  $("jnMsg").textContent = `✓ ${jj.note}`;
-  $("jnName").value = "";
+  jcSetCreate(false);
   await jcLoad();
-  $("jcDomain").value = name; jcFill(); jcLoadAll(); jcListLoad();
+  $("jcDomain").value = name; jcFill(); await jcLoadAll(); jcListLoad();
   loadDomainOptions(true);        // 소스 폼의 도메인 셀렉트도 동기화
-  $("jcHint").focus();            // 다음에 할 일 = 지침 쓰기
-};
+  $("veMsg").textContent = `✓ ${jj.note}`;
+}
+function jcDedupRead() {
+  return {sim_high: parseFloat($("vcHigh").value),
+          sim_threshold: parseFloat($("vcThr").value),
+          short_name_chars: parseInt($("vcShort").value),
+          char_ratio: parseFloat($("vcRatio").value),
+          select_max: parseInt($("vcSel").value),
+          select_prompt: $("vcSelPrompt").value};
+}
 function jcFill() {   // 도메인 셀렉트 주변 표시만 (본문은 jcLoadAll)
   const n = Object.keys(_DOMS).length;
   $("jcMeta").textContent = n
@@ -2506,7 +2547,10 @@ $("jcDomain").onchange = () => { jcFill(); jcLoadAll(); jcListLoad(); };   // �
 
 // 판정 설정 한 묶음 로드 — 지침·엔티티 스키마·뽑는 방식·병합을 한 번에 읽는다
 async function jcLoadAll() {
-  const j = await fetch("/admin/judge-config" + jcQ()).then(r => r.ok ? r.json() : null)
+  // 작성 모드에서는 복사 원본(없으면 현재 묶음)의 값을 읽어 편집기를 채운다 — 빈 화면 금지
+  const src = jcCreating ? ($("jnCopy").value || jcCurDomain()) : jcCurDomain();
+  const q = src ? "?domain=" + encodeURIComponent(src) : "";
+  const j = await fetch("/admin/judge-config" + q).then(r => r.ok ? r.json() : null)
     .catch(() => null);
   if (!j) return;
   vePosLoad();
@@ -2563,18 +2607,14 @@ function veSel(kind, i) { VE.sel = {kind, i}; veRender(); }
 function veRender() { _veNorm(); veCanvas(); veDetail(); veGate(); veRail(); }
 
 async function veSave() {   // 판정 설정 한 묶음 저장 — 부분 저장 없음
+  if (jcCreating) { await jcCreate(); return; }   // 작성 모드면 생성
   if (!veGate()) { $("veMsg").textContent = "위 ⚠ 사유를 먼저 해결하세요"; return; }
   const r = await fetch("/admin/judge-config" + jcQ(), {method: "PUT",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({hint: $("jcHint").value,
                           etypes: veTypesRead(),
                           criteria: $("veCrit").value, descr: $("veDescr").value,
-                          dedup: {sim_high: parseFloat($("vcHigh").value),
-                                  sim_threshold: parseFloat($("vcThr").value),
-                                  short_name_chars: parseInt($("vcShort").value),
-                                  char_ratio: parseFloat($("vcRatio").value),
-                                  select_max: parseInt($("vcSel").value),
-                                  select_prompt: $("vcSelPrompt").value}})});
+                          dedup: jcDedupRead()})});
   const j = await r.json().catch(() => ({}));
   $("veMsg").textContent = r.ok ? `✓ ${j.note || "저장됨"}`
     : (typeof j.detail === "string" ? j.detail
@@ -2591,7 +2631,9 @@ function veRail() {
   add("① 추출 (엔티티)", "step");
   add(`계층 ${VE.chain.length}칸 · 속성 ${VE.attrs.length}`);
   add("·", "sep");
-  add(VE.dirty ? "저장 안 된 변경 있음" : "저장됨", VE.dirty ? "" : "live");
+  add(jcCreating ? "새 묶음 작성 중 — 아직 저장 안 됨"
+                 : (VE.dirty ? "저장 안 된 변경 있음" : "저장됨"),
+      (!jcCreating && !VE.dirty) ? "live" : "");
   add("·", "sep");
   add("다음 → " + (VE.dirty ? "[💾 저장]을 누르면 새 run이 이 스키마로 판정합니다"
                             : "노드를 클릭해 고치거나 ＋로 계층·속성을 늘리세요"), "next");

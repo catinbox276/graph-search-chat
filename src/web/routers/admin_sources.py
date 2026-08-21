@@ -914,13 +914,15 @@ def admin_judge_config_new(inp: JudgeConfigNewIn):
                      "h": inp.hint.strip() or None, "s": inp.scope})
         _schema_row(cur, inp.name, inp.copy_from)
         _cluster_row(cur, inp.name, inp.copy_from)
-        if inp.etypes:      # 생성 폼에서 스키마를 직접 써 보냈으면 그 값으로
-            cur.setinputsizes(et=oracledb.DB_TYPE_CLOB, cr=oracledb.DB_TYPE_CLOB)
-            cur.execute("""UPDATE entity_versions SET etypes = :et, criteria = :cr, descr = :ds
-                           WHERE name = :n AND version = 1""",
-                        {"et": json.dumps(inp.etypes, ensure_ascii=False),
-                         "cr": inp.criteria.strip() or None,
-                         "ds": inp.descr.strip() or None, "n": inp.name})
+        # 생성 폼이 스키마·지침을 함께 보낸다 (한 페이지에서 전부 작성) — 복사본을 덮어쓴다.
+        # etypes가 비어 오면 복사본을 그대로 둔다 (지침만 채운 생성도 허용).
+        cur.setinputsizes(et=oracledb.DB_TYPE_CLOB, cr=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE entity_versions
+                       SET etypes = NVL(:et, etypes), criteria = :cr, descr = :ds
+                       WHERE name = :n AND version = 1""",
+                    {"et": json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None,
+                     "cr": inp.criteria.strip() or None,
+                     "ds": inp.descr.strip() or None, "n": inp.name})
         cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
         cur.execute("""UPDATE cluster_versions
                        SET sim_high = :sh, sim_threshold = :st, short_name_chars = :sn,
