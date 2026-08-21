@@ -712,36 +712,6 @@ def _schema_row(cur, domain: str, copy_from: str = "") -> str:
     return domain
 
 
-@router.get("/admin/entity-schema")
-def admin_entity_schema(domain: str = ""):
-    """이 도메인의 추출 스키마 + 코드 기본 프롬프트. domain 미지정=첫 도메인."""
-    with db_cursor() as cur:
-        dom = _first_domain(cur, domain)
-        name = _schema_row(cur, dom)
-        cur.execute("""SELECT criteria, descr, etypes FROM entity_versions
-                       WHERE name = :1 AND version = 1""", [name])
-        r = cur.fetchone()
-    return {"domain": dom, "criteria": _lob_str(r[0]), "descr": r[1] or "",
-            "etypes": _lob_str(r[2]),
-            "defaults": {"doc_prompt": _judge.DOC_PROMPT, "pack_prompt": _judge.PACK_PROMPT}}
-
-
-@router.put("/admin/entity-schema")
-def admin_entity_schema_put(inp: EntityVersionIn, domain: str = ""):
-    """덮어쓰기 저장 — 검증은 EntityVersionIn의 _etypes가 그대로 한다."""
-    import json
-    with db_cursor() as cur:
-        name, ver = _schema_row(cur, _first_domain(cur, domain)), 1
-        cur.setinputsizes(etypes=oracledb.DB_TYPE_CLOB, criteria=oracledb.DB_TYPE_CLOB)
-        cur.execute("""UPDATE entity_versions
-                       SET etypes = :etypes, criteria = :criteria, descr = :descr
-                       WHERE name = :nm AND version = :vr""",
-                    {"etypes": json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None,
-                     "criteria": inp.criteria.strip() or None,
-                     "descr": inp.descr.strip() or None, "nm": name, "vr": ver})
-    return {"ok": True, "note": f"'{name}' 추출 스키마 저장됨 — 이 도메인의 새 run이 이 기준으로 판정합니다"}
-
-
 class EntityPreviewIn(BaseModel):
     criteria: str = ""
     etypes: list[dict] = []
@@ -845,41 +815,80 @@ def _merge_defaults() -> dict:
     return default_merge_cfg()
 
 
-@router.get("/admin/cluster-config")
-def admin_cluster_config(domain: str = ""):
-    """이 도메인의 병합(dedup) 설정 + 코드 기본값. domain 미지정=첫 도메인."""
+class JudgeConfigIn(EntityVersionIn):
+    """판정 설정 한 묶음 — 도메인 지침 + 추출 스키마·지침 + 병합 설정.
+
+    도메인·엔티티·병합을 따로 저장하면 서로 어긋난 조합이 생긴다 (2026-08-21 결정 —
+    실측된 사고가 전부 그 자유도에서 나왔다: 빈 스냅샷 run, 라우터 라인 혼재, 야간 배치의
+    코드 기본 폴백). 한 번에 받고 한 트랜잭션에 쓴다. 검증은 상속받은 _etypes와
+    ClusterVersionIn이 그대로 한다."""
+    hint: str = ""                       # 도메인 지침 (무엇을 이 도메인 지식으로 인정할지)
+    dedup: ClusterVersionIn = ClusterVersionIn()
+
+
+@router.get("/admin/judge-config")
+def admin_judge_config(domain: str = ""):
+    """이 도메인의 판정 설정 한 묶음 + 코드 기본값. domain 미지정=첫 도메인."""
     with db_cursor() as cur:
-        name = _cluster_row(cur, _first_domain(cur, domain))
-        cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
-                              select_max, select_prompt FROM cluster_versions
-                       WHERE name = :1 AND version = 1""", [name])
+        dom = _first_domain(cur, domain)
+        _schema_row(cur, dom)
+        _cluster_row(cur, dom)
+        cur.execute("""SELECT e.criteria, e.descr, e.etypes,
+                              c.sim_high, c.sim_threshold, c.short_name_chars, c.char_ratio,
+                              c.select_max, c.select_prompt, r.extract_hint, NVL(r.scope, 'both')
+                       FROM entity_versions e
+                       JOIN cluster_versions c ON c.name = e.name AND c.version = 1
+                       JOIN domain_registry r ON r.name = e.name
+                       WHERE e.name = :1 AND e.version = 1""", [dom])
         r = cur.fetchone()
     d = _merge_defaults()
-    return {"domain": name, "sim_high": float(r[0]) if r[0] is not None else d["sim_high"],
-            "sim_threshold": float(r[1]) if r[1] is not None else d["sim_threshold"],
-            "short_name_chars": int(r[2]) if r[2] is not None else d["short_name_chars"],
-            "char_ratio": float(r[3]) if r[3] is not None else d["char_ratio"],
-            "select_max": int(r[4]) if r[4] is not None else d["select_max"],
-            "select_prompt": _lob_str(r[5]),
-            "defaults": {**{k: v for k, v in d.items() if k != "select_prompt"},
-                         "select_prompt": _select_tmpl()}}
+    return {"domain": dom, "scope": r[10],
+            "hint": _lob_str(r[9]), "criteria": _lob_str(r[0]), "descr": r[1] or "",
+            "etypes": _lob_str(r[2]),
+            "dedup": {"sim_high": float(r[3]) if r[3] is not None else d["sim_high"],
+                      "sim_threshold": float(r[4]) if r[4] is not None else d["sim_threshold"],
+                      "short_name_chars": int(r[5]) if r[5] is not None else d["short_name_chars"],
+                      "char_ratio": float(r[6]) if r[6] is not None else d["char_ratio"],
+                      "select_max": int(r[7]) if r[7] is not None else d["select_max"],
+                      "select_prompt": _lob_str(r[8])},
+            "defaults": {"doc_prompt": _judge.DOC_PROMPT, "pack_prompt": _judge.PACK_PROMPT,
+                         "select_prompt": _select_tmpl(),
+                         "dedup": {k: v for k, v in d.items() if k != "select_prompt"}}}
 
 
-@router.put("/admin/cluster-config")
-def admin_cluster_config_put(inp: ClusterVersionIn, domain: str = ""):
-    """덮어쓰기 저장 — 검증은 ClusterVersionIn이 그대로 한다."""
+@router.put("/admin/judge-config")
+def admin_judge_config_put(inp: JudgeConfigIn, domain: str = ""):
+    """한 묶음 덮어쓰기 — 지침·스키마·병합을 한 트랜잭션에 쓴다 (부분 저장 없음)."""
+    import json
     with db_cursor() as cur:
-        name, ver = _cluster_row(cur, _first_domain(cur, domain)), 1
+        dom = _first_domain(cur, domain)
+        _schema_row(cur, dom)
+        _cluster_row(cur, dom)
+        cur.setinputsizes(h=oracledb.DB_TYPE_CLOB)
+        cur.execute("UPDATE domain_registry SET extract_hint = :h WHERE name = :n",
+                    {"h": inp.hint.strip() or None, "n": dom})
+        cur.setinputsizes(h=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE domain_versions SET extract_hint = :h
+                       WHERE name = :n AND version = 1""",
+                    {"h": inp.hint.strip() or None, "n": dom})   # 옛 리더 폴백 통로 동기화
+        cur.setinputsizes(et=oracledb.DB_TYPE_CLOB, cr=oracledb.DB_TYPE_CLOB)
+        cur.execute("""UPDATE entity_versions
+                       SET etypes = :et, criteria = :cr, descr = :ds
+                       WHERE name = :n AND version = 1""",
+                    {"et": json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None,
+                     "cr": inp.criteria.strip() or None,
+                     "ds": inp.descr.strip() or None, "n": dom})
         cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
         cur.execute("""UPDATE cluster_versions
                        SET sim_high = :sh, sim_threshold = :st, short_name_chars = :sn,
                            char_ratio = :cr, select_max = :sm, select_prompt = :sp
-                       WHERE name = :nm AND version = :vr""",
-                    {"sh": inp.sim_high, "st": inp.sim_threshold,
-                     "sn": inp.short_name_chars, "cr": inp.char_ratio,
-                     "sm": inp.select_max, "sp": inp.select_prompt.strip() or None,
-                     "nm": name, "vr": ver})
-    return {"ok": True, "note": f"'{name}' 병합 설정 저장됨 — 이 도메인의 새 run이 이 기준으로 합칩니다"}
+                       WHERE name = :n AND version = 1""",
+                    {"sh": inp.dedup.sim_high, "st": inp.dedup.sim_threshold,
+                     "sn": inp.dedup.short_name_chars, "cr": inp.dedup.char_ratio,
+                     "sm": inp.dedup.select_max,
+                     "sp": inp.dedup.select_prompt.strip() or None, "n": dom})
+    return {"ok": True, "domain": dom,
+            "note": f"'{dom}' 판정 설정 저장됨 — 이 도메인의 새 run이 이 기준으로 판정합니다"}
 
 
 # ── 조합 프리셋 (헬름차트식 — 차원별 버전 선택을 이름 있는 세트로 저장, 소스에 적용) ──
