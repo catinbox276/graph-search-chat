@@ -264,10 +264,14 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
                 raise ValueError(f"엔티티 라인 없음: {it['line']}·v{it['version']}")
             st["lines"].append({"line": it["line"], "version": int(it["version"]), **snap})
     else:
-        # 엔티티 (라인, 버전) 선택 → 그 버전의 프롬프트를 스냅샷 (미지정=활성 라인).
+        # 판정 설정의 단위는 도메인이다 (2026-08-21) — 이 run의 도메인 행(version=1)을
+        # 스냅샷한다. 명시 지정(entity_line)은 옛 호출부 호환으로만 남긴다.
         en_name, ev = (entity_line or None), entity_version
         if not (en_name and ev):
-            en_name, ev = versioning.active(cur, "entity_versions")
+            en_name, ev = c["domain"], 1
+            cur.execute("SELECT 1 FROM entity_versions WHERE name = :1 AND version = 1", [en_name])
+            if not cur.fetchone():   # 도메인 행이 아직 없으면 옛 전역 한 벌로 폴백
+                en_name, ev = versioning.active(cur, "entity_versions")
         if en_name and ev is not None:
             snap = _line_snapshot(en_name, ev)
             if snap:
@@ -283,10 +287,13 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
     _h = cur.fetchone()
     if _h and _h[0]:
         st["hint"] = _lob(_h[0])
-    # 클러스터 (라인, 버전) 선택 → dedup 스냅샷 (미지정=활성 라인)
+    # 병합 설정도 도메인 단위 — 도메인 행(version=1), 없으면 옛 전역 한 벌로 폴백
     cl_name, cv = (cluster_line or None), cluster_version
     if not (cl_name and cv):
-        cl_name, cv = versioning.active(cur, "cluster_versions")
+        cl_name, cv = c["domain"], 1
+        cur.execute("SELECT 1 FROM cluster_versions WHERE name = :1 AND version = 1", [cl_name])
+        if not cur.fetchone():
+            cl_name, cv = versioning.active(cur, "cluster_versions")
     if cl_name and cv is not None:
         cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio, select_max,
                               select_prompt

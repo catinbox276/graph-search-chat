@@ -32,8 +32,12 @@ def expects():
 
 
 def _active_snapshots(cur):
-    """활성 엔티티·클러스터 라인 스냅샷 — (schema, criteria, mc, judged_with) 반환.
-    세션 추출도 스키마 라인(문서와 공유)으로 조립 (경량 스키마화 — 라인 없으면 코드 기본).
+    """판정 설정 스냅샷 — (schema, criteria, mc, judged_with) 반환.
+
+    판정 설정의 단위는 도메인이다 (2026-08-21) — 대화용 도메인(scope both|chat) 중 우선순위
+    첫 도메인의 설정을 쓴다. 그 행이 없으면 옛 전역 한 벌로 폴백.
+    # ponytail: 세션마다 분류된 도메인의 스키마를 쓰려면 프롬프트 템플릿을 세션별로 다시
+    # 조립해야 한다 (지금은 배치 시작 때 1회 조립). 대화 트래픽이 쌓이면 그때 올린다.
     doc_pipeline.judge는 lazy import — judge가 graph_pipeline을 import해 상단 import는 순환."""
     from core import versioning
     from graph.doc_pipeline import judge as _j
@@ -50,7 +54,17 @@ def _active_snapshots(cur):
 
     schema, crit, mc, en, ev, cn, cv = _j.DEFAULT_SCHEMA, "", None, None, None, None, None
     try:
-        en, ev = versioning.active(cur, "entity_versions")
+        cur.execute("""SELECT name FROM domain_registry
+                       WHERE NVL(scope, 'both') IN ('both', 'chat')
+                       ORDER BY priority, name FETCH FIRST 1 ROWS ONLY""")
+        _d = cur.fetchone()
+        en, ev = (_d[0], 1) if _d else (None, None)
+        if en:
+            cur.execute("SELECT 1 FROM entity_versions WHERE name = :1 AND version = 1", [en])
+            if not cur.fetchone():
+                en, ev = versioning.active(cur, "entity_versions")
+        else:
+            en, ev = versioning.active(cur, "entity_versions")
         if en and ev is not None:
             cur.execute("""SELECT criteria, etypes FROM entity_versions
                            WHERE name = :1 AND version = :2""", [en, ev])
@@ -58,7 +72,13 @@ def _active_snapshots(cur):
             if r:
                 crit = _lob(r[0])
                 schema = _j.norm_schema(_jl(r[1]))
-        cn, cv = versioning.active(cur, "cluster_versions")
+        cn, cv = (en, 1) if en else (None, None)
+        if cn:
+            cur.execute("SELECT 1 FROM cluster_versions WHERE name = :1 AND version = 1", [cn])
+            if not cur.fetchone():
+                cn, cv = versioning.active(cur, "cluster_versions")
+        else:
+            cn, cv = versioning.active(cur, "cluster_versions")
         if cn and cv is not None:
             cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
                                   select_max, select_prompt

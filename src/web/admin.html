@@ -422,7 +422,7 @@
   <p class="hint" style="margin-top:8px">🔹 <b>도메인 버전</b>은 [도메인 시드] 탭. 🔹 버전을 <b>조합해 run 생성</b>은 [🔀 파이프라인] 탭에서 — 노드에서 이 버전을 고르고 [▶ run 생성].</p>
 </section>
 <section class="card" id="sec-entity">
-  <h2>판정 설정 <small>도메인 지침 · 뽑아낼 엔티티 · 포함/제외 기준 · 병합 — 한 벌로 저장, 이력은 run 스냅샷</small></h2>
+  <h2>판정 설정 <small>도메인 하나 = 지침 · 뽑아낼 엔티티 · 뽑는 방식 · 병합 한 벌 — 이력은 run 스냅샷</small></h2>
   <div class="rail" id="entRail"><span class="step">불러오는 중</span></div>
   <details class="explain">
     <summary>엔티티가 무엇인지 — 이 화면 읽는 법</summary>
@@ -447,8 +447,8 @@
   <div class="fgroup">
     <div class="fgroup-t">1️⃣ 도메인 지침 <small>— 어떤 문서를 이 도메인의 지식으로 인정할지. 여기가 비면 LLM이 도메인 이름만 보고 판단합니다</small></div>
     <div class="schedrow" style="margin:0 0 6px">
-      <label class="fld"><span>도메인</span>
-        <select id="jcDomain" title="지침은 도메인마다 따로입니다 — 소스가 이 도메인에 물려 판정 기준이 됩니다"></select></label>
+      <label class="fld"><span>도메인 (이 화면 전체가 이 도메인의 설정)</span>
+        <select id="jcDomain" title="지침·추출 스키마·병합이 모두 이 도메인 것입니다 — 바꾸면 아래 전체가 다시 로드됩니다"></select></label>
       <span class="hint" id="jcMeta" style="margin:0"></span>
     </div>
     <textarea id="jcHint" class="psta" spellcheck="false" placeholder="예: 이 도메인은 조직이 참고하는 기술 문제해결 지식을 모은다. 출처가 사내 문서인지 외부 기술 Q&A인지는 따지지 않는다 — 재현 가능한 조치가 있으면 인정한다.&#10;인정: 문제 증상과 해법(설정·명령·코드·절차)이 함께 있는 글&#10;제외: 결론 없이 끝나는 글, 의견·추천만 있는 글"></textarea>
@@ -515,6 +515,9 @@
       </select>
       <input id="dtools" placeholder="도구명 쉼표구분 (문서 전용이면 비워도 됨)">
       <input id="dprio" type="number" value="100" min="1" title="낮을수록 먼저 대조 — 최하순위가 폴백">
+      <label class="fld"><span>설정 복사 원본</span>
+        <select id="dcopy" title="새 도메인의 추출 스키마·병합 설정을 어디서 복사해 시작할지 — 빈 값으로 시작하지 않습니다">
+          <option value="">기본값으로 시작</option></select></label>
       <button id="dsave">추가/수정</button>
       <button type="button" class="warn" id="dreset"
               title="이 도메인에 물린 모든 소스의 문서 구조화 기여를 회수하고 재구조화 — 대화 세션 기여는 유지">⚠ 도메인 문서 초기화</button>
@@ -963,7 +966,7 @@ $("dform").onsubmit = async (e) => {
     body: JSON.stringify({name, tools: $("dtools").value.trim(),
                           priority: parseInt($("dprio").value) || 100,
                           extract_hint: (_DOMS[name] || {}).extract_hint || "",
-                          scope: $("dscope").value}),
+                          scope: $("dscope").value, copy_from: $("dcopy").value}),
   });
   if (!r.ok) {
     let msg = `저장 실패 (${r.status})`;
@@ -971,9 +974,11 @@ $("dform").onsubmit = async (e) => {
     dmsg(msg);
     return;
   }
-  await loadDomains(name);  // 폼은 유지 — 이어서 수정 가능
+  const note = (await r.json().catch(() => ({}))).note || "";
+  await loadDomains(name);   // 폼은 유지 — 이어서 수정 가능
+  $("jcDomain").value = name; jcFill(); veLoad(); vcLoad();   // 새 도메인 설정을 바로 편집
   loadDomainOptions(true);   // 소스 폼의 도메인 셀렉트도 즉시 동기화
-  dmsg(`✓ "${name}" 저장됨 — 다음 run부터 반영`, true);
+  dmsg(`✓ "${name}" 저장됨 — ${note || "다음 run부터 반영"}`, true);
 };
 $("dreset").onclick = async () => {
   const name = $("dname").value.trim();
@@ -2388,6 +2393,9 @@ function chainBadge(c, i) {
 // 그래서 차원별 버전을 없애고 한 화면·한 벌로 둔다. 이력은 run 스냅샷이 담당한다
 // (run이 조합 전체를 값으로 얼려 재현·비교가 되는 유일한 지점 — 2026-08-21 결정).
 const _DOMS = {};          // 이름 → 도메인 정의 (지침 편집·업서트 때 나머지 필드 보존)
+// 지금 고른 도메인 — 지침·추출 스키마·병합이 전부 이 도메인 것이다 (판정 설정 = 도메인 한 벌)
+function jcCurDomain() { const el = $("jcDomain"); return el ? el.value : ""; }
+const jcQ = () => jcCurDomain() ? "?domain=" + encodeURIComponent(jcCurDomain()) : "";
 
 async function jcLoad() {
   const j = await fetch("/admin/domains").then(r => r.ok ? r.json() : {domains: []})
@@ -2402,6 +2410,13 @@ async function jcLoad() {
     sel.appendChild(o);
   });
   if (keep && _DOMS[keep]) sel.value = keep;
+  const cp = $("dcopy");
+  if (cp) {   // 새 도메인이 복사해 시작할 원본 — 빈 값으로 시작하지 않게
+    const k2 = cp.value;
+    cp.innerHTML = `<option value="">기본값으로 시작</option>` +
+      Object.keys(_DOMS).map(n => `<option value="${esc(n)}">${esc(n)} 설정 복사</option>`).join("");
+    if (k2) cp.value = k2;
+  }
   jcFill();
 }
 function jcFill() {
@@ -2413,7 +2428,7 @@ function jcFill() {
     : "등록된 도메인이 없습니다 — 아래 [도메인 등록]에서 먼저 만드세요";
   $("jcMsg").textContent = "";
 }
-$("jcDomain").onchange = jcFill;
+$("jcDomain").onchange = () => { jcFill(); veLoad(); vcLoad(); };   // 도메인 = 설정 한 벌
 $("jcSave").onclick = async () => {
   const name = $("jcDomain").value, d = _DOMS[name];
   if (!d) { $("jcMsg").textContent = "도메인을 먼저 고르세요"; return; }
@@ -2428,7 +2443,7 @@ $("jcSave").onclick = async () => {
 };
 
 async function vcLoad() {
-  const j = await fetch("/admin/cluster-config").then(r => r.ok ? r.json() : null)
+  const j = await fetch("/admin/cluster-config" + jcQ()).then(r => r.ok ? r.json() : null)
     .catch(() => null);
   if (!j) return;
   $("vcHigh").value = j.sim_high; $("vcThr").value = j.sim_threshold;
@@ -2439,7 +2454,7 @@ async function vcLoad() {
   $("vcMsg").textContent = "";
 }
 $("vcSave").onclick = async () => {
-  const r = await fetch("/admin/cluster-config", {method: "PUT",
+  const r = await fetch("/admin/cluster-config" + jcQ(), {method: "PUT",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({sim_high: parseFloat($("vcHigh").value),
                           sim_threshold: parseFloat($("vcThr").value),
@@ -2492,7 +2507,8 @@ function veRender() { _veNorm(); veCanvas(); veDetail(); veGate(); veRail(); }
 
 async function veLoad() {
   vePosLoad();
-  const j = await fetch("/admin/entity-schema").then(r => r.ok ? r.json() : null).catch(() => null);
+  const j = await fetch("/admin/entity-schema" + jcQ()).then(r => r.ok ? r.json() : null)
+    .catch(() => null);
   const {chain, attrs} = normEtypes(parseEtypes(j && j.etypes));
   VE.chain = chain; VE.attrs = attrs;
   VE.sel = {kind: "chain", i: 0}; VE.dirty = false;
@@ -2503,7 +2519,7 @@ async function veLoad() {
 }
 async function veSave() {
   if (!veGate()) { $("veMsg").textContent = "위 ⚠ 사유를 먼저 해결하세요"; return; }
-  const r = await fetch("/admin/entity-schema", {method: "PUT",
+  const r = await fetch("/admin/entity-schema" + jcQ(), {method: "PUT",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({etypes: veTypesRead(),
                           criteria: $("veCrit").value, descr: $("veDescr").value})});
@@ -3370,7 +3386,8 @@ const TABS = {
   users:   {secs: ["sec-users"], load: () => loadUsers()},
   data:    {secs: ["sec-data"], load: () => loadDataVer()},
   entity:  {secs: ["sec-entity"],
-            load: () => { veLoad(); jcLoad(); vcLoad(); loadDomains(); }},
+            // 도메인 먼저 — 스키마·병합은 그 도메인 것을 읽는다 (판정 설정 = 도메인 한 벌)
+            load: async () => { await jcLoad(); veLoad(); vcLoad(); loadDomains(); }},
   mapping: {secs: ["sec-mapping"], load: () => { loadMvEditor(); loadMappingVer(); }},
   sources: {secs: ["sec-sources", "sec-status", "sec-pipeline"],
             load: () => { loadDomainOptions(true); loadSources();

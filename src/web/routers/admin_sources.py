@@ -33,6 +33,7 @@ class DomainIn(BaseModel):
     priority: int = 100  # 낮을수록 먼저 대조. 최하순위가 폴백 도메인
     extract_hint: str = ""  # 도메인별 추출 지침 — 목표·접근법 추출 프롬프트에 주입 (대화·문서 공통)
     scope: Literal["both", "chat", "doc"] = "both"  # both(대화+문서) | chat(대화 전용) | doc(문서 전용)
+    copy_from: str = ""   # 새 도메인의 추출 스키마·병합 설정을 복사할 원본 도메인 (빈값=기본값)
 
     @field_validator("name", "tools", "extract_hint")
     @classmethod
@@ -94,9 +95,17 @@ def admin_domain_add(inp: DomainIn):
                        VALUES (:n, 1, :t, :p, :h, :s, 'Y')""",
                     {"n": inp.name, "t": inp.tools or None, "p": inp.priority,
                      "h": inp.extract_hint or None, "s": inp.scope})
+        # 도메인 = 판정 설정 한 벌 — 추출 스키마·병합 설정을 같이 만든다. 빈 값이 아니라
+        # 참조할 값으로 시작한다 (copy_from 도메인 → 씨앗 → 코드 기본).
+        seeded = not _has_config(cur, inp.name)
+        _schema_row(cur, inp.name, inp.copy_from)
+        _cluster_row(cur, inp.name, inp.copy_from)
     note = {"doc": "문서 전용 — 소스(📚)에 지정하면 문서 구조화에 사용 (대화 분류엔 안 낌)",
             "chat": "대화 전용 — 다음 파이프라인 실행부터 신규 세션 분류에 반영",
             "both": "대화+문서 — 세션 분류와 소스 문서 구조화 양쪽에 사용"}[inp.scope]
+    if seeded:
+        src = inp.copy_from or "기본값"
+        note += f" · 추출 스키마·병합 설정을 '{src}'에서 복사해 만들었습니다 (판정 설정에서 수정)"
     return {"ok": True, "name": inp.name, "scope": inp.scope, "note": note}
 
 
@@ -640,53 +649,89 @@ def _cluster_vals(inp) -> dict:
 # 엔티티 스키마는 **한 벌**이다 — 라인·버전 관리를 없앴다 (2026-08-20 결정).
 # 이유: 버전 수·라인 목록이 화면 복잡도의 절반을 차지하는데, 실제로 쓰는 건 항상 최신 한 벌.
 # 저장은 덮어쓰기(이력 없음). 이미 만들어진 run은 자기 스냅샷을 들고 있어 재현·비교가 유지된다.
-SCHEMA_LINE = "기본"
+# 판정 설정의 단위는 **도메인**이다 (2026-08-21 결정) — 도메인 하나가 지침·추출 스키마·
+# 병합 설정을 한 벌로 들고 있다. entity_versions/cluster_versions의 name 컬럼(옛 '라인')을
+# 도메인 이름으로 쓰고 version은 항상 1 — 이력은 run 스냅샷이 담당한다.
+SEED_LINE = "기본"   # 옛 전역 한 벌 = 새 도메인이 복사해 시작하는 씨앗 (템플릿)
 
 
-def _schema_row(cur) -> tuple[str, int]:
-    """단일 스키마가 사는 (라인, 버전) = (기본, 1). 여러 행이 남아 있으면 한 벌로 접는다.
-    접기 규칙: 남길 내용 = 기본 라인의 최신 버전 (없으면 아무 라인의 최신) — 마지막으로 쓰던 스키마.
-    관례와 다른 지점: 여기서만 name·version을 직접 UPDATE한다 (versioning 헬퍼는 append 전용)."""
+def _has_config(cur, domain: str) -> bool:
+    """이 도메인에 판정 설정(추출 스키마) 행이 이미 있나 — 안내 문구용."""
     _ensure_entity_versions(cur)
-    cur.execute("SELECT COUNT(*) FROM entity_versions")
-    n = cur.fetchone()[0]
-    if not n:
-        versioning.new_line(cur, versioning.ENTITY_SPEC, SCHEMA_LINE, _EMPTY_SCHEMA_VALS)
-    elif n > 1:
-        cur.execute("""SELECT name, version FROM entity_versions
-                       ORDER BY CASE WHEN name = :1 THEN 0 ELSE 1 END, version DESC
-                       FETCH FIRST 1 ROWS ONLY""", [SCHEMA_LINE])
-        keep = cur.fetchone()
-        cur.execute("DELETE FROM entity_versions WHERE NOT (name = :1 AND version = :2)", keep)
-    # 원문 프롬프트 override(고급)는 UI에서 없앴다 — 남아 있으면 조용히 조립 결과를 덮어쓰므로 비운다
-    cur.execute("""UPDATE entity_versions SET name = :1, version = 1, is_default = 'Y',
-                   doc_prompt = NULL, pack_prompt = NULL, note = NULL""", [SCHEMA_LINE])
-    return SCHEMA_LINE, 1
+    cur.execute("SELECT 1 FROM entity_versions WHERE name = :1 AND version = 1", [domain])
+    return bool(cur.fetchone())
 
+
+def _first_domain(cur, domain: str = "") -> str:
+    """대상 도메인 — 지정값 우선, 없으면 등록된 첫 도메인(우선순위 순)."""
+    if (domain or "").strip():
+        return domain.strip()
+    ensure_domain_registry(cur)
+    cur.execute("SELECT name FROM domain_registry ORDER BY priority, name FETCH FIRST 1 ROWS ONLY")
+    r = cur.fetchone()
+    if not r:
+        raise HTTPException(400, "등록된 도메인이 없습니다 — 도메인을 먼저 만드세요")
+    return r[0]
 
 _EMPTY_SCHEMA_VALS = {"doc_prompt": None, "pack_prompt": None, "criteria": None,
                       "descr": None, "etypes": None}
 
 
-@router.get("/admin/entity-schema")
-def admin_entity_schema():
-    """지금 쓰는 엔티티 스키마 한 벌 + 코드 기본 프롬프트."""
-    with db_cursor() as cur:
-        name, ver = _schema_row(cur)
+def _schema_row(cur, domain: str, copy_from: str = "") -> str:
+    """도메인의 추출 스키마 행을 보장하고 도메인 이름을 반환 (version은 항상 1).
+
+    없으면 만든다 — 빈 값이 아니라 **참조할 값**으로 시작한다: copy_from 도메인 → 옛 전역
+    한 벌('기본') → 코드 기본. 새 도메인을 만들 때 빈 화면을 주면 사용자가 무엇을 채워야
+    하는지 알 수 없다(오늘 kin_qna 빈 스냅샷이 그 사례)."""
+    _ensure_entity_versions(cur)
+    cur.execute("SELECT 1 FROM entity_versions WHERE name = :1 AND version = 1", [domain])
+    if cur.fetchone():
+        cur.execute("""UPDATE entity_versions SET is_default = 'Y', doc_prompt = NULL,
+                       pack_prompt = NULL, note = NULL
+                       WHERE name = :1 AND version = 1""", [domain])
+        return domain
+    src = None
+    for cand in (copy_from, SEED_LINE):
+        if not cand:
+            continue
         cur.execute("""SELECT criteria, descr, etypes FROM entity_versions
-                       WHERE name = :1 AND version = :2""", [name, ver])
+                       WHERE name = :1 ORDER BY version DESC FETCH FIRST 1 ROWS ONLY""", [cand])
+        src = cur.fetchone()
+        if src:
+            break
+    if not src:   # 아무 행도 없으면 아무거나 하나 (첫 부팅 뒤 두 번째 도메인 등)
+        cur.execute("""SELECT criteria, descr, etypes FROM entity_versions
+                       ORDER BY version DESC FETCH FIRST 1 ROWS ONLY""")
+        src = cur.fetchone()
+    cur.setinputsizes(cr=oracledb.DB_TYPE_CLOB, et=oracledb.DB_TYPE_CLOB)
+    cur.execute("""INSERT INTO entity_versions (name, version, criteria, descr, etypes, is_default)
+                   VALUES (:nm, 1, :cr, :ds, :et, 'Y')""",
+                {"nm": domain, "cr": _lob_str(src[0]) or None if src else None,
+                 "ds": (src[1] if src else None) or None,
+                 "et": _lob_str(src[2]) or None if src else None})
+    return domain
+
+
+@router.get("/admin/entity-schema")
+def admin_entity_schema(domain: str = ""):
+    """이 도메인의 추출 스키마 + 코드 기본 프롬프트. domain 미지정=첫 도메인."""
+    with db_cursor() as cur:
+        dom = _first_domain(cur, domain)
+        name = _schema_row(cur, dom)
+        cur.execute("""SELECT criteria, descr, etypes FROM entity_versions
+                       WHERE name = :1 AND version = 1""", [name])
         r = cur.fetchone()
-    return {"criteria": _lob_str(r[0]), "descr": r[1] or "",
+    return {"domain": dom, "criteria": _lob_str(r[0]), "descr": r[1] or "",
             "etypes": _lob_str(r[2]),
             "defaults": {"doc_prompt": _judge.DOC_PROMPT, "pack_prompt": _judge.PACK_PROMPT}}
 
 
 @router.put("/admin/entity-schema")
-def admin_entity_schema_put(inp: EntityVersionIn):
+def admin_entity_schema_put(inp: EntityVersionIn, domain: str = ""):
     """덮어쓰기 저장 — 검증은 EntityVersionIn의 _etypes가 그대로 한다."""
     import json
     with db_cursor() as cur:
-        name, ver = _schema_row(cur)
+        name, ver = _schema_row(cur, _first_domain(cur, domain)), 1
         cur.setinputsizes(etypes=oracledb.DB_TYPE_CLOB, criteria=oracledb.DB_TYPE_CLOB)
         cur.execute("""UPDATE entity_versions
                        SET etypes = :etypes, criteria = :criteria, descr = :descr
@@ -694,7 +739,7 @@ def admin_entity_schema_put(inp: EntityVersionIn):
                     {"etypes": json.dumps(inp.etypes, ensure_ascii=False) if inp.etypes else None,
                      "criteria": inp.criteria.strip() or None,
                      "descr": inp.descr.strip() or None, "nm": name, "vr": ver})
-    return {"ok": True, "note": "엔티티 스키마 저장됨 — 새로 만드는 run이 이 스키마로 판정합니다"}
+    return {"ok": True, "note": f"'{name}' 추출 스키마 저장됨 — 이 도메인의 새 run이 이 기준으로 판정합니다"}
 
 
 class EntityPreviewIn(BaseModel):
@@ -749,48 +794,68 @@ def admin_entity_preview(inp: EntityPreviewIn):
 # 근거: 버전 4개를 만들어놓고 run 11개가 전부 v1만 썼다. 판정 설정(도메인 지침·추출
 # 스키마·병합)은 항상 같이 바뀌고 바꾸면 전량 재구조화가 필요해서 변경 단위가 한 벌이다.
 # 이력은 run 스냅샷이 담당한다 (조합 전체를 얼려 재현·비교가 되는 유일한 지점).
-CLUSTER_LINE = "기본"
-
-
 def _select_tmpl() -> str:
     """후보선택 프롬프트 코드 기본값 — llm.py의 단일 정의를 그대로 보여준다."""
     from graph.graph_pipeline.llm import SELECT_PROMPT_TMPL
     return SELECT_PROMPT_TMPL
 
 
-def _cluster_row(cur) -> tuple[str, int]:
-    """단일 병합 설정이 사는 (라인, 버전) = (기본, 1). 여러 행이 남아 있으면 접는다.
-    남길 내용 = 기본 라인의 최신 (마지막으로 쓰던 설정). 관례와 다른 지점: 여기서만
-    name·version을 직접 UPDATE한다 (versioning 헬퍼는 append 전용)."""
+def _cluster_row(cur, domain: str, copy_from: str = "") -> str:
+    """도메인의 병합(dedup) 설정 행을 보장하고 도메인 이름을 반환 (version은 항상 1).
+    없으면 copy_from → 씨앗('기본') → 아무 행 순으로 복사해 만든다 (빈 값으로 시작 금지)."""
     _ensure_cluster_versions(cur)
-    cur.execute("SELECT COUNT(*) FROM cluster_versions")
-    n = cur.fetchone()[0]
-    if not n:
-        versioning.new_line(cur, versioning.CLUSTER_SPEC, CLUSTER_LINE,
-                            {c: None for c in versioning.CLUSTER_SPEC.content_cols})
-    elif n > 1:
-        cur.execute("""SELECT name, version FROM cluster_versions
-                       ORDER BY CASE WHEN name = :1 THEN 0 ELSE 1 END, version DESC
-                       FETCH FIRST 1 ROWS ONLY""", [CLUSTER_LINE])
-        keep = cur.fetchone()
-        cur.execute("DELETE FROM cluster_versions WHERE NOT (name = :1 AND version = :2)", keep)
-    cur.execute("""UPDATE cluster_versions SET name = :1, version = 1, is_default = 'Y',
-                   note = NULL""", [CLUSTER_LINE])
-    return CLUSTER_LINE, 1
+    cur.execute("SELECT 1 FROM cluster_versions WHERE name = :1 AND version = 1", [domain])
+    if cur.fetchone():
+        cur.execute("""UPDATE cluster_versions SET is_default = 'Y', note = NULL
+                       WHERE name = :1 AND version = 1""", [domain])
+        return domain
+    cols = "sim_high, sim_threshold, short_name_chars, char_ratio, select_max, select_prompt"
+    src = None
+    for cand in ([copy_from, SEED_LINE] if copy_from else [SEED_LINE]):
+        cur.execute(f"""SELECT {cols} FROM cluster_versions
+                        WHERE name = :1 ORDER BY version DESC FETCH FIRST 1 ROWS ONLY""", [cand])
+        src = cur.fetchone()
+        if src:
+            break
+    if not src:
+        cur.execute(f"SELECT {cols} FROM cluster_versions ORDER BY version DESC "
+                    "FETCH FIRST 1 ROWS ONLY")
+        src = cur.fetchone()
+    d = _merge_defaults()
+    vals = ([float(src[0]) if src[0] is not None else d["sim_high"],
+             float(src[1]) if src[1] is not None else d["sim_threshold"],
+             int(src[2]) if src[2] is not None else d["short_name_chars"],
+             float(src[3]) if src[3] is not None else d["char_ratio"],
+             int(src[4]) if src[4] is not None else d["select_max"],
+             _lob_str(src[5]) or None] if src
+            else [d["sim_high"], d["sim_threshold"], d["short_name_chars"],
+                  d["char_ratio"], d["select_max"], None])
+    cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
+    cur.execute("""INSERT INTO cluster_versions
+                     (name, version, sim_high, sim_threshold, short_name_chars, char_ratio,
+                      select_max, select_prompt, is_default)
+                   VALUES (:nm, 1, :sh, :st, :sn, :cr, :sm, :sp, 'Y')""",
+                {"nm": domain, "sh": vals[0], "st": vals[1], "sn": vals[2],
+                 "cr": vals[3], "sm": vals[4], "sp": vals[5]})
+    return domain
+
+
+def _merge_defaults() -> dict:
+    from graph.graph_pipeline.merge import default_merge_cfg
+    return default_merge_cfg()
 
 
 @router.get("/admin/cluster-config")
-def admin_cluster_config():
-    """지금 쓰는 병합(dedup) 설정 한 벌 + 코드 기본값."""
+def admin_cluster_config(domain: str = ""):
+    """이 도메인의 병합(dedup) 설정 + 코드 기본값. domain 미지정=첫 도메인."""
     with db_cursor() as cur:
-        name, ver = _cluster_row(cur)
+        name = _cluster_row(cur, _first_domain(cur, domain))
         cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
                               select_max, select_prompt FROM cluster_versions
-                       WHERE name = :1 AND version = :2""", [name, ver])
+                       WHERE name = :1 AND version = 1""", [name])
         r = cur.fetchone()
-    from graph.graph_pipeline.merge import default_merge_cfg
-    d = default_merge_cfg()
-    return {"sim_high": float(r[0]) if r[0] is not None else d["sim_high"],
+    d = _merge_defaults()
+    return {"domain": name, "sim_high": float(r[0]) if r[0] is not None else d["sim_high"],
             "sim_threshold": float(r[1]) if r[1] is not None else d["sim_threshold"],
             "short_name_chars": int(r[2]) if r[2] is not None else d["short_name_chars"],
             "char_ratio": float(r[3]) if r[3] is not None else d["char_ratio"],
@@ -801,10 +866,10 @@ def admin_cluster_config():
 
 
 @router.put("/admin/cluster-config")
-def admin_cluster_config_put(inp: ClusterVersionIn):
+def admin_cluster_config_put(inp: ClusterVersionIn, domain: str = ""):
     """덮어쓰기 저장 — 검증은 ClusterVersionIn이 그대로 한다."""
     with db_cursor() as cur:
-        name, ver = _cluster_row(cur)
+        name, ver = _cluster_row(cur, _first_domain(cur, domain)), 1
         cur.setinputsizes(sp=oracledb.DB_TYPE_CLOB)
         cur.execute("""UPDATE cluster_versions
                        SET sim_high = :sh, sim_threshold = :st, short_name_chars = :sn,
@@ -814,7 +879,7 @@ def admin_cluster_config_put(inp: ClusterVersionIn):
                      "sn": inp.short_name_chars, "cr": inp.char_ratio,
                      "sm": inp.select_max, "sp": inp.select_prompt.strip() or None,
                      "nm": name, "vr": ver})
-    return {"ok": True, "note": "병합 설정 저장됨 — 새로 만드는 run이 이 기준으로 합칩니다"}
+    return {"ok": True, "note": f"'{name}' 병합 설정 저장됨 — 이 도메인의 새 run이 이 기준으로 합칩니다"}
 
 
 # ── 조합 프리셋 (헬름차트식 — 차원별 버전 선택을 이름 있는 세트로 저장, 소스에 적용) ──
@@ -1467,25 +1532,14 @@ def admin_source_runs(sname: str):
             row["labels"] = sorted(lbl.get(row["run_id"], []))
         # stale 배지 (Dagster 패턴) — 활성 run의 조합이 현재 기본 버전들보다 뒤처졌는지
         from graph.doc_pipeline.runs import _default_mapping_ver, _default_data_ver
-        cn, cv = versioning.active(cur, "cluster_versions")
         mv = _default_mapping_ver(cur, sname)
         dv = _default_data_ver(cur, sname)
         for row in rows:
             if not row["active"]:
                 continue
             stale = []
-            try:
-                cur.execute("""SELECT NVL(v.version, 1) FROM domain_versions v
-                               WHERE v.name = :1 AND v.is_default = 'Y'""", [row["domain"]])
-                dmr = cur.fetchone()
-            except Exception:
-                dmr = None   # domain_versions 미생성 등 — stale은 부가정보라 조용히 생략
-            if dmr and row["domain_version"] and int(dmr[0]) != int(row["domain_version"]):
-                stale.append(f"도메인 v{row['domain_version']}→v{int(dmr[0])}")
-            def _lv(ln, v):   # 라인·버전 표기 (미지정 run은 '미지정')
-                return f"{ln}·v{v}" if v is not None else "미지정"
-            if cn and cv is not None and (row["cluster_line"], row["cluster_version"]) != (cn, cv):
-                stale.append(f"②병합 {_lv(row['cluster_line'], row['cluster_version'])}→{cn}·v{cv}")
+            # 판정 설정(도메인 지침·추출 스키마·병합)은 버전이 없어졌다 (2026-08-21) —
+            # 값이 바뀌었는지는 run 스냅샷을 열어 비교한다. 여기서는 소스 쪽 버전만 본다.
             if mv is not None and row["join_version"] not in (None, mv):
                 stale.append(f"매핑 v{row['join_version']}→v{mv}")
             if dv is not None and row["data_version"] not in (None, dv):
@@ -1814,11 +1868,10 @@ def admin_source_dryrun(sname: str, inp: DryrunIn):
                 for row in cur.fetchall()]
     if not docs:
         return {"domain": domain, "results": [], "note": "미처리 문서가 없습니다"}
-    # 활성 엔티티 버전의 스키마·지침으로 조립 — run이 실제로 쓸 프롬프트와 동일 기준
+    # 이 소스의 **도메인** 판정 설정으로 조립 — run이 실제로 쓸 프롬프트와 동일 기준
     doc_prompt, schema = "", _judge.DEFAULT_SCHEMA
     with db_cursor() as cur:
-        _ensure_entity_versions(cur)
-        en, ev = versioning.active(cur, "entity_versions")
+        en, ev = _schema_row(cur, domain), 1
         if en and ev is not None:
             cur.execute("""SELECT doc_prompt, criteria, etypes FROM entity_versions
                            WHERE name = :1 AND version = :2""", [en, ev])
