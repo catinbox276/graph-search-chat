@@ -240,14 +240,14 @@ def create_run(cur, source_name: str, domain="", domain_version=None,
     def _line_snapshot(name, ver):
         """(라인, 버전) → {schema, doc_prompt, pack_prompt, descr} — 조립 결과 스냅샷.
         원문(doc/pack) override가 있으면 그것 우선, 없으면 지침(criteria)을 스캐폴드에 주입."""
-        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, descr, etypes, rtypes
+        cur.execute("""SELECT doc_prompt, pack_prompt, criteria, descr, etypes
                        FROM entity_versions
                        WHERE name = :1 AND version = :2""", [name, ver])
         r = cur.fetchone()
         if not r:
             return None
         doc_p, pack_p, crit = _lob(r[0]), _lob(r[1]), _lob(r[2])
-        schema = _j.norm_schema(_jl(r[4]), _jl(r[5]))
+        schema = _j.norm_schema(_jl(r[4]))
         built_doc, built_pack = _j.build_prompts(schema, crit)
         return {"schema": schema, "descr": r[3] or "",
                 "doc_prompt": (doc_p or "").strip() or built_doc,

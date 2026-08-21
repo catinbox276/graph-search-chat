@@ -52,12 +52,12 @@ def _active_snapshots(cur):
     try:
         en, ev = versioning.active(cur, "entity_versions")
         if en and ev is not None:
-            cur.execute("""SELECT criteria, etypes, rtypes FROM entity_versions
+            cur.execute("""SELECT criteria, etypes FROM entity_versions
                            WHERE name = :1 AND version = :2""", [en, ev])
             r = cur.fetchone()
             if r:
                 crit = _lob(r[0])
-                schema = _j.norm_schema(_jl(r[1]), _jl(r[2]))
+                schema = _j.norm_schema(_jl(r[1]))
         cn, cv = versioning.active(cur, "cluster_versions")
         if cn and cv is not None:
             cur.execute("""SELECT sim_high, sim_threshold, short_name_chars, char_ratio,
@@ -94,8 +94,7 @@ def main():
     extract_tmpl = (_st.get("entity_extract_prompt") or "").strip() \
         or _j.build_session_extract_prompt(schema, crit)
     print(f"세션 추출 구성: {judged_with} · 체인 {'→'.join(c['key'] for c in chain)}"
-          f"{' · 속성 ' + str(len(schema.get('attrs') or [])) + '종' if schema.get('attrs') else ''}"
-          f"{' · 관계 ' + str(len(schema.get('relations') or [])) + '종' if schema.get('relations') else ''}",
+          f"{' · 속성 ' + str(len(schema.get('attrs') or [])) + '종' if schema.get('attrs') else ''}",
           flush=True)
     cur.execute("""SELECT id, question, tool_calls, answer FROM sessions
                    WHERE turn = 1 AND verdict IS NULL ORDER BY id""")
@@ -197,9 +196,9 @@ def main():
             for tool in sorted(tool_names):
                 get_or_create(cur, 8, f"tool:{tool}", sol, "session", sid,
                               use_embedding=False, mc=mc)
-            # 속성(9층)·관계 — 문서 파이프라인과 대칭 (apply_extras 공용, ref=세션id)
+            # 속성(9층) — 문서 파이프라인과 대칭 (apply_extras 공용, ref=세션id)
             ej = {t["key"]: j.get(t["key"]) for t in schema["attrs"]}
-            apply_extras(cur, schema, ej, j.get("relations"), entry_node, val2node,
+            apply_extras(cur, schema, ej, None, entry_node, val2node,
                          "session", sid)
         # 채택 판정: 이 세션에 노출된 제안 노드를 실제로 사용했는가 (유도 vs 자발 구분의 기초)
         cur.execute("""UPDATE suggestions s SET adopted =

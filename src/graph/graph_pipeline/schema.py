@@ -86,23 +86,16 @@ def ddl(cur):
         cur.execute("UPDATE nodes SET role_tag = 'solution' WHERE layer = 3")  # 구 접근법층
         cur.execute("UPDATE nodes SET layer = 9 WHERE layer = 5")              # 속성 5→9
         cur.execute("UPDATE nodes SET layer = 8 WHERE layer = 4")              # 도구 4→8
-    # entity_relations — 타입드 관계 (Graphiti edge_type_map 포팅). 카운트 없는 존재 기반:
-    # 활성 여부는 조회 시 run 스코핑(doc_runs.active), 회수는 ref 단위 DELETE — ±1 기계 불필요.
+    # entity_relations 제거 (2026-08-21) — 문서당 속성이 1개씩이라 관계가 정보를 더하지
+    # 않았다(측정: library/task 모두 문서당 1개). one-shot DROP: 테이블이 있을 때만.
     cur.execute("SELECT COUNT(*) FROM user_tables WHERE table_name = 'ENTITY_RELATIONS'")
-    if not cur.fetchone()[0]:
-        cur.execute("""CREATE TABLE entity_relations (
-            src     VARCHAR2(36) NOT NULL,
-            dst     VARCHAR2(36) NOT NULL,
-            rtype   VARCHAR2(64) NOT NULL,
-            ref     VARCHAR2(400) NOT NULL,
-            run_id  VARCHAR2(32) DEFAULT '-' NOT NULL,
-            created TIMESTAMP DEFAULT SYSTIMESTAMP,
-            CONSTRAINT entity_relations_pk PRIMARY KEY (src, dst, rtype, ref, run_id),
-            CONSTRAINT entity_relations_src_fk FOREIGN KEY (src)
-              REFERENCES nodes(id) ON DELETE CASCADE,
-            CONSTRAINT entity_relations_dst_fk FOREIGN KEY (dst)
-              REFERENCES nodes(id) ON DELETE CASCADE)""")
-        cur.execute("CREATE INDEX entity_relations_dst_ix ON entity_relations (dst)")
+    if cur.fetchone()[0]:
+        cur.execute("DROP TABLE entity_relations")
+    # entity_versions.rtypes(관계 정의) 컬럼도 함께 제거 — 관계가 없으면 담을 게 없다
+    cur.execute("""SELECT COUNT(*) FROM user_tab_columns
+                   WHERE table_name = 'ENTITY_VERSIONS' AND column_name = 'RTYPES'""")
+    if cur.fetchone()[0]:
+        cur.execute("ALTER TABLE entity_versions DROP COLUMN rtypes")
     ensure_domain_registry(cur)
     from graph.doc_pipeline.runs import ensure_runs  # 지연 import — 순환 방지
     ensure_runs(cur)

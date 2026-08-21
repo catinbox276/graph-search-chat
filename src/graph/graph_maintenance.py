@@ -167,6 +167,32 @@ def pass3_decay(cur):
     return decayed
 
 
+def pass_attr_embed(cur, limit=500):
+    """속성 노드(9층) 임베딩 백필 — 벡터가 없으면 검색 진입에서 이 값에 닿지 못한다.
+    병합 기준은 여전히 이름 정확일치라 벡터는 조회에만 쓴다 (merge.upsert_entity 주석).
+    새로 만드는 노드는 생성 시 채워지고, 이 pass는 그 전에 만들어진 노드를 메꾼다."""
+    cur.execute(f"""SELECT id, name FROM nodes
+                    WHERE layer = 9 AND embedding IS NULL AND name IS NOT NULL
+                    FETCH FIRST {int(limit)} ROWS ONLY""")
+    rows = cur.fetchall()
+    if not rows:
+        print("  [속성 임베딩] 백필 대상 없음", flush=True)
+        return 0
+    from graph.graph_pipeline.llm import embed
+    done = 0
+    for nid, name in rows:
+        try:
+            vec = embed(name, "")
+        except Exception as e:
+            print(f"  [속성 임베딩] 중단 — {type(e).__name__}: {str(e)[:100]}", flush=True)
+            break            # 엔드포인트가 죽었으면 나머지도 실패한다 — 다음 배치에서 재시도
+        cur.execute("UPDATE nodes SET embedding = :1 WHERE id = :2",
+                    [json.dumps(vec).encode(), nid])
+        done += 1
+    print(f"  [속성 임베딩] {done}/{len(rows)}건 백필", flush=True)
+    return done
+
+
 def pass4_integrity(cur):
     """무결성 점검 리포트 — FK가 못 막는 참조를 검사해 위반을 침묵이 아닌 리포트로.
     (노드 참조는 FK 캐스케이드가 강제하므로 여기선 '바깥' 참조만: 세션·문서·도메인)
@@ -210,11 +236,12 @@ def main():
     m = pass1_sibling_merge(cur)
     a = pass2_leaf_absorb(cur, age)
     d = pass3_decay(cur)
+    e = pass_attr_embed(cur)
     con.commit()
     bad = pass4_integrity(cur)
     cur.execute("SELECT COUNT(*) FROM nodes")
     print(f"완료: 형제 통합 {m}건, 잎 흡수 {a}건 (age>={age}d), 감쇠 {d}건, "
-          f"무결성 위반 {bad}건 — 노드 {before} -> {cur.fetchone()[0]}")
+          f"속성 임베딩 {e}건, 무결성 위반 {bad}건 — 노드 {before} -> {cur.fetchone()[0]}")
     con.close()
     # 활동 로그 보관 회전 — "전부 쌓기"의 무한 증가 방지 (config.EVENTS_RETAIN_DAYS)
     from core import events

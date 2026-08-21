@@ -242,18 +242,15 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
                         val2node[(c["key"], cv_)] = parent
                         if i == 0:
                             entry_node = parent
-                    # 속성(attr, 9층)·관계(rtypes) — 세션 파이프라인과 공용 apply_extras.
+                    # 속성(attr, 9층) — 세션 파이프라인과 공용 apply_extras.
                     # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
                     ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
                     legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
                     if not any(v for v in ej.values()) and isinstance(legacy, dict):
                         ej = legacy
-                    ats, rels_out = apply_extras(cur, sc, ej, j.get("relations"),
-                                                 entry_node, val2node, "doc", ref,
-                                                 run_id=run_id, count=count)
+                    ats, _ = apply_extras(cur, sc, ej, None, entry_node, val2node,
+                                          "doc", ref, run_id=run_id, count=count)
                     attrs_out.update(ats)
-                    if rels_out:
-                        attrs_out["_relations"] = rels_out   # run별 결과에 함께 기록
                     status, note = "done", str(j.get("reason") or "")[:1000]
                 elif j.get("fits"):   # fits인데 체인 값 일부 누락 — 우회 연결 금지
                     missing = ", ".join(c["key"] for c in chain if not j.get(c["key"]))

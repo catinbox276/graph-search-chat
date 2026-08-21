@@ -18,9 +18,12 @@ _DEF_SOLUTION = {"key": "approach", "label": "접근법", "desc": "핵심 해법
 
 
 def norm_schema(etypes, rtypes=None) -> dict:
-    """etypes 행 + rtypes 행 → {chain, entry, solution, solution_pos, attrs, relations}.
-    entry/solution 접근자는 항상 채워짐(체인의 태그 칸 참조) — 2슬롯 리더 하위호환.
-    관계의 source/target은 스키마 타입 키(체인 전 키+속성 키)에 실존해야 하며 아니면 버린다."""
+    """etypes 행 → {chain, entry, solution, solution_pos, attrs}.
+
+    rtypes(관계)는 2026-08-21에 제거됐다 — 문서당 속성이 1개씩이라 관계가 정보를
+    더하지 않았다(측정: library/task 모두 문서당 1개, 239/216건). 인자는 옛 run
+    스냅샷·호출부 호환으로 받고 무시한다.
+    entry/solution 접근자는 항상 채워짐(체인의 태그 칸 참조) — 2슬롯 리더 하위호환."""
     chain, attrs, legacy_e, legacy_s = [], [], None, None
     for t in (etypes or []):
         if not (isinstance(t, dict) and str(t.get("key", "")).strip()):
@@ -52,20 +55,8 @@ def norm_schema(etypes, rtypes=None) -> dict:
         spos = len(chain) - 1
     for i, c in enumerate(chain):
         c["tags"] = (["entry"] if i == 0 else []) + (["solution"] if i == spos else [])
-    keys = {c["key"] for c in chain} | {a["key"] for a in attrs}
-    relations = []
-    for r in (rtypes or []):
-        if not (isinstance(r, dict) and str(r.get("key", "")).strip()):
-            continue
-        src, tgt = str(r.get("source", "")).strip(), str(r.get("target", "")).strip()
-        if src not in keys or tgt not in keys:
-            continue   # 시그니처가 스키마 밖 — 무효 행 폐기
-        relations.append({"key": str(r["key"]).strip(),
-                          "label": str(r.get("label", "")).strip() or str(r["key"]).strip(),
-                          "desc": str(r.get("desc", "")).strip(),
-                          "source": src, "target": tgt})
     return {"chain": chain, "entry": chain[0], "solution": chain[spos],
-            "solution_pos": spos, "attrs": attrs, "relations": relations}
+            "solution_pos": spos, "attrs": attrs}
 
 
 DEFAULT_SCHEMA = norm_schema([])   # 리터럴과 정규화 결과가 절대 어긋나지 않게
@@ -92,31 +83,7 @@ def _out_fields(schema: dict, brief: bool = False, src: str = "문서") -> str:
     for a in schema["attrs"]:
         lines.append(f' "{a["key"]}": "{a["desc"] or a["label"]}'
                      f' ({src}에서 확인될 때만 — 없으면 이 키를 생략)"')
-    if schema.get("relations"):
-        lines.append(' "relations": [{"type": "<관계 타입 키>", '
-                     '"source": "<출발 엔티티 값>", "target": "<도착 엔티티 값>"}]')
     return ",\n".join(lines)
-
-
-def _rel_block(schema: dict, src: str = "문서") -> str:
-    """관계 타입 카탈로그 + 추출 규칙 — Graphiti extract_edges의 FACT_TYPES/RULES 포팅.
-    관계가 정의된 스키마에서만 프롬프트에 붙는다. src: "문서" 또는 "대화"."""
-    rels = schema.get("relations") or []
-    if not rels:
-        return ""
-    tl = {t["key"]: (t.get("label") or t["key"])
-          for t in [*chain_view(schema)[0], *schema["attrs"]]}
-    lines = "\n".join(
-        f'- {r["key"]} ({r["label"]}): {r["desc"] or "(설명 없음)"}'
-        f' [시그니처: {tl.get(r["source"], r["source"])} → {tl.get(r["target"], r["target"])}]'
-        for r in rels)
-    return f"""
-
-관계 추출 규칙 — 추출했다면 아래 관계 타입에 해당하는 사실만 "relations" 배열로 추출하라:
-{lines}
-- source/target에는 반드시 위 필드들로 이 {src}에서 추출한 엔티티 값을 그대로 쓴다
-  (목록에 없는 이름을 쓰면 그 관계는 폐기된다). source와 target은 서로 달라야 한다.
-- {src}에 명시되었거나 명백히 함의된 관계만 — 추측 금지. 해당 없으면 빈 배열 []."""
 
 
 def _crit_block(criteria: str) -> str:
@@ -143,7 +110,7 @@ def build_doc_prompt(schema: dict | None = None, criteria: str = "") -> str:
 fits=false로 판정할 것:
 - 도메인과 무관한 내용
 - {labels}도 찾을 수 없는 글, 결말·결론 없이 끝나는 글
-- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글{_rel_block(sc)}"""
+- 내용이 너무 빈약해 지식으로 일반화할 수 없는 글"""
 
 
 def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
@@ -163,7 +130,7 @@ def build_pack_prompt(schema: dict | None = None, criteria: str = "") -> str:
 {_out_fields(sc, brief=True)}}}, ...]
 
 fits=false로 판정할 것: 도메인과 무관 / {labels}도 없음 / 결말·결론 없음 / 내용이 빈약함.
-각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다.{_rel_block(sc)}"""
+각 문서는 독립적으로 판정하라 — 다른 문서의 내용이 판정에 영향을 주면 안 된다."""
 
 
 def build_prompts(schema: dict | None = None, criteria: str = "") -> tuple:
@@ -207,7 +174,7 @@ def build_session_extract_prompt(schema: dict | None = None, criteria: str = "")
 fits=false로 판정할 것: 도메인·업무와 무관한 잡담, 일반 상식 질문(요리·생활·시사 등) —
 조직 지식으로 축적할 가치가 없는 대화.
 grounded=false로 판정할 것: 최종 답변이 도구 결과(검색된 문서·조회된 데이터)에 근거하지 않고
-모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함).{_rel_block(sc, src="대화")}"""
+모델의 일반 지식만으로 작성된 경우 (예: 검색이 0건이거나 무관한 결과뿐인데 답변함)."""
 
 
 def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -> str:
@@ -234,7 +201,7 @@ def build_session_judge_prompt(schema: dict | None = None, criteria: str = "") -
 - success: 답변이 판정 기준의 핵심(문제 해결)을 달성함. 인용 형식이 미흡해도 해결책이 맞으면 success
 - fail: 접근 자체가 막힌 경우만 — 데이터/글이 존재하지 않아 목표 달성이 불가능했고 답변이 이를 인정함
   (기준이 '실패 인정'이면 인정했을 때 fail)
-- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우{_rel_block(sc, src="대화")}"""
+- unknown: 판단 불가, 근거 없이 지어냄, 또는 답변 품질이 미달이지만 접근이 막힌 건 아닌 경우"""
 
 
 def build_session_prompts(schema: dict | None = None, criteria: str = "") -> tuple:

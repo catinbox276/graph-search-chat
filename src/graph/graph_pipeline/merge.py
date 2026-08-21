@@ -38,18 +38,30 @@ def upsert_entity(cur, etype: str, value: str, parent_id: str,
                   ev_kind: str, ev_ref: str, run_id: str = "-", count: bool = True) -> str:
     """관리자 정의 타입 엔티티 노드 — (entity_type, name) 전역 정확일치 병합.
 
-    시간·회사명 같은 구조화 값이라 임베딩 유사도 병합을 안 쓴다 (2024-03과 2024-04가
+    시간·회사명 같은 구조화 값이라 임베딩 유사도 **병합**을 안 쓴다 (2024-03과 2024-04가
     비슷하다고 합쳐지면 안 됨). 같은 값은 전역에서 노드 1개 — 여러 목표/문서가 같은
     회사·시점을 공유하며 연결되는 게 이 층의 가치. 엣지·증거는 get_or_create와 동일
-    규약이라 활성 전환(_run_edge_delta)·초기화(_reset_source)가 자동으로 커버한다."""
+    규약이라 활성 전환(_run_edge_delta)·초기화(_reset_source)가 자동으로 커버한다.
+
+    임베딩은 **검색 진입용으로만** 채운다 (2026-08-21) — 사용자가 "PostgreSQL 노하우"
+    처럼 속성 값으로 묻는 경우가 실제로 많고(측정: 속성이 붙은 문서 311/333건),
+    벡터가 없으면 path_suggest의 의미 검색이 이 노드에 닿지 못한다. 병합 판정은
+    여전히 이름 정확일치만 본다 — 벡터는 조회에만 쓴다."""
     cur.execute("""SELECT id FROM nodes WHERE layer = :1 AND entity_type = :2 AND name = :3""",
                 [ENTITY_LAYER, etype, value])
     r = cur.fetchone()
     node_id = r[0] if r else None
     if node_id is None:
+        vec = None
+        try:                     # 임베딩 실패는 무해 — 렉시컬 진입은 벡터 없이도 된다
+            vec = embed(value, "")
+        except Exception as e:
+            print(f"[속성 embed 실패→벡터없이 진행] {type(e).__name__}: {str(e)[:100]}", flush=True)
         node_id = uuid.uuid4().hex[:32]
-        cur.execute("""INSERT INTO nodes (id, layer, name, entity_type)
-                       VALUES (:1, :2, :3, :4)""", [node_id, ENTITY_LAYER, value, etype])
+        cur.execute("""INSERT INTO nodes (id, layer, name, entity_type, embedding)
+                       VALUES (:1, :2, :3, :4, :5)""",
+                    [node_id, ENTITY_LAYER, value, etype,
+                     json.dumps(vec).encode() if vec is not None else None])
     if parent_id:
         cur.execute("""MERGE INTO edges e USING dual ON (e.src=:src AND e.dst=:dst)
                        WHEN MATCHED THEN UPDATE SET raw_count = raw_count+:inc,
@@ -65,28 +77,13 @@ def upsert_entity(cur, etype: str, value: str, parent_id: str,
     return node_id
 
 
-def upsert_relation(cur, rtype: str, src_id: str, dst_id: str,
-                    ref: str, run_id: str = "-"):
-    """타입드 관계 존재 기록 — (src,dst,rtype,ref,run_id) 멱등 MERGE.
-    카운트 없음: 활성 여부는 조회 시 run 스코핑, 회수는 ref 단위 DELETE."""
-    if src_id == dst_id:
-        return   # self-edge 폐기 (Graphiti 규칙)
-    cur.execute("""MERGE INTO entity_relations r USING dual
-                   ON (r.src = :s AND r.dst = :d AND r.rtype = :t
-                       AND r.ref = :f AND r.run_id = :rid)
-                   WHEN NOT MATCHED THEN INSERT (src, dst, rtype, ref, run_id)
-                   VALUES (:s, :d, :t, :f, :rid)""",
-                {"s": src_id, "d": dst_id, "t": rtype, "f": ref, "rid": run_id})
-
-
 def apply_extras(cur, sc, ej, rj, anchor, val2node, ev_kind, ref,
                  run_id: str = "-", count: bool = True) -> tuple:
-    """스키마의 속성(9층)·관계(rtypes)를 판정 결과에서 병합 — (attrs_out, rels_out) 반환.
+    """스키마의 속성(9층)을 판정 결과에서 병합 — (attrs_out, []) 반환.
     문서·세션 파이프라인 공용. ej: {속성키: 값}(호출자가 legacy 폴백 처리),
-    rj: LLM의 relations 리스트(검증 전), anchor: 속성이 붙는 진입점 노드,
-    val2node: (타입키, 값)→노드id — 진입점·추천단위를 담아 오면 속성이 여기 추가됨.
-    관계는 스키마 타입·이 판정의 추출값 화이트리스트 검증(코드) 후 저장,
-    위반 행은 조용히 폐기 (Graphiti: 목록 밖 이름 = reject)."""
+    anchor: 속성이 붙는 진입점 노드, val2node: (타입키, 값)→노드id.
+    rj는 관계 제거(2026-08-21) 후 무시 — 옛 run 스냅샷 재생 시 인자가 남아 있어 받는다.
+    두 번째 반환값은 호출부 호환용 빈 리스트."""
     attrs_out = {}
     for ak, av in list((ej or {}).items())[:30]:
         if isinstance(av, (str, int, float)) and str(av).strip():
@@ -95,24 +92,7 @@ def apply_extras(cur, sc, ej, rj, anchor, val2node, ev_kind, ref,
             nid = upsert_entity(cur, ak_, av_, anchor, ev_kind, ref,
                                 run_id=run_id, count=count)
             val2node[(ak_, av_)] = nid
-    rdefs = {r["key"]: r for r in sc.get("relations") or []}
-    rels_out = []
-    if rdefs and isinstance(rj, list):
-        for rel in rj[:30]:
-            if not isinstance(rel, dict):
-                continue
-            rd = rdefs.get(str(rel.get("type", "")).strip())
-            sv = str(rel.get("source", "")).strip()[:400]
-            tv = str(rel.get("target", "")).strip()[:400]
-            if not (rd and sv and tv):
-                continue
-            sn = val2node.get((rd["source"], sv))
-            tn = val2node.get((rd["target"], tv))
-            if not (sn and tn) or sn == tn:
-                continue   # 추출값 목록 밖 / self-edge → 폐기
-            upsert_relation(cur, rd["key"], sn, tn, ref, run_id=run_id)
-            rels_out.append({"type": rd["key"], "source": sv, "target": tv})
-    return attrs_out, rels_out
+    return attrs_out, []
 
 
 def _auto_merge_ok(a: str, b: str, mc: dict) -> bool:

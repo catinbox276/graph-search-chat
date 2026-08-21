@@ -50,7 +50,12 @@ def suggest_paths(problem: str) -> str:
     N = 8
     sem_ids = ix.node_semantic(problem, N, SIM_ENTRY, layers={2})   # 목표 노드, 코사인 ≥ SIM_ENTRY만
     lex_ids = ix.node_lexical(problem, N, layers={2})
-    if not sem_ids and not lex_ids:
+    # 속성(9층)으로도 진입한다 (2026-08-21) — "PostgreSQL 노하우"처럼 값 이름으로 묻는
+    # 질문이 실제로 많은데(속성이 붙은 문서 311/333건) 목표 문장 검색만으로는 닿지 못했다.
+    # 순위는 여전히 목표 노드가 정한다 — 속성은 목표로 올라오는 '문' 하나를 더 여는 것.
+    attr_ids = set(ix.node_semantic(problem, N, SIM_ENTRY, layers={9})) \
+        | set(ix.node_lexical(problem, N, layers={9}))
+    if not sem_ids and not lex_ids and not attr_ids:
         return ("이 문제와 유사한 과거 해결 이력이 그래프에 없습니다. "
                 "새로운 유형의 문제이니 자유롭게 접근하세요 (해결하면 그래프에 새 경로로 축적됩니다).")
     rrf, sem_set, lex_set = {}, set(sem_ids), set(lex_ids)
@@ -58,10 +63,23 @@ def suggest_paths(problem: str) -> str:
         rrf[nid] = rrf.get(nid, 0.0) + 1.0 / (config.RRF_K + r + 1)
     for r, nid in enumerate(lex_ids):
         rrf[nid] = rrf.get(nid, 0.0) + 1.0 / (config.RRF_K + r + 1)
-    goals = sorted(rrf, key=rrf.get, reverse=True)      # node_id 리스트(RRF 내림차순)
     with _pool.acquire() as con:
         cur = con.cursor()
         _ensure_table(cur)
+        # 속성 매칭 → 그 값이 붙은 목표(진입점)로 한 홉 거슬러 올라가 합류.
+        # 속성 경유는 라벨을 달아 구분한다 (몰래 섞지 않는다 — 기존 태그 표기와 동일 원칙).
+        via_attr = {}
+        if attr_ids:
+            marks = ",".join(f":{i + 1}" for i in range(len(attr_ids)))
+            cur.execute(f"""SELECT p.id, a.name FROM edges e
+                            JOIN nodes a ON a.id = e.dst AND a.layer = 9
+                            JOIN nodes p ON p.id = e.src AND p.role_tag = 'entry'
+                            WHERE e.dst IN ({marks})""", list(attr_ids))
+            for pid, aname in cur.fetchall():
+                via_attr.setdefault(pid, aname)
+                # 속성 경유는 목표 직접 일치보다 낮게 — 넓은 값(예: '분류')이 상위를 밀어내지 않게
+                rrf[pid] = rrf.get(pid, 0.0) + 0.5 / (config.RRF_K + 1)
+        goals = sorted(rrf, key=rrf.get, reverse=True)  # node_id 리스트(RRF 내림차순)
         marks = ",".join(f":{i + 1}" for i in range(len(goals)))
         cur.execute(f"SELECT id, name FROM nodes WHERE id IN ({marks})", goals)
         gnames = {r[0]: r[1] for r in cur.fetchall()}
@@ -69,7 +87,9 @@ def suggest_paths(problem: str) -> str:
         for gid in goals[:3]:
             gname = gnames.get(gid, "?")
             tag = ("의미+키워드 일치" if gid in sem_set and gid in lex_set
-                   else "의미 유사" if gid in sem_set else "키워드 일치")
+                   else "의미 유사" if gid in sem_set
+                   else "키워드 일치" if gid in lex_set
+                   else f"속성 일치: {via_attr.get(gid, '')}")
             out.append(f"\n[유사 목표] {gname} ({tag})")
             # 성공/실패는 불리언 플래그가 아니라 세션 판정 카운트로 (poc-results 이슈2 해법)
             # v2 계층 체인: 진입점(2층)에서 체인 층(3..7)을 따라 내려가 검증귀속

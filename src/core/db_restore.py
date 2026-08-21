@@ -42,7 +42,7 @@ TABLES = [
     # 대화·run 이력
     "SESSIONS", "DOC_RUNS", "DOC_RESULTS", "RUN_LABELS",
     # 그래프 (nodes가 부모 — edges·증거·관계·제안이 참조)
-    "NODES", "EDGES", "NODE_EVIDENCE", "ENTITY_RELATIONS", "SUGGESTIONS",
+    "NODES", "EDGES", "NODE_EVIDENCE", "SUGGESTIONS",
 ]
 
 _TS_TYPES = ("TIMESTAMP", "DATE")
@@ -156,7 +156,7 @@ def _selfcheck() -> None:
     # FK 부모가 자식보다 먼저 오는지 (대표 쌍)
     idx = {t: i for i, t in enumerate(TABLES)}
     for parent, child in (("NODES", "EDGES"), ("NODES", "NODE_EVIDENCE"),
-                          ("NODES", "ENTITY_RELATIONS"), ("NODES", "SUGGESTIONS"),
+                          ("NODES", "SUGGESTIONS"),
                           ("DOMAIN_REGISTRY", "SOURCE_REGISTRY"),
                           ("SOURCE_REGISTRY", "CORPUS_DOCS"),
                           ("DOC_RUNS", "DOC_RESULTS"), ("DOC_RUNS", "RUN_LABELS")):
