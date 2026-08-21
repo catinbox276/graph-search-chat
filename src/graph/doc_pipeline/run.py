@@ -82,7 +82,18 @@ def main():
         if budget <= 0:
             break
         rid = runs.current_run(cur, source_name)
-        n = _structure_one(cur, con, source_name, domain, hint, budget, s, stats, rid)
+        # 활성 run 스냅샷 적용 — run은 "이 조합으로 판정한다"는 약속이라 야간 배치도 따라야 한다.
+        # (2026-08-21 버그: 이 줄이 없어 CLI·야간 배치가 코드 기본 스키마로 판정했고, 관리자가
+        #  정의한 속성이 통째로 빠졌다. HTTP '지금 구조화' 버튼만 스냅샷을 적용하고 있었다.)
+        # s는 소스 루프 공유 상태라 소스별 복사본에 덮는다 — 스냅샷이 다음 소스로 새지 않게.
+        ss, r_count = SimpleNamespace(**vars(s)), True
+        try:
+            r_domain, r_hint, r_count = _run_overrides(cur, rid, ss)
+            domain, hint = r_domain or domain, r_hint or hint
+        except ValueError:
+            ss = s          # run 행이 없으면(구버전 DB) 종전대로 코드 기본
+        n = _structure_one(cur, con, source_name, domain, hint, budget, ss, stats, rid,
+                           count=r_count)
         if n:
             runs.finish_run(cur, rid)
             con.commit()
@@ -228,30 +239,39 @@ def _judge_merge(cur, con, source_name, domain, hint, docs, s, stats,
                     status, note = "error", (j.get("_error") if j
                                              else "LLM 응답 파싱 실패")
                 elif j.get("fits") and all(j.get(c["key"]) for c in chain):
-                    # 계층 체인 사다리 — 도메인(1) 밑으로 체인 칸을 순서대로 (layer 2+i).
-                    # 태그: 첫 칸=entry(검색진입·속성 부착), spos 칸=solution(검증귀속)
-                    d = get_or_create(cur, 1, domain, None, "doc", ref,
-                                      use_embedding=False, run_id=run_id, count=count, mc=mc)
-                    parent, val2node, entry_node = d, {}, None
-                    for i, c in enumerate(chain):
-                        cv_ = str(j[c["key"]]).strip()[:400]
-                        rt = "entry" if i == 0 else ("solution" if i == spos else None)
-                        parent = get_or_create(cur, 2 + i, cv_, parent, "doc", ref,
-                                               run_id=run_id, count=count, mc=mc,
-                                               role_tag=rt)
-                        val2node[(c["key"], cv_)] = parent
-                        if i == 0:
-                            entry_node = parent
-                    # 속성(attr, 9층) — 세션 파이프라인과 공용 apply_extras.
-                    # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
-                    ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
-                    legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
-                    if not any(v for v in ej.values()) and isinstance(legacy, dict):
-                        ej = legacy
-                    ats, _ = apply_extras(cur, sc, ej, None, entry_node, val2node,
-                                          "doc", ref, run_id=run_id, count=count)
-                    attrs_out.update(ats)
-                    status, note = "done", str(j.get("reason") or "")[:1000]
+                    try:
+                        # 계층 체인 사다리 — 도메인(1) 밑으로 체인 칸을 순서대로 (layer 2+i).
+                        # 태그: 첫 칸=entry(검색진입·속성 부착), spos 칸=solution(검증귀속)
+                        d = get_or_create(cur, 1, domain, None, "doc", ref,
+                                          use_embedding=False, run_id=run_id, count=count, mc=mc)
+                        parent, val2node, entry_node = d, {}, None
+                        for i, c in enumerate(chain):
+                            cv_ = str(j[c["key"]]).strip()[:400]
+                            rt = "entry" if i == 0 else ("solution" if i == spos else None)
+                            parent = get_or_create(cur, 2 + i, cv_, parent, "doc", ref,
+                                                   run_id=run_id, count=count, mc=mc,
+                                                   role_tag=rt)
+                            val2node[(c["key"], cv_)] = parent
+                            if i == 0:
+                                entry_node = parent
+                        # 속성(attr, 9층) — 세션 파이프라인과 공용 apply_extras.
+                        # 같은 값(회사·시점 등)은 전역 1노드라 문서들이 이 노드로 이어진다.
+                        ej = {a["key"]: j.get(a["key"]) for a in sc["attrs"]}   # 스키마 top-level 키
+                        legacy = j.get("entities")   # 구 run 스냅샷(중첩 entities) 하위호환
+                        if not any(v for v in ej.values()) and isinstance(legacy, dict):
+                            ej = legacy
+                        ats, _ = apply_extras(cur, sc, ej, None, entry_node, val2node,
+                                              "doc", ref, run_id=run_id, count=count)
+                        attrs_out.update(ats)
+                        status, note = "done", str(j.get("reason") or "")[:1000]
+                    except oracledb.DatabaseError as e:
+                        # 병합 중 DB 오류 — 이 문서만 버리고 배치는 계속한다
+                        # (실측 2026-08-21: ORA-00001 한 건이 2192건 배치를 죽였다).
+                        # 부분 기록은 롤백해 반쪽 그래프를 남기지 않는다 —
+                        # 재시도는 [실패 재시도]가 미처리로 되돌려 다시 판정한다.
+                        con.rollback()
+                        status = "error"
+                        note = f"병합 실패: {type(e).__name__}: {str(e)[:200]}"
                 elif j.get("fits"):   # fits인데 체인 값 일부 누락 — 우회 연결 금지
                     missing = ", ".join(c["key"] for c in chain if not j.get(c["key"]))
                     status, note = "excluded", f"체인 값 누락: {missing}"[:1000]
